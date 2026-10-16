@@ -265,14 +265,14 @@ CContinent::CContinent()
 
 class CChangeTaskPriority : public CTaskManager::IChangeTaskPriority
 {
-	virtual float getTaskPriority(const IRunnable &runnable) NL_OVERRIDE
+ virtual float getTaskPriority(const IRunnable &runnable, float currentPriority) NL_OVERRIDE
 	{
 		const NLMISC::IRunnablePos *_3dRunnable = dynamic_cast<const NLMISC::IRunnablePos*>(&runnable);
 		if (_3dRunnable)
 		{
 			return (_3dRunnable->Position - UserEntity->pos()).norm();
 		}
-		return 0;
+      return currentPriority;
 	}
 } ChangeTaskPriority;
 
