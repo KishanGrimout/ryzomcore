@@ -4,9 +4,10 @@ FILE(GLOB SRC *.cpp)
 FILE(GLOB SRC_TIME time_weather_season/*.cpp)
 
 FILE(GLOB PRIV_H *.h)
+FILE(GLOB PRIV_DYNWORLD_H dynworld/*.h)
 FILE(GLOB PRIV_TIME_H time_weather_season/*.h)
 
-SET(HEADER ${PRIV_H})
+SET(HEADER ${PRIV_H} ${PRIV_DYNWORLD_H})
 
 FILE(GLOB R2 
 	dms.h dms.cpp
@@ -27,6 +28,7 @@ LIST(REMOVE_ITEM SRC R2)
 LIST(REMOVE_ITEM HEADER R2)
 
 SOURCE_GROUP("" FILES ${SRC} ${HEADER})
+SOURCE_GROUP("dynworld" FILES ${PRIV_DYNWORLD_H})
 SOURCE_GROUP("time_weather_season" FILES ${SRC_TIME} ${PRIV_TIME_H})
 SOURCE_GROUP("R2" FILES ${R2})
 
@@ -73,6 +75,7 @@ ENDIF()
 
 IF(WITH_INSTALL_LIBRARIES)
   INSTALL(FILES ${PRIV_H} DESTINATION include/ryzom/game_share COMPONENT headers)
+  INSTALL(FILES ${PRIV_DYNWORLD_H} DESTINATION include/ryzom/game_share/dynworld COMPONENT headers)
   INSTALL(FILES ${PRIV_TIME_H} DESTINATION include/ryzom/game_share/time_weather_season COMPONENT headers)
 ENDIF()
 
