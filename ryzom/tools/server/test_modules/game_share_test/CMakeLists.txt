@@ -37,3 +37,18 @@ target_link_libraries(ryzom_dynworld_noise_test
         NeL::misc
         Ryzom::gameshare
 )
+
+add_test_executable(ryzom_dynworld_mapgen_params_test
+        test_dynworld_mapgen_params.cpp
+)
+
+target_include_directories(ryzom_dynworld_mapgen_params_test
+        PRIVATE
+        ${CMAKE_SOURCE_DIR}/ryzom/common/src
+)
+
+target_link_libraries(ryzom_dynworld_mapgen_params_test
+        PRIVATE
+        NeL::misc
+        Ryzom::gameshare
+)
