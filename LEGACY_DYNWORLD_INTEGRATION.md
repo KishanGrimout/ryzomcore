@@ -30,7 +30,7 @@
 
 ## External dependency version notes
 
-- ANL checkout: `D:\Programmation\ANL`, branch `master`, HEAD `28d40d67f6f3e25149f5580da0e6655cc7ee8467` (2015-11-20, `optimize voronoi noise`); `git describe --tags --always --dirty` reports `28d40d6-dirty`. The checkout has a modified `Noise/noise_gen.h` and untracked build directories, and no release tag or license file was identified. Do not treat this dirty checkout as a reproducible dependency until its source and license are verified.
+- ANL checkout: `D:\Programmation\ANL`, branch `master`, HEAD `28d40d67f6f3e25149f5580da0e6655cc7ee8467` (2015-11-20, `optimize voronoi noise`). `git describe --tags --always --dirty` reports `28d40d6-dirty`; although status reports `Noise/noise_gen.h` modified, its content hash matches HEAD. The checkout also has untracked build directories, no release tag, and no identified license file. Verify the license before wiring ANL.
 - PolyVox checkout: `D:\Programmation\polyvox`, branch `kishan-dynworld`, commit `c5c63c22db5194029e54dea770d5b10799dbfdd3` (2018-05-01); describes as `v0.2.1-1068-gc5c63c22` and has a clean worktree. `include/PolyVox/PagedVolume.h` identifies the MIT license.
 
 ## Remaining integration order
@@ -42,8 +42,8 @@
 - [x] Port and test `mapgen/noise` using existing NeL dependencies; keep ANL isolated to higher-level map generation.
 - [x] Port and test `mapgen_params` using the existing NeL config and noise APIs.
 - [x] Port and test `environment_definition` using existing NeL configuration APIs.
-- ANL is referenced by legacy `mapgen.cpp`, but the available checkout is dirty and no license file or release tag was found; defer that consumer until a reproducible source and license are verified.
-- PolyVox is identified above; defer target/package wiring until a selected consumer requires it. UnQLite remains unversioned and unwired.
+- `mapgen.cpp` also includes `map_sector`, `material_library`, `biome_manager`, and `cavegen`; `mapgen.h` uses PolyVox-backed definitions. Do not port the generator as a standalone unit.
+- Integrate the clean, MIT-licensed PolyVox wrapper and map support modules first. Defer ANL wiring until its license is verified; UnQLite remains unversioned and unwired.
 
 ### 2. NeL 3D and PACS extensions
 
@@ -67,4 +67,4 @@
 
 ## Current checkpoint
 
-The `Voxel` header, NeL-only `mapgen/noise`, `mapgen_params`, and `environment_definition` are integrated. All four focused dynworld tests and the full workspace build pass. ANL and PolyVox dependency versions are recorded above; ANL wiring remains blocked on a clean source revision and license verification, while PolyVox and UnQLite wiring remain deferred until their consumers are integrated. Next, review the NeL 3D requirements for material definitions.
+The `Voxel` header, NeL-only `mapgen/noise`, `mapgen_params`, and `environment_definition` are integrated. All four focused dynworld tests and the full workspace build pass. Mapgen is deferred until PolyVox-backed definitions and its map/material/biome/cave modules are integrated; ANL license verification remains outstanding. Next, integrate the PolyVox wrapper as the first mapgen prerequisite.
