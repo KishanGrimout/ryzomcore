@@ -2,11 +2,17 @@ FIND_PACKAGE(ZLIB REQUIRED)
 
 FILE(GLOB SRC *.cpp)
 FILE(GLOB SRC_TIME time_weather_season/*.cpp)
-FILE(GLOB SRC_DYNWORLD_MAPGEN dynworld/mapgen/noise.cpp)
+SET(SRC_DYNWORLD_MAPGEN
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/noise.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/mapgen_params.cpp
+)
 
 FILE(GLOB PRIV_H *.h)
 FILE(GLOB PRIV_DYNWORLD_H dynworld/*.h)
-FILE(GLOB PRIV_DYNWORLD_MAPGEN_H dynworld/mapgen/noise.h)
+SET(PRIV_DYNWORLD_MAPGEN_H
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/noise.h
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/mapgen_params.h
+)
 FILE(GLOB PRIV_TIME_H time_weather_season/*.h)
 
 SET(HEADER ${PRIV_H} ${PRIV_DYNWORLD_H} ${PRIV_DYNWORLD_MAPGEN_H})
