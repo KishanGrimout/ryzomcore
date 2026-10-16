@@ -41,6 +41,26 @@ private:
     std::atomic<uint> &_Completed;
 };
 
+class CShutdownRequestTask : public NLMISC::IRunnable
+{
+public:
+    CShutdownRequestTask(NLMISC::CParallelTaskManager &manager, std::atomic<bool> &requested)
+        : _Manager(manager), _Requested(requested)
+    {
+    }
+
+    void run() NL_OVERRIDE
+    {
+        _Manager.requestShutdown();
+        _Requested.store(true, std::memory_order_release);
+        delete this;
+    }
+
+private:
+    NLMISC::CParallelTaskManager &_Manager;
+    std::atomic<bool> &_Requested;
+};
+
 class CRecursiveTask : public NLMISC::IRunnable
 {
 public:
@@ -109,4 +129,19 @@ TEST_F(CUTMiscParallelTaskManager, drainsQueuedAndNestedTasks)
 
     EXPECT_EQ(43u, completed.load());
     EXPECT_EQ(2u, workerContextTasks.load());
+}
+
+TEST_F(CUTMiscParallelTaskManager, workerCanRequestShutdownForExternalDestruction)
+{
+    std::atomic<uint> completed{0};
+    std::atomic<bool> shutdownRequested{false};
+    {
+        NLMISC::CParallelTaskManager manager(2);
+        for (uint i = 0; i < 32; ++i)
+            manager.addTask(new CCountingTask(completed));
+        manager.addTask(new CShutdownRequestTask(manager, shutdownRequested));
+    }
+
+    EXPECT_TRUE(shutdownRequested.load(std::memory_order_acquire));
+    EXPECT_EQ(32u, completed.load());
 }

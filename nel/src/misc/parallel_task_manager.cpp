@@ -88,7 +88,10 @@ CParallelTaskManager::CParallelTaskManager(uint workerCount)
 
 CParallelTaskManager::~CParallelTaskManager()
 {
-    nlassert(CurrentWorkerContext.Manager != this);
+    if (CurrentWorkerContext.Manager == this)
+    {
+        nlerror("CParallelTaskManager must be destroyed outside its worker threads");
+    }
 
     for (;;)
     {
@@ -103,6 +106,12 @@ CParallelTaskManager::~CParallelTaskManager()
     }
 
     _ThreadsPool.clear();
+}
+
+void CParallelTaskManager::requestShutdown()
+{
+    std::lock_guard<std::mutex> lock(_SchedulingMutex);
+    _ShuttingDown = true;
 }
 
 bool CParallelTaskManager::workersIdle()

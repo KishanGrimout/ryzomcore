@@ -32,6 +32,9 @@ public:
     explicit CParallelTaskManager(uint workerCount = 0);
     ~CParallelTaskManager() NL_OVERRIDE;
 
+    /// Stop accepting tasks. Already queued tasks continue to run until destruction.
+    void requestShutdown();
+
     void addTask(IRunnable *task, float priority = 0, uint affinity = 0xFFFFFFFF);
     uint getNumWaitingTasks();
     uint getNumWorkers() const { return static_cast<uint>(_ThreadsPool.size()); }
