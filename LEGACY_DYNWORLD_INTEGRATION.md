@@ -24,14 +24,16 @@
 - [x] Add `requestShutdown()` for worker-requested shutdown; require external-thread destruction and log a NeL fatal error on invalid worker-thread destruction.
 - [x] Build the workspace and run `nel_misc_test` successfully.
 - [x] Port the shared dynworld `Voxel` type, register its header for game-share installation, and add focused tests.
+- [x] Port the NeL-only `mapgen/noise` unit, correct derivative arithmetic, and add focused tests.
 
 ## Remaining integration order
 
-### 1. Shared dynworld foundation — next
+### 1. Shared dynworld foundation — in progress
 
 - [x] Inventory `ryzom/common/src/game_share/dynworld` and map external dependency consumers.
 - [x] Port and test the self-contained `Voxel` type without server or client runtime dependencies.
-- Continue with mapgen code that can be integrated without introducing external dependencies; defer ANL, PolyVox, and UnQLite wiring until their consumers are selected.
+- [x] Port and test `mapgen/noise` using existing NeL dependencies; keep ANL isolated to higher-level map generation.
+- Continue with `mapgen_params`, then defer ANL, PolyVox, and UnQLite wiring until their consumers are selected.
 
 ### 2. NeL 3D and PACS extensions
 
@@ -55,4 +57,4 @@
 
 ## Current checkpoint
 
-The `Voxel` header is integrated and its focused tests pass. No ANL/PolyVox/UnQLite wiring, NeL 3D/PACS API changes, server hooks, client renderer, or assets have been integrated yet. Next, review the mapgen components for the smallest dependency-free unit to port.
+The `Voxel` header and NeL-only `mapgen/noise` unit are integrated and their focused tests pass. No ANL/PolyVox/UnQLite wiring, NeL 3D/PACS API changes, server hooks, client renderer, or assets have been integrated yet. Next, review and port `mapgen_params` without introducing external dependencies.

@@ -2,12 +2,14 @@ FIND_PACKAGE(ZLIB REQUIRED)
 
 FILE(GLOB SRC *.cpp)
 FILE(GLOB SRC_TIME time_weather_season/*.cpp)
+FILE(GLOB SRC_DYNWORLD_MAPGEN dynworld/mapgen/noise.cpp)
 
 FILE(GLOB PRIV_H *.h)
 FILE(GLOB PRIV_DYNWORLD_H dynworld/*.h)
+FILE(GLOB PRIV_DYNWORLD_MAPGEN_H dynworld/mapgen/noise.h)
 FILE(GLOB PRIV_TIME_H time_weather_season/*.h)
 
-SET(HEADER ${PRIV_H} ${PRIV_DYNWORLD_H})
+SET(HEADER ${PRIV_H} ${PRIV_DYNWORLD_H} ${PRIV_DYNWORLD_MAPGEN_H})
 
 FILE(GLOB R2 
 	dms.h dms.cpp
@@ -29,6 +31,7 @@ LIST(REMOVE_ITEM HEADER R2)
 
 SOURCE_GROUP("" FILES ${SRC} ${HEADER})
 SOURCE_GROUP("dynworld" FILES ${PRIV_DYNWORLD_H})
+SOURCE_GROUP("dynworld/mapgen" FILES ${SRC_DYNWORLD_MAPGEN} ${PRIV_DYNWORLD_MAPGEN_H})
 SOURCE_GROUP("time_weather_season" FILES ${SRC_TIME} ${PRIV_TIME_H})
 SOURCE_GROUP("R2" FILES ${R2})
 
@@ -36,7 +39,7 @@ SOURCE_GROUP("R2" FILES ${R2})
 LIST(REMOVE_ITEM SRC ${CMAKE_CURRENT_SOURCE_DIR}/enum_template.cpp)
 LIST(REMOVE_ITEM HEADER ${CMAKE_CURRENT_SOURCE_DIR}/enum_template.h)
 
-NL_TARGET_LIB(ryzom_gameshare ${HEADER} ${PRIV_TIME_H} ${SRC} ${SRC_TIME} ${R2})
+NL_TARGET_LIB(ryzom_gameshare ${HEADER} ${PRIV_TIME_H} ${SRC} ${SRC_TIME} ${SRC_DYNWORLD_MAPGEN} ${R2})
 add_library(Ryzom::gameshare ALIAS ryzom_gameshare)
 
 if (WITH_RYZOM_XSLT)
@@ -76,6 +79,7 @@ ENDIF()
 IF(WITH_INSTALL_LIBRARIES)
   INSTALL(FILES ${PRIV_H} DESTINATION include/ryzom/game_share COMPONENT headers)
   INSTALL(FILES ${PRIV_DYNWORLD_H} DESTINATION include/ryzom/game_share/dynworld COMPONENT headers)
+  INSTALL(FILES ${PRIV_DYNWORLD_MAPGEN_H} DESTINATION include/ryzom/game_share/dynworld/mapgen COMPONENT headers)
   INSTALL(FILES ${PRIV_TIME_H} DESTINATION include/ryzom/game_share/time_weather_season COMPONENT headers)
 ENDIF()
 
