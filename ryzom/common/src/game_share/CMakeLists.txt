@@ -1,9 +1,12 @@
 FIND_PACKAGE(ZLIB REQUIRED)
+FIND_PACKAGE(ZLIB REQUIRED)
+FIND_PACKAGE(PolyVox MODULE REQUIRED)
 
 FILE(GLOB SRC *.cpp)
 FILE(GLOB SRC_TIME time_weather_season/*.cpp)
 SET(SRC_DYNWORLD
-	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/environment_definition.cpp
+ ${CMAKE_CURRENT_SOURCE_DIR}/dynworld/environment_definition.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/polyvox_defs.cpp
 )
 SET(SRC_DYNWORLD_MAPGEN
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/noise.cpp
@@ -13,7 +16,8 @@ SET(SRC_DYNWORLD_MAPGEN
 FILE(GLOB PRIV_H *.h)
 SET(PRIV_DYNWORLD_H
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/voxel.h
-	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/environment_definition.h
+   ${CMAKE_CURRENT_SOURCE_DIR}/dynworld/environment_definition.h
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/polyvox_defs.h
 )
 SET(PRIV_DYNWORLD_MAPGEN_H
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/noise.h
@@ -70,8 +74,9 @@ TARGET_LINK_LIBRARIES(ryzom_gameshare
 		PUBLIC
 		NeL::misc
 		NeL::net
-		NeL::ligo
+        NeL::ligo
 		NeL::georges
+		PolyVox::Core
 		PRIVATE
 		ZLIB::ZLIB
 )
