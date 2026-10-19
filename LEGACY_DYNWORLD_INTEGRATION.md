@@ -27,6 +27,8 @@
 - [x] Port the NeL-only `mapgen/noise` unit, correct derivative arithmetic, and add focused tests.
 - [x] Port `mapgen_params`, assign valid bitmask values to `Flat` and `Caves`, initialize the unused biome parameters safely, and test configuration loading.
 - [x] Port `environment_definition`, register only the selected source/header, and test config loading and derived bounds.
+- [x] Integrate PolyVox wrapper and definitions (FindPolyVox.cmake, polyvox_defs.h/cpp).
+- [x] Port and test `map_sector` with sector ID/region coordinate system.
 
 ## External dependency version notes
 
@@ -35,15 +37,17 @@
 
 ## Remaining integration order
 
-### 1. Shared dynworld foundation — in progress
+### 1. Shared dynworld foundation â€” in progress
 
 - [x] Inventory `ryzom/common/src/game_share/dynworld` and map external dependency consumers.
 - [x] Port and test the self-contained `Voxel` type without server or client runtime dependencies.
 - [x] Port and test `mapgen/noise` using existing NeL dependencies; keep ANL isolated to higher-level map generation.
 - [x] Port and test `mapgen_params` using the existing NeL config and noise APIs.
 - [x] Port and test `environment_definition` using existing NeL configuration APIs.
-- `mapgen.cpp` also includes `map_sector`, `material_library`, `biome_manager`, and `cavegen`; `mapgen.h` uses PolyVox-backed definitions. Do not port the generator as a standalone unit.
-- Integrate the clean, MIT-licensed PolyVox wrapper and map support modules first. Defer ANL wiring until its license is verified; UnQLite remains unversioned and unwired.
+- [x] Integrate the clean, MIT-licensed PolyVox wrapper and map support modules first.
+- [x] Port `map_sector` for sector ID/region coordinate system.
+- `mapgen.cpp` also includes `material_library`, `biome_manager`, and `cavegen`; `mapgen.h` uses PolyVox-backed definitions. Do not port the generator as a standalone unit.
+- Defer ANL wiring until its license is verified; UnQLite remains unversioned and unwired.
 
 ### 2. NeL 3D and PACS extensions
 
@@ -67,4 +71,4 @@
 
 ## Current checkpoint
 
-The `Voxel` header, NeL-only `mapgen/noise`, `mapgen_params`, and `environment_definition` are integrated. All four focused dynworld tests and the full workspace build pass. Mapgen is deferred until PolyVox-backed definitions and its map/material/biome/cave modules are integrated; ANL license verification remains outstanding. Next, integrate the PolyVox wrapper as the first mapgen prerequisite.
+The `Voxel` header, NeL-only `mapgen/noise`, `mapgen_params`, `environment_definition`, PolyVox wrapper, and `map_sector` are integrated. All focused dynworld tests and the full workspace build pass. The next integration units are `material_definition` and `material_library` (no ANL dependency), followed by `biome_manager`, `cavegen`, and `mapgen` which require ANL. ANL license verification remains outstanding.
