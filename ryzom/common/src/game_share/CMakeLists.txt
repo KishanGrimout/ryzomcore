@@ -2,6 +2,8 @@ FIND_PACKAGE(ZLIB REQUIRED)
 FIND_PACKAGE(ZLIB REQUIRED)
 FIND_PACKAGE(PolyVox MODULE REQUIRED)
 
+INCLUDE_DIRECTORIES(${POLYVOX_INCLUDE_DIR})
+
 FILE(GLOB SRC *.cpp)
 FILE(GLOB SRC_TIME time_weather_season/*.cpp)
 SET(SRC_DYNWORLD
@@ -74,9 +76,8 @@ TARGET_LINK_LIBRARIES(ryzom_gameshare
 		PUBLIC
 		NeL::misc
 		NeL::net
-        NeL::ligo
+		NeL::ligo
 		NeL::georges
-		PolyVox::Core
 		PRIVATE
 		ZLIB::ZLIB
 )

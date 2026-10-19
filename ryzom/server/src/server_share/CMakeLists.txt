@@ -11,6 +11,8 @@ SOURCE_GROUP("R2" FILES ${R2})
 NL_TARGET_LIB(ryzom_servershare ${SRC} ${R2})
 add_library(Ryzom::servershare ALIAS ryzom_servershare)
 
+INCLUDE_DIRECTORIES(${POLYVOX_INCLUDE_DIR})
+
 if (WITH_RYZOM_XSLT)
     add_module_interface(XML_SOURCES
             backup_service_itf.xml
