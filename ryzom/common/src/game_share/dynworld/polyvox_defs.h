@@ -30,7 +30,7 @@
 
 class VolumeRWLock
 {
-	mutable NLMISC::CFastReaderWriter m_lock;
+	mutable NLMISC::CReaderWriter m_lock;
 	template <typename T> static std::atomic<T>& as_atomic(T& value)
 	{
 		static_assert(sizeof(T) == sizeof(std::atomic<T>), "");
@@ -42,7 +42,7 @@ public:
 	void readUnlock() const 	{ m_lock.leaveReader(); }
 	void writeLock() const 		{ m_lock.enterWriter(); }
 	void writeUnlock() const 	{ m_lock.leaveWriter(); }
-	void upgradeLock() const 	{ m_lock.upgrade(); }
+	/*void upgradeLock() const { m_lock.upgrade(); }
 	void downgradeLock() const 	{ m_lock.downgrade(); }
 	bool isLocked() const
 	{
@@ -50,7 +50,7 @@ public:
 		if (lockSucceed)
 			m_lock.leaveReader();
 		return !lockSucceed;
-	}
+	}*/
 
 	template <typename T> static T postIncr(T& value) { return as_atomic(value)++; }
 	template <typename T> static T preIncr(T& value)  { return ++as_atomic(value); }
