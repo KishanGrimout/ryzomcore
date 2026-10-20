@@ -36,6 +36,9 @@
 - [x] Port `biome_manager` with ANL noise integration.
 - [x] Port `mapgen/cavegen` for cave generation.
 - [x] Port `mapgen/mapgen` for main map generation.
+- [x] Port `cast_collector.h` for raycast hit collection.
+- [x] Port `marching_controller.h/cpp` for marching cubes surface extraction.
+- [x] Port `region_mesh_interface.h` for region mesh initialization.
 
 ## External dependency version notes
 
@@ -59,7 +62,8 @@
 - [x] Port `biome_manager` for biome generation with ANL.
 - [x] Port `mapgen/cavegen` for cave generation.
 - [x] Port `mapgen/mapgen` for main map generation.
-- Remaining dynworld modules: other server-side and client-side files that depend on the integrated foundation.
+- [x] Port `cast_collector`, `marching_controller`, and `region_mesh_interface` for mesh/raycast support.
+- Remaining: map.cpp/h, map_cache_manager, map_server, master_pager, slave_pager, and related server-side components.
 
 ### 2. NeL 3D and PACS extensions
 
@@ -83,4 +87,4 @@
 
 ## Current checkpoint
 
-All core dynworld foundation modules are integrated: Voxel, noise, mapgen_params, environment_definition, PolyVox wrapper, map_sector, material_definition, material_library, biome_manager, cavegen, and mapgen. ANL license verified and integrated with FindANL.cmake. The next phase is to integrate server-side and client-side DynWorld components that build on this foundation.
+All core dynworld foundation modules are integrated including mesh/raycast support (cast_collector, marching_controller, region_mesh_interface). The next step is to integrate map.cpp/h which ties together the voxels, sectors, materials, biome generation, and mesh generation into the complete map management system.
