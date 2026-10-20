@@ -31,10 +31,15 @@
 - [x] Port and test `map_sector` with sector ID/region coordinate system.
 - [x] Port `material_definition` for material texture definitions.
 - [x] Port `material_library` for material and environment management.
+- [x] Verify ANL license (permissive BSD/MIT-like at https://github.com/JTippetts/accidental-noise-library/blob/master/LICENSE).
+- [x] Create FindANL.cmake for ANL discovery.
+- [x] Port `biome_manager` with ANL noise integration.
+- [x] Port `mapgen/cavegen` for cave generation.
+- [x] Port `mapgen/mapgen` for main map generation.
 
 ## External dependency version notes
 
-- ANL checkout: `D:\Programmation\ANL`, branch `master`, HEAD `28d40d67f6f3e25149f5580da0e6655cc7ee8467` (2015-11-20, `optimize voronoi noise`). `git describe --tags --always --dirty` reports `28d40d6-dirty`; although status reports `Noise/noise_gen.h` modified, its content hash matches HEAD. The checkout also has untracked build directories, no release tag, and no identified license file. Verify the license before wiring ANL.
+- ANL checkout: `D:\Programmation\ANL`, branch `master`, HEAD `28d40d67f6f3e25149f5580da0e6655cc7ee8467` (2015-11-20, `optimize voronoi noise`). License: Permissive (BSD/MIT-like) - verified at https://github.com/JTippetts/accidental-noise-library/blob/master/LICENSE. Compatible with project.
 - PolyVox checkout: `D:\Programmation\polyvox`, branch `kishan-dynworld`, commit `c5c63c22db5194029e54dea770d5b10799dbfdd3` (2018-05-01); describes as `v0.2.1-1068-gc5c63c22` and has a clean worktree. `include/PolyVox/PagedVolume.h` identifies the MIT license.
 
 ## Remaining integration order
@@ -50,8 +55,11 @@
 - [x] Port `map_sector` for sector ID/region coordinate system.
 - [x] Port `material_definition` for material texture definitions.
 - [x] Port `material_library` for material and environment management.
-- `mapgen.cpp` also includes `biome_manager` and `cavegen`; `mapgen.h` uses PolyVox-backed definitions. Do not port the generator as a standalone unit.
-- Defer ANL wiring until its license is verified; UnQLite remains unversioned and unwired.
+- [x] Verify ANL license and integrate ANL discovery.
+- [x] Port `biome_manager` for biome generation with ANL.
+- [x] Port `mapgen/cavegen` for cave generation.
+- [x] Port `mapgen/mapgen` for main map generation.
+- Remaining dynworld modules: other server-side and client-side files that depend on the integrated foundation.
 
 ### 2. NeL 3D and PACS extensions
 
@@ -75,4 +83,4 @@
 
 ## Current checkpoint
 
-The `Voxel` header, NeL-only `mapgen/noise`, `mapgen_params`, `environment_definition`, PolyVox wrapper, `map_sector`, `material_definition`, and `material_library` are integrated. All focused dynworld tests and the full workspace build pass. The next integration units are `biome_manager`, `cavegen`, and `mapgen` which require ANL. ANL license verification remains outstanding.
+All core dynworld foundation modules are integrated: Voxel, noise, mapgen_params, environment_definition, PolyVox wrapper, map_sector, material_definition, material_library, biome_manager, cavegen, and mapgen. ANL license verified and integrated with FindANL.cmake. The next phase is to integrate server-side and client-side DynWorld components that build on this foundation.
