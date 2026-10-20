@@ -14,8 +14,10 @@ SET(SRC_DYNWORLD
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/material_definition.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/material_library.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/biome_manager.cpp
-	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/polyvox_defs.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/map.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/map_deferred_command_manager.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/marching_controller.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/polyvox_defs.cpp
 )
 SET(SRC_DYNWORLD_MAPGEN
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/noise.cpp
@@ -32,6 +34,9 @@ SET(PRIV_DYNWORLD_H
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/material_definition.h
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/material_library.h
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/biome_manager.h
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/map.h
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/map_deferred_command.h
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/map_deferred_command_manager.h
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/cast_collector.h
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/marching_controller.h
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/region_mesh_interface.h
