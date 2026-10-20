@@ -29,6 +29,8 @@
 - [x] Port `environment_definition`, register only the selected source/header, and test config loading and derived bounds.
 - [x] Integrate PolyVox wrapper and definitions (FindPolyVox.cmake, polyvox_defs.h/cpp).
 - [x] Port and test `map_sector` with sector ID/region coordinate system.
+- [x] Port `material_definition` for material texture definitions.
+- [x] Port `material_library` for material and environment management.
 
 ## External dependency version notes
 
@@ -46,7 +48,9 @@
 - [x] Port and test `environment_definition` using existing NeL configuration APIs.
 - [x] Integrate the clean, MIT-licensed PolyVox wrapper and map support modules first.
 - [x] Port `map_sector` for sector ID/region coordinate system.
-- `mapgen.cpp` also includes `material_library`, `biome_manager`, and `cavegen`; `mapgen.h` uses PolyVox-backed definitions. Do not port the generator as a standalone unit.
+- [x] Port `material_definition` for material texture definitions.
+- [x] Port `material_library` for material and environment management.
+- `mapgen.cpp` also includes `biome_manager` and `cavegen`; `mapgen.h` uses PolyVox-backed definitions. Do not port the generator as a standalone unit.
 - Defer ANL wiring until its license is verified; UnQLite remains unversioned and unwired.
 
 ### 2. NeL 3D and PACS extensions
@@ -71,4 +75,4 @@
 
 ## Current checkpoint
 
-The `Voxel` header, NeL-only `mapgen/noise`, `mapgen_params`, `environment_definition`, PolyVox wrapper, and `map_sector` are integrated. All focused dynworld tests and the full workspace build pass. The next integration units are `material_definition` and `material_library` (no ANL dependency), followed by `biome_manager`, `cavegen`, and `mapgen` which require ANL. ANL license verification remains outstanding.
+The `Voxel` header, NeL-only `mapgen/noise`, `mapgen_params`, `environment_definition`, PolyVox wrapper, `map_sector`, `material_definition`, and `material_library` are integrated. All focused dynworld tests and the full workspace build pass. The next integration units are `biome_manager`, `cavegen`, and `mapgen` which require ANL. ANL license verification remains outstanding.
