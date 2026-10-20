@@ -1,8 +1,10 @@
 FIND_PACKAGE(ZLIB REQUIRED)
 FIND_PACKAGE(ZLIB REQUIRED)
 FIND_PACKAGE(PolyVox MODULE REQUIRED)
+FIND_PACKAGE(ANL MODULE REQUIRED)
 
 INCLUDE_DIRECTORIES(${POLYVOX_INCLUDE_DIR})
+INCLUDE_DIRECTORIES(${ANL_INCLUDE_DIR})
 
 FILE(GLOB SRC *.cpp)
 FILE(GLOB SRC_TIME time_weather_season/*.cpp)
@@ -11,11 +13,14 @@ SET(SRC_DYNWORLD
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/map_sector.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/material_definition.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/material_library.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/biome_manager.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/polyvox_defs.cpp
 )
 SET(SRC_DYNWORLD_MAPGEN
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/noise.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/mapgen_params.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/cavegen.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/mapgen.cpp
 )
 
 FILE(GLOB PRIV_H *.h)
@@ -25,11 +30,14 @@ SET(PRIV_DYNWORLD_H
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/map_sector.h
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/material_definition.h
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/material_library.h
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/biome_manager.h
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/polyvox_defs.h
 )
 SET(PRIV_DYNWORLD_MAPGEN_H
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/noise.h
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/mapgen_params.h
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/cavegen.h
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/mapgen.h
 )
 FILE(GLOB PRIV_TIME_H time_weather_season/*.h)
 
@@ -53,7 +61,7 @@ FILE(GLOB R2
 LIST(REMOVE_ITEM SRC R2)
 LIST(REMOVE_ITEM HEADER R2)
 
-SOURCE_GROUP("") FILES ${SRC} ${HEADER})
+SOURCE_GROUP("" FILES ${SRC} ${HEADER})
 SOURCE_GROUP("dynworld" FILES ${SRC_DYNWORLD} ${PRIV_DYNWORLD_H})
 SOURCE_GROUP("dynworld/mapgen" FILES ${SRC_DYNWORLD_MAPGEN} ${PRIV_DYNWORLD_MAPGEN_H})
 SOURCE_GROUP("time_weather_season" FILES ${SRC_TIME} ${PRIV_TIME_H})
