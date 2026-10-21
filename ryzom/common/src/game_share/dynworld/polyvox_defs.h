@@ -17,6 +17,14 @@
 #ifndef POLYVOX_DEFS_HEADER
 #define POLYVOX_DEFS_HEADER
 
+// Disable PIX profiling (Windows Performance Analyzer SDK) as per integration rules
+#ifndef PIX_COLOR_DEFAULT
+#define PIX_COLOR_DEFAULT 0
+#define PIXBeginEvent(color, name) do {} while(0)
+#define PIXEndEvent() do {} while(0)
+#define PIXScopedEvent(color, name) do {} while(0)
+#endif
+
 #include <PolyVox/PagedVolume.h>
 #include <PolyVox/RawVolume.h>
 #include <PolyVox/Vertex.h>
@@ -43,14 +51,14 @@ public:
 	void writeLock() const 		{ m_lock.enterWriter(); }
 	void writeUnlock() const 	{ m_lock.leaveWriter(); }
 	/*void upgradeLock() const { m_lock.upgrade(); }
-	void downgradeLock() const 	{ m_lock.downgrade(); }
+	void downgradeLock() const 	{ m_lock.downgrade(); }*/
 	bool isLocked() const
 	{
 		bool lockSucceed = m_lock.tryEnterReader();
 		if (lockSucceed)
 			m_lock.leaveReader();
 		return !lockSucceed;
-	}*/
+	}
 
 	template <typename T> static T postIncr(T& value) { return as_atomic(value)++; }
 	template <typename T> static T preIncr(T& value)  { return ++as_atomic(value); }

@@ -44,6 +44,11 @@ public:
 		m_Mutex.unlock_shared();
 	}
 
+	bool tryEnterReader()
+	{
+		return m_Mutex.try_lock_shared();
+	}
+
 	void enterWriter()
 	{
 		m_Mutex.lock();
@@ -52,6 +57,11 @@ public:
 	void leaveWriter()
 	{
 		m_Mutex.unlock();
+	}
+	
+	bool tryEnterWriter()
+	{
+		return m_Mutex.try_lock();
 	}
 };
 	
@@ -107,6 +117,56 @@ public:
 	void			leaveWriter()
 	{
 		const_cast<CMutex&>(_RWMutex).leave();
+	}
+	
+	bool			tryEnterReader()
+	{
+		// Try to enter as reader - returns true if successful, false if a writer has the lock
+		if (_RWMutex.tryEnter())
+		{
+			// Got the write lock, but we want read access, so we need to check if there are writers waiting
+			// For simplicity, we'll just try to enter as reader properly
+			_RWMutex.leave();
+			
+			// Proper read lock attempt
+			const_cast<CMutex&>(_Fairness).enter();
+			const_cast<CMutex&>(_ReadersMutex).enter();
+			bool success = (_ReadersLevel == 0 && _RWMutex.tryEnter());
+			if (success)
+			{
+				_ReadersLevel++;
+			}
+			const_cast<CMutex&>(_ReadersMutex).leave();
+			const_cast<CMutex&>(_Fairness).leave();
+			return success;
+		}
+		return false;
+	}
+	
+	bool			tryEnterWriter()
+	{
+		// Try to enter as writer - returns true if successful
+		const_cast<CMutex&>(_Fairness).enter();
+		bool success = _RWMutex.tryEnter();
+		if (success)
+		{
+			// Wait for readers to finish
+			const_cast<CMutex&>(_ReadersMutex).enter();
+			while (_ReadersLevel > 0)
+			{
+				const_cast<CMutex&>(_ReadersMutex).leave();
+				const_cast<CMutex&>(_Fairness).leave();
+				nlSleep(1);
+				const_cast<CMutex&>(_Fairness).enter();
+				const_cast<CMutex&>(_ReadersMutex).enter();
+			}
+			const_cast<CMutex&>(_ReadersMutex).leave();
+		}
+		else
+		{
+			const_cast<CMutex&>(_Fairness).leave();
+		}
+		return success;
 	}
 };
 

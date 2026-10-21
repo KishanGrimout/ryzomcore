@@ -1,10 +1,16 @@
 FIND_PACKAGE(ZLIB REQUIRED)
-FIND_PACKAGE(ZLIB REQUIRED)
 FIND_PACKAGE(PolyVox MODULE REQUIRED)
 FIND_PACKAGE(ANL MODULE REQUIRED)
 
 INCLUDE_DIRECTORIES(${POLYVOX_INCLUDE_DIR})
 INCLUDE_DIRECTORIES(${ANL_INCLUDE_DIR})
+
+# Add NeL sevenzip include directory for LZMA compression headers
+FIND_PACKAGE(NeL REQUIRED COMPONENTS sevenzip)
+INCLUDE_DIRECTORIES(${NeL_sevenzip_INCLUDE_DIRS})
+
+# Add local seven_zip include directory for wrapper
+INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/seven_zip)
 
 FILE(GLOB SRC *.cpp)
 FILE(GLOB SRC_TIME time_weather_season/*.cpp)
@@ -18,7 +24,15 @@ SET(SRC_DYNWORLD
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/map_deferred_command_manager.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/marching_controller.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/polyvox_defs.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/disk_file_db.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/map_cache_manager.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/map_server.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/master_pager.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/slave_pager.cpp
 )
+
+# Seven zip wrapper for LZMA compression
+FILE(GLOB SRC_SEVENZIP ${CMAKE_CURRENT_SOURCE_DIR}/seven_zip/*.cpp)
 SET(SRC_DYNWORLD_MAPGEN
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/noise.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/mapgen_params.cpp
@@ -41,7 +55,15 @@ SET(PRIV_DYNWORLD_H
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/marching_controller.h
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/region_mesh_interface.h
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/polyvox_defs.h
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/disk_file_db.h
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/map_cache_manager.h
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/map_server.h
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/master_pager.h
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/slave_pager.h
 )
+
+# Seven zip wrapper headers
+FILE(GLOB PRIV_SEVENZIP_H ${CMAKE_CURRENT_SOURCE_DIR}/seven_zip/*.h)
 SET(PRIV_DYNWORLD_MAPGEN_H
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/noise.h
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/mapgen/mapgen_params.h
@@ -50,7 +72,7 @@ SET(PRIV_DYNWORLD_MAPGEN_H
 )
 FILE(GLOB PRIV_TIME_H time_weather_season/*.h)
 
-SET(HEADER ${PRIV_H} ${PRIV_DYNWORLD_H} ${PRIV_DYNWORLD_MAPGEN_H})
+SET(HEADER ${PRIV_H} ${PRIV_DYNWORLD_H} ${PRIV_DYNWORLD_MAPGEN_H} ${PRIV_SEVENZIP_H})
 
 FILE(GLOB R2 
 	dms.h dms.cpp
@@ -70,9 +92,10 @@ FILE(GLOB R2
 LIST(REMOVE_ITEM SRC R2)
 LIST(REMOVE_ITEM HEADER R2)
 
-SOURCE_GROUP("") FILES ${SRC} ${HEADER})
+SOURCE_GROUP("" FILES ${SRC} ${HEADER})
 SOURCE_GROUP("dynworld" FILES ${SRC_DYNWORLD} ${PRIV_DYNWORLD_H})
 SOURCE_GROUP("dynworld/mapgen" FILES ${SRC_DYNWORLD_MAPGEN} ${PRIV_DYNWORLD_MAPGEN_H})
+SOURCE_GROUP("seven_zip" FILES ${SRC_SEVENZIP} ${PRIV_SEVENZIP_H})
 SOURCE_GROUP("time_weather_season" FILES ${SRC_TIME} ${PRIV_TIME_H})
 SOURCE_GROUP("R2" FILES ${R2})
 
@@ -80,7 +103,7 @@ SOURCE_GROUP("R2" FILES ${R2})
 LIST(REMOVE_ITEM SRC ${CMAKE_CURRENT_SOURCE_DIR}/enum_template.cpp)
 LIST(REMOVE_ITEM HEADER ${CMAKE_CURRENT_SOURCE_DIR}/enum_template.h)
 
-NL_TARGET_LIB(ryzom_gameshare ${HEADER} ${PRIV_TIME_H} ${SRC} ${SRC_TIME} ${SRC_DYNWORLD} ${SRC_DYNWORLD_MAPGEN} ${R2})
+NL_TARGET_LIB(ryzom_gameshare ${HEADER} ${PRIV_TIME_H} ${SRC} ${SRC_TIME} ${SRC_DYNWORLD} ${SRC_DYNWORLD_MAPGEN} ${SRC_SEVENZIP} ${R2})
 add_library(Ryzom::gameshare ALIAS ryzom_gameshare)
 
 if (WITH_RYZOM_XSLT)
@@ -101,6 +124,7 @@ TARGET_LINK_LIBRARIES(ryzom_gameshare
 		NeL::net
 		NeL::ligo
 		NeL::georges
+		NeL::sevenzip
 		PRIVATE
 		ZLIB::ZLIB
 )
@@ -121,5 +145,6 @@ IF(WITH_INSTALL_LIBRARIES)
   INSTALL(FILES ${PRIV_H} DESTINATION include/ryzom/game_share COMPONENT headers)
   INSTALL(FILES ${PRIV_DYNWORLD_H} DESTINATION include/ryzom/game_share/dynworld COMPONENT headers)
   INSTALL(FILES ${PRIV_DYNWORLD_MAPGEN_H} DESTINATION include/ryzom/game_share/dynworld/mapgen COMPONENT headers)
+  INSTALL(FILES ${PRIV_SEVENZIP_H} DESTINATION include/ryzom/game_share/seven_zip COMPONENT headers)
   INSTALL(FILES ${PRIV_TIME_H} DESTINATION include/ryzom/game_share/time_weather_season COMPONENT headers)
 ENDIF()
