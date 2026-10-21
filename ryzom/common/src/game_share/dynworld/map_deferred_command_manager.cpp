@@ -54,9 +54,6 @@ float CMapDeferredCommandManager::CChangeTaskPriority::getTaskPriority(const NLM
 		return deferredCommand->getCommand()->getPriority();
 	}
 
-	if (_Next != nullptr)
-		return _Next->getTaskPriority(runable, currentPriority);
-
 	return currentPriority;
 }
 

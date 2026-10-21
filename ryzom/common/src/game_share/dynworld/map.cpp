@@ -389,7 +389,7 @@ CPrefetchSectorCommand::CPrefetchSectorCommand(CMapBase* map, TLoadingSector::TI
 
 bool CPrefetchSectorCommand::execute()
 {
-	NL_PROF_F("PrefetchSectorCommand(%p)", m_sectorId);
+	//NL_PROF_F("PrefetchSectorCommand(%p)", m_sectorId);
 	prefetchSector();
 	return true;
 }

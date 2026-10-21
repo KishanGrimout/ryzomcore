@@ -39,6 +39,15 @@
 - [x] Port `cast_collector.h` for raycast hit collection.
 - [x] Port `marching_controller.h/cpp` for marching cubes surface extraction.
 - [x] Port `region_mesh_interface.h` for region mesh initialization.
+- [x] Port `map_deferred_command.h` for deferred map command interface.
+- [x] Port `map_deferred_command_manager.h/cpp` for async command management.
+- [x] Port `map.h/cpp` and `map.hpp` for core map management.
+- [x] Port `disk_file_db.h/cpp` for disk-based sector cache backend.
+- [x] Port and integrate seven_zip module (seven_zip.h/cpp) for LZMA compression.
+- [x] Port `map_cache_manager.h/cpp` for sector cache management with compression.
+- [x] Port `map_server.h/cpp` for server-side map interface.
+- [x] Port `master_pager.h/cpp` for master pager coordinator.
+- [x] Port `slave_pager.h/cpp` for slave pager with sector I/O and caching.
 
 ## External dependency version notes
 
@@ -63,7 +72,13 @@
 - [x] Port `mapgen/cavegen` for cave generation.
 - [x] Port `mapgen/mapgen` for main map generation.
 - [x] Port `cast_collector`, `marching_controller`, and `region_mesh_interface` for mesh/raycast support.
-- Remaining: map.cpp/h, map_cache_manager, map_server, master_pager, slave_pager, and related server-side components.
+- [x] Port `map_deferred_command` and `map_deferred_command_manager` for async operations.
+- [x] Port `map.h/cpp` for core map management.
+- [x] Port `disk_file_db.h/cpp` for disk-based cache backend.
+- [x] Integrate seven_zip wrapper for LZMA compression support.
+- [x] Port `map_cache_manager.h/cpp` for sector cache management.
+- [x] Port `map_server.h/cpp` for server-side map interface.
+- [x] Port `master_pager.h/cpp` and `slave_pager.h/cpp` for sector paging coordination and I/O.
 
 ### 2. NeL 3D and PACS extensions
 
@@ -87,4 +102,8 @@
 
 ## Current checkpoint
 
-All core dynworld foundation modules are integrated including mesh/raycast support (cast_collector, marching_controller, region_mesh_interface). The next step is to integrate map.cpp/h which ties together the voxels, sectors, materials, biome generation, and mesh generation into the complete map management system.
+All core dynworld map management and paging modules are integrated. The foundation now includes: voxel types, sector management, material library, biome generation, cave generation, map generation, raycasting, mesh extraction, async command management, and the complete paging system (disk_file_db, map_cache_manager, map_server, master_pager, slave_pager) with LZMA compression support via seven_zip wrapper. The next steps are:
+- Review the integrated pager components against current NeL APIs
+- Integrate NeL 3D and PACS extensions
+- Port server integration (shared server-side dynworld state, persistence, map/continent management)
+- Port client rendering and runtime (dynamic landscape renderer, mesh integration, shaders)
