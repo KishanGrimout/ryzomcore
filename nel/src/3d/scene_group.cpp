@@ -66,6 +66,12 @@ CInstanceGroup::CInstance::CInstance ()
 	DontCastShadowForInterior= false;
 	DontCastShadowForExterior= false;
 	Visible= true;
+	// NOTE(dynworld): deterministic init for runtime-generated instance groups (legacy dynworld fix,
+	// used by CDynInstanceGroupUser); these members were left garbage before.
+	nParent= -1;
+	SunContribution= 0;
+	for (uint l= 0; l < NumStaticLightPerInstance; ++l)
+		Light[l]= 0xFF;
 }
 
 // ***************************************************************************
