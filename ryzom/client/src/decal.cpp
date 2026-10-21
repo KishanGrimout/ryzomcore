@@ -630,7 +630,7 @@ void CDecalRenderList::renderAllDecals()
 	MainCam.buildCameraPyramidCorners(_WorldCamPyramidCorners, false);
 	Driver->setModelMatrix(CMatrix::Identity);
 	CLandscapeModel *landscapeModel = ((CLandscapeUser *) Landscape)->getLandscape();
-	CShadowPolyReceiver &shadowPolyReceiver = landscapeModel->Landscape.getShadowPolyReceiver();
+	CShadowPolyReceiver &shadowPolyReceiver = landscapeModel->getLandscape().getShadowPolyReceiver();
 	//
 	float maxDist = Landscape->getTileNear() * 0.9f;
 	const float threshold = 0.8f; // ratio over the whole dist at which the fade out begins

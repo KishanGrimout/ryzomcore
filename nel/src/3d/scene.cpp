@@ -816,7 +816,7 @@ CTransformShape	*CScene::createInstance(const string &shapeName)
 	if( pLM != nullptr)
 	{
 		// Init lightmap information
-		pLM->Landscape.initAnimatedLightIndex (*this);
+		pLM->getLandscape().initAnimatedLightIndex (*this);
 	}
 
 	return pTShp;

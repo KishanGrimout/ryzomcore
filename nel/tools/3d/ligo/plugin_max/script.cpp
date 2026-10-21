@@ -1742,27 +1742,27 @@ bool MakeSnapShot (NLMISC::CBitmap &snapshot, const NL3D::CTileBank &tileBank, c
 			// Build the scene
 			CExportNelOptions options;
 			CExportNel export_ (errorInDialog, false, true, MAXScript_interface, "Snapshot ligozone", &options);
-			export_.buildScene (*CNELU::Scene, *CNELU::ShapeBank, *CNELU::Driver, 0, &theLand->Landscape, NULL, false, false, false);
+			export_.buildScene (*CNELU::Scene, *CNELU::ShapeBank, *CNELU::Driver, 0, &theLand->getLandscape(), NULL, false, false, false);
 
-			theLand->Landscape.setTileNear (50.f);
-			theLand->Landscape.TileBank=tileBank;
-			theLand->Landscape.TileFarBank=tileFarBank;
-			theLand->Landscape.initTileBanks ();
+			theLand->getLandscape().setTileNear (50.f);
+			theLand->getLandscape().TileBank=tileBank;
+			theLand->getLandscape().TileFarBank=tileFarBank;
+			theLand->getLandscape().initTileBanks ();
 
 			// Enable additive tiles
 			theLand->enableAdditive (true);
-			theLand->Landscape.setRefineMode (true);
+			theLand->getLandscape().setRefineMode (true);
 
-			// theLand->Landscape.setupStaticLight(CRGBA(255, 255, 255), CRGBA(0, 0, 0), 1.0f);
-			// theLand->Landscape.setThreshold(0.0005);
+			// theLand->getLandscape().setupStaticLight(CRGBA(255, 255, 255), CRGBA(0, 0, 0), 1.0f);
+			// theLand->getLandscape().setThreshold(0.0005);
 
 			// Enbable automatique lighting
 	#ifndef NL_DEBUG
-			// theLand->Landscape.enableAutomaticLighting (true);
-			// theLand->Landscape.setupAutomaticLightDir (CVector (0, 0, -1));
+			// theLand->getLandscape().enableAutomaticLighting (true);
+			// theLand->getLandscape().setupAutomaticLightDir (CVector (0, 0, -1));
 	#endif // NL_DEBUG
 
-			// theLand->Landscape.updateLightingAll();
+			// theLand->getLandscape().updateLightingAll();
 
 			// Clear the backbuffer and the alpha
 			CNELU::clearBuffers(CRGBA(255,0,255,0));

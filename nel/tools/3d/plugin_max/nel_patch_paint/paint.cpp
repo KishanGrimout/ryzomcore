@@ -2738,22 +2738,22 @@ void	mainproc(CScene& scene, CEventListenerAsync& AsyncListener, CEvent3dMouseLi
 		{
 			// Add a additive tile...
 			int i;
-			for (i=0; i<landscape.Landscape.TileBank.getTileCount(); i++)
+			for (i=0; i<landscape.getLandscape().TileBank.getTileCount(); i++)
 			{
-				landscape.Landscape.TileBank.getTile(i)->setFileName (CTile::additive, "arrow.tga");
-				landscape.Landscape.releaseTiles(i, 1);
+				landscape.getLandscape().TileBank.getTile(i)->setFileName (CTile::additive, "arrow.tga");
+				landscape.getLandscape().releaseTiles(i, 1);
 			}
 		}
 		else
 		{
 			// Copy original bank
-			landscape.Landscape.TileBank = bank;
+			landscape.getLandscape().TileBank = bank;
 
 			// Add a additive tile...
 			int i;
-			for (i=0; i<landscape.Landscape.TileBank.getTileCount(); i++)
+			for (i=0; i<landscape.getLandscape().TileBank.getTileCount(); i++)
 			{
-				landscape.Landscape.releaseTiles(i, 1);
+				landscape.getLandscape().releaseTiles(i, 1);
 			}
 		}
 
@@ -2761,7 +2761,7 @@ void	mainproc(CScene& scene, CEventListenerAsync& AsyncListener, CEvent3dMouseLi
 		for (uint zone=0; zone<pData->VectMesh.size(); zone++)
 		{
 			// Get the zone
-			CZone *pZone=landscape.Landscape.getZone (zone);
+			CZone *pZone=landscape.getLandscape().getZone (zone);
 			if (pZone)
 			{
 				// For each patch
@@ -2783,13 +2783,13 @@ void	mainproc(CScene& scene, CEventListenerAsync& AsyncListener, CEvent3dMouseLi
 		pData->pobj->automaticLighting^=true;
 
 		// Enable / disable automatic lighting
-		landscape.Landscape.enableAutomaticLighting (pData->pobj->automaticLighting);
+		landscape.getLandscape().enableAutomaticLighting (pData->pobj->automaticLighting);
 
 		// Touch all patches
 		for (uint zone=0; zone<pData->VectMesh.size(); zone++)
 		{
 			// Get the zone
-			CZone *pZone=landscape.Landscape.getZone (zone);
+			CZone *pZone=landscape.getLandscape().getZone (zone);
 			nlassert (pZone);
 
 			// For each patch
@@ -2983,10 +2983,10 @@ void	mainproc(CScene& scene, CEventListenerAsync& AsyncListener, CEvent3dMouseLi
 		scene.render();
 
 		// first time: disable RefineMode, and compute all patchs tesselation.
-		if(landscape.Landscape.getRefineMode())
+		if(landscape.getLandscape().getRefineMode())
 		{
-			landscape.Landscape.setRefineMode (false);
-			landscape.Landscape.refineAll(camKey.getPos());
+			landscape.getLandscape().setRefineMode (false);
+			landscape.getLandscape().refineAll(camKey.getPos());
 		}
 
 		t0= t1;
@@ -4123,13 +4123,13 @@ DWORD WINAPI myThread (LPVOID vData)
 
 			// Create a Landscape.
 			CLandscapeModel	*TheLand= (CLandscapeModel*)CNELU::Scene->createModel(LandscapeModelId);
-			TheLand->Landscape.setTileNear (10000.f);
-			TheLand->Landscape.TileBank=bank;
+			TheLand->getLandscape().setTileNear (10000.f);
+			TheLand->getLandscape().TileBank=bank;
 
 			// Enbable automatique lighting
-			TheLand->Landscape.enableAutomaticLighting (false);
-			TheLand->Landscape.setupAutomaticLightDir (LightDirection);
-			TheLand->Landscape.setupStaticLight (LightDiffuse, LightAmbiant, LightMultiply);
+			TheLand->getLandscape().enableAutomaticLighting (false);
+			TheLand->getLandscape().setupAutomaticLightDir (LightDirection);
+			TheLand->getLandscape().setupStaticLight (LightDiffuse, LightAmbiant, LightMultiply);
 
 			// *******************
 			CExportNel export_ (true, true, true, pData->eproc->ip, "NeL Patch Painter", NULL);
@@ -4255,7 +4255,7 @@ DWORD WINAPI myThread (LPVOID vData)
 					cornerSmoother.computeAllCornerSmoothFlags (&zone, emptyVector);
 
 					// Add the zone
-					TheLand->Landscape.addZone (zone);
+					TheLand->getLandscape().addZone (zone);
 				}
 				else
 				{
@@ -4266,16 +4266,16 @@ DWORD WINAPI myThread (LPVOID vData)
 
 			// Check zones
 	#ifdef NL_DEBUG
-			TheLand->Landscape.checkBinds();
+			TheLand->getLandscape().checkBinds();
 	#endif // NL_DEBUG
 
 			// Refine les zones
-			TheLand->Landscape.setRefineMode (true);
+			TheLand->getLandscape().setRefineMode (true);
 
 			// Go.
 			//========
 			CEvent3dMouseListener	mouseListener;
-			MouseListener			listener (pData->eproc->ip, CNELU::Camera, &viewport, pData->pobj, pData->eproc, &TheLand->Landscape,
+			MouseListener			listener (pData->eproc->ip, CNELU::Camera, &viewport, pData->pobj, pData->eproc, &TheLand->getLandscape(),
 				&CNELU::AsyncListener, &mouseListener, pData->VectMesh, pData->T);
 
 			// Mouse listener
@@ -4314,22 +4314,22 @@ DWORD WINAPI myThread (LPVOID vData)
 					// Flush all its 128x128 tiles
 					sint tl;
 					for (tl=0; tl<tileSet->getNumTile128(); tl++)
-						TheLand->Landscape.flushTiles (CNELU::Scene->getDriver(), (uint16)tileSet->getTile128(tl), 1);
+						TheLand->getLandscape().flushTiles (CNELU::Scene->getDriver(), (uint16)tileSet->getTile128(tl), 1);
 
 					// Flush all its 256x256 tiles
 					for (tl=0; tl<tileSet->getNumTile256(); tl++)
-						TheLand->Landscape.flushTiles (CNELU::Scene->getDriver(), (uint16)tileSet->getTile256(tl), 1);
+						TheLand->getLandscape().flushTiles (CNELU::Scene->getDriver(), (uint16)tileSet->getTile256(tl), 1);
 
 					// Flush all its transisitons tiles
 					for (tl=0; tl<CTileSet::count; tl++)
-						TheLand->Landscape.flushTiles (CNELU::Scene->getDriver(), (uint16)tileSet->getTransition(tl)->getTile (), 1);
+						TheLand->getLandscape().flushTiles (CNELU::Scene->getDriver(), (uint16)tileSet->getTransition(tl)->getTile (), 1);
 				}
 			}
 
 			// Setup lights
 			CPaintLight lights;
 			lights.build (*pData->eproc->ip);
-			lights.setup (TheLand->Landscape, *CNELU::Scene);
+			lights.setup (TheLand->getLandscape(), *CNELU::Scene);
 
 			// MAIN LOOP
 			do

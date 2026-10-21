@@ -44,10 +44,11 @@ void	CLandscapeModel::registerBasic()
 
 
 // ***************************************************************************
-CLandscapeModel::CLandscapeModel()
+CLandscapeModel::CLandscapeModel(CLandscape* landscape /*= NULL*/)
 {
-	Landscape.OwnerModel = this;
-	Landscape.init();
+	Landscape = (landscape == NULL) ? (new CLandscape()) : landscape;
+	Landscape->OwnerModel = this;
+	Landscape->init();
 	_ActiveAdditive=false;
 	_Additive=1.f;
 
@@ -64,6 +65,12 @@ CLandscapeModel::CLandscapeModel()
 	_RefineCenterAuto= true;
 }
 
+// ***************************************************************************
+CLandscapeModel::~CLandscapeModel()
+{
+	delete Landscape;
+}
+
 
 // ***************************************************************************
 void	CLandscapeModel::initModel()
@@ -76,7 +83,7 @@ void	CLandscapeModel::initModel()
 
 	// After creating the landscape (and so the VegetableManager in the ctor).
 	// we must init correclty the VegetableManager.
-	Landscape.createVegetableBlendLayersModels(getOwnerScene());
+	Landscape->createVegetableBlendLayersModels(getOwnerScene());
 }
 
 
@@ -91,7 +98,7 @@ void	CLandscapeModel::traverseHrc()
 		The landscape and vegetable are not influenced by thoses animation (as if the light were not animated)
 		NB: important to do before the LightTrav. Also even if landscape is hidden, still must animate those light?
 	*/
-	Landscape.setPointLightFactor(*getOwnerScene());
+	Landscape->setPointLightFactor(*getOwnerScene());
 }
 
 
@@ -160,7 +167,7 @@ void	CLandscapeModel::clipAndRenderLandscape()
 	H_AUTO( NL3D_Landscape_Clip );
 
 	// Should be unlocked
-	nlassert (!Landscape.isLocked());
+	nlassert (!Landscape->isLocked());
 
 	CClipTrav		&clipTrav= getOwnerScene()->getClipTrav();
 	CRenderTrav		&renderTrav= getOwnerScene()->getRenderTrav();
@@ -176,7 +183,7 @@ void	CLandscapeModel::clipAndRenderLandscape()
 	nlassert(NL3D_TESSBLOCK_NUM_CLIP_PLANE==4);
 
 	// Before Landscape clip, must setup Driver, for good VB allocation.
-	Landscape.setDriver(getOwnerScene()->getRenderTrav().getDriver());
+	Landscape->setDriver(getOwnerScene()->getRenderTrav().getDriver());
 
 	// get the refineCenter.
 	CVector		refineCenter;
@@ -194,7 +201,7 @@ void	CLandscapeModel::clipAndRenderLandscape()
 	// reflection while the camera moves.
 	clipTrav.getClusterVisibilityPosOverride(refineCenter);
 
-	Landscape.lockBuffers ();
+	Landscape->lockBuffers ();
 
 	// Use the Clustered pyramid for Patch, but Frustum pyramid for TessBlocks.
 	// We are sure that pyramid has normalized plane normals.
@@ -217,11 +224,11 @@ void	CLandscapeModel::clipAndRenderLandscape()
 		// within it must survive the patch-level cull
 		waterPlane.make(CVector(0.f, 0.f, -1.f), CVector(0.f, 0.f, reflPlaneZ - CWaterReflectionManager::getFarClipBias()));
 		reflPyramid.push_back(waterPlane);
-		Landscape.clip(refineCenter, reflPyramid);
+		Landscape->clip(refineCenter, reflPyramid);
 	}
 	else
 	{
-		Landscape.clip(refineCenter, ClusteredPyramid);
+		Landscape->clip(refineCenter, ClusteredPyramid);
 	}
 
 
@@ -230,14 +237,14 @@ void	CLandscapeModel::clipAndRenderLandscape()
 
 	// Change the landscape center. All Geomorphed pos (in VertexBuffer only or during VertexProgram)
 	// subtract this position.
-	Landscape.setPZBModelPosition(renderTrav.CamPos);
+	Landscape->setPZBModelPosition(renderTrav.CamPos);
 
 	/* setup the model matrix
 		ZBuffer Precision: set the modelMatrix to the current landscape PZBModelPosition.
 		NB: don't use renderTrav.CamPos directly because setPZBModelPosition() may modify the position
 	*/
 	_RenderWorldMatrix.identity();
-	_RenderWorldMatrix.setPos(Landscape.getPZBModelPosition());
+	_RenderWorldMatrix.setPos(Landscape->getPZBModelPosition());
 	renderTrav.getDriver()->setupModelMatrix(_RenderWorldMatrix);
 
 
@@ -246,14 +253,14 @@ void	CLandscapeModel::clipAndRenderLandscape()
 	nlassert(scene);
 	{
 		// For vegetable, set the animation Time.
-		Landscape.setVegetableTime(scene->getCurrentTime());
+		Landscape->setVegetableTime(scene->getCurrentTime());
 
 		// For vegetable updateLighting, set the system Time.
-		Landscape.setVegetableUpdateLightingTime(scene->getCurrentSystemTime());
+		Landscape->setVegetableUpdateLightingTime(scene->getCurrentSystemTime());
 
 		// updateLighting
 		H_BEFORE( NL3D_Landscape_UpdateLighting );
-		Landscape.updateLighting(scene->getCurrentSystemTime());
+		Landscape->updateLighting(scene->getCurrentSystemTime());
 		H_AFTER( NL3D_Landscape_UpdateLighting );
 
 		// if SceneLighting enabled
@@ -262,13 +269,13 @@ void	CLandscapeModel::clipAndRenderLandscape()
 			H_AUTO( NL3D_Landscape_DynamicLighting );
 
 			// For vegetable, set the lighting
-			Landscape.setupVegetableLighting(scene->getSunAmbient(), scene->getSunDiffuse(),
+			Landscape->setupVegetableLighting(scene->getSunAmbient(), scene->getSunDiffuse(),
 				scene->getSunDirection());
 
 			// current visible Dynamic light list are registered in LightTrav::LightingManager
 			CLightTrav		&lightTrav= scene->getLightTrav();
 			// Get all dynamic light list, and light landscape with it.
-			Landscape.computeDynamicLighting(lightTrav.LightingManager.getAllDynamicLightList());
+			Landscape->computeDynamicLighting(lightTrav.LightingManager.getAllDynamicLightList());
 		}
 	}
 
@@ -285,7 +292,7 @@ void	CLandscapeModel::clipAndRenderLandscape()
 	if (!inReflection)
 	{
 		H_BEFORE( NL3D_Landscape_Refine );
-		Landscape.refine(refineCenter);
+		Landscape->refine(refineCenter);
 		H_AFTER( NL3D_Landscape_Refine );
 	}
 
@@ -293,16 +300,16 @@ void	CLandscapeModel::clipAndRenderLandscape()
 	H_BEFORE( NL3D_Landscape_Render );
 	// In reflection renders the far passes select the deeper water clip
 	// bias (fills the void bleed at water horizons with distant terrain)
-	Landscape.setWaterReflectionClip(inReflection ? &getOwnerScene()->getWaterReflectionManager() : nullptr);
+	Landscape->setWaterReflectionClip(inReflection ? &getOwnerScene()->getWaterReflectionManager() : nullptr);
 	// Vegetation is excluded from water reflection renders: its vertex
 	// program does not implement the reflection clip plane (underwater
 	// vegetation would show), and the contribution is not worth the cost
 	bool doVegetables = !inReflection;
-	Landscape.render(refineCenter, renderTrav.CamLook, CurrentPyramid, isAdditive (), doVegetables);
+	Landscape->render(refineCenter, renderTrav.CamLook, CurrentPyramid, isAdditive (), doVegetables);
 	H_AFTER( NL3D_Landscape_Render );
 
 	// Should be unlocked by render
-	nlassert (!Landscape.isLocked());
+	nlassert (!Landscape->isLocked());
 }
 
 // ***************************************************************************
@@ -323,7 +330,7 @@ void	CLandscapeModel::traverseRender()
 // ***************************************************************************
 void	CLandscapeModel::profileRender()
 {
-	Landscape.profileRender();
+	Landscape->profileRender();
 }
 
 
@@ -338,8 +345,8 @@ void	CLandscapeModel::profileRender()
 void		CLandscapeModel::getReceiverBBox(CAABBox &bbox)
 {
 	// Build a dummy bbox around the TileNear distance.
-	bbox.setCenter(Landscape.getOldRefineCenter());
-	float	hs= Landscape.getTileNear() * 1.5f; // Enlarge a little because may have some triangles outside this dist.
+	bbox.setCenter(Landscape->getOldRefineCenter());
+	float	hs= Landscape->getTileNear() * 1.5f; // Enlarge a little because may have some triangles outside this dist.
 	bbox.setHalfSize(CVector(hs,hs,hs));
 }
 
@@ -352,7 +359,7 @@ void		CLandscapeModel::receiveShadowMap(CShadowMap *shadowMap, const CVector &ca
 	drv->setupModelMatrix(_RenderWorldMatrix);
 
 	// render.
-	Landscape.receiveShadowMap(drv, shadowMap, casterPos, shadowMat, Landscape.getPZBModelPosition());
+	Landscape->receiveShadowMap(drv, shadowMap, casterPos, shadowMat, Landscape->getPZBModelPosition());
 }
 
 

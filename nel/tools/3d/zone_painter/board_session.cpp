@@ -787,16 +787,16 @@ bool rebuildWorkingSet(std::string &err, uint &outWelds, bool skipWriteBack, boo
 
 	// Landscape: remove old, add new
 	for (size_t i = 0; i < oldIds.size(); ++i)
-		g_PaintCtx.Land->Landscape.removeZone((uint16)oldIds[i]);
+		g_PaintCtx.Land->getLandscape().removeZone((uint16)oldIds[i]);
 	for (size_t i = 0; i < zones.size(); ++i)
 	{
 		NL3D::CZone zone;
 		buildDisplayZone(zones[i], zone);
-		if (!g_PaintCtx.Land->Landscape.addZone(zone))
+		if (!g_PaintCtx.Land->getLandscape().addZone(zone))
 			fprintf(stderr, "WARNING: rebuild addZone failed for %u '%s'\n",
 			        zones[i].ZoneId, zones[i].Name.c_str());
 	}
-	g_PaintCtx.Land->Landscape.setRefineMode(true);
+	g_PaintCtx.Land->getLandscape().setRefineMode(true);
 
 	// Paint core re-init (clears undo)
 	std::vector<ZPPAINT::SPaintZoneInput> inputs;
@@ -809,7 +809,7 @@ bool rebuildWorkingSet(std::string &err, uint &outWelds, bool skipWriteBack, boo
 		return false;
 	}
 	g_PaintCtx.Core->restoreOriginalBytes(originals);
-	g_PaintCtx.Core->attachLandscape(&g_PaintCtx.Land->Landscape);
+	g_PaintCtx.Core->attachLandscape(&g_PaintCtx.Land->getLandscape());
 	printf("session rebuild: undo %s; retained dirty flags restored (%u carriers stashed)\n",
 	       keepUndo ? "kept (topology rebuild)" : "cleared", (uint)originals.size());
 	return true;

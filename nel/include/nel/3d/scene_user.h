@@ -151,7 +151,7 @@ public:
 	virtual	USkeleton		createSkeleton(const std::string &shapeName) NL_OVERRIDE;
 	virtual	void			deleteSkeleton(USkeleton &skel) NL_OVERRIDE;
 
-	virtual	ULandscape		*createLandscape() NL_OVERRIDE;
+	virtual	ULandscape		*createLandscape(ULandscape *land = NULL) NL_OVERRIDE;
 	virtual	void			deleteLandscape(ULandscape *land) NL_OVERRIDE;
 
 	virtual	UCloudScape		*createCloudScape() NL_OVERRIDE;

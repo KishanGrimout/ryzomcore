@@ -62,7 +62,7 @@ void	CLandscapeUser::setZonePath(const std::string &zonePath)
 // ****************************************************************************
 void CLandscapeUser::invalidateAllTiles()
 {
-	_Landscape->Landscape.invalidateAllTiles();
+	_Landscape->getLandscape().invalidateAllTiles();
 }
 
 // ****************************************************************************
@@ -71,24 +71,24 @@ void	CLandscapeUser::loadBankFiles(const std::string &tileBankFile, const std::s
 	NL3D_HAUTO_LOAD_LANDSCAPE;
 
 	// Release all OLD tiles
-	_Landscape->Landscape.releaseAllTiles();
+	_Landscape->getLandscape().releaseAllTiles();
 
 	// Clear the bank
-	_Landscape->Landscape.TileBank.clear ();
+	_Landscape->getLandscape().TileBank.clear ();
 
 	// First, load the banks.
 	//=======================
 	CIFile bankFile(CPath::lookup(tileBankFile));
-	_Landscape->Landscape.TileBank.serial(bankFile);
+	_Landscape->getLandscape().TileBank.serial(bankFile);
 	// All textures path are relative!
-	_Landscape->Landscape.TileBank.makeAllPathRelative();
+	_Landscape->getLandscape().TileBank.makeAllPathRelative();
 	// Use DDS!!!
-	_Landscape->Landscape.TileBank.makeAllExtensionDDS();
+	_Landscape->getLandscape().TileBank.makeAllExtensionDDS();
 	// No absolute path
-	_Landscape->Landscape.TileBank.setAbsPath ("");
+	_Landscape->getLandscape().TileBank.setAbsPath ("");
 
 	CIFile farbankFile(CPath::lookup(farBankFile));
-	_Landscape->Landscape.TileFarBank.serial(farbankFile);
+	_Landscape->getLandscape().TileFarBank.serial(farbankFile);
 	bankFile.close();
 	farbankFile.close();
 }
@@ -98,10 +98,10 @@ void	CLandscapeUser::loadBankFiles(const std::string &tileBankFile, const std::s
 void	CLandscapeUser::flushTiles (NLMISC::IProgressCallback &progress)
 {
 	// After loading the TileBank, and before initTileBanks(), must load the vegetables descritpor
-	_Landscape->Landscape.TileBank.loadTileVegetableDescs();
+	_Landscape->getLandscape().TileBank.loadTileVegetableDescs();
 
 	// init the TileBanks descriptors
-	if ( ! _Landscape->Landscape.initTileBanks() )
+	if ( ! _Landscape->getLandscape().initTileBanks() )
 	{
 		nlwarning( "You need to recompute bank.farbank for the far textures" );
 	}
@@ -109,9 +109,9 @@ void	CLandscapeUser::flushTiles (NLMISC::IProgressCallback &progress)
 	// Count tiles
 	uint tileCount = 0;
 	sint	ts;
-	for (ts=0; ts<_Landscape->Landscape.TileBank.getTileSetCount (); ts++)
+	for (ts=0; ts<_Landscape->getLandscape().TileBank.getTileSetCount (); ts++)
 	{
-		CTileSet *tileSet=_Landscape->Landscape.TileBank.getTileSet (ts);
+		CTileSet *tileSet=_Landscape->getLandscape().TileBank.getTileSet (ts);
 		tileCount += tileSet->getNumTile128();
 		tileCount += tileSet->getNumTile256();
 		tileCount += CTileSet::count;
@@ -120,9 +120,9 @@ void	CLandscapeUser::flushTiles (NLMISC::IProgressCallback &progress)
 	// Second, temporary, flushTiles.
 	//===============================
 	uint tile = 0;
-	for (ts=0; ts<_Landscape->Landscape.TileBank.getTileSetCount (); ts++)
+	for (ts=0; ts<_Landscape->getLandscape().TileBank.getTileSetCount (); ts++)
 	{
-		CTileSet *tileSet=_Landscape->Landscape.TileBank.getTileSet (ts);
+		CTileSet *tileSet=_Landscape->getLandscape().TileBank.getTileSet (ts);
 		sint tl;
 		for (tl=0; tl<tileSet->getNumTile128(); tl++)
 		{
@@ -130,7 +130,7 @@ void	CLandscapeUser::flushTiles (NLMISC::IProgressCallback &progress)
 			progress.progress ((float)tile/(float)tileCount);
 			tile++;
 
-			_Landscape->Landscape.flushTiles (_Scene->getDriver(), (uint16)tileSet->getTile128(tl), 1);
+			_Landscape->getLandscape().flushTiles (_Scene->getDriver(), (uint16)tileSet->getTile128(tl), 1);
 		}
 		for (tl=0; tl<tileSet->getNumTile256(); tl++)
 		{
@@ -138,7 +138,7 @@ void	CLandscapeUser::flushTiles (NLMISC::IProgressCallback &progress)
 			progress.progress ((float)tile/(float)tileCount);
 			tile++;
 
-			_Landscape->Landscape.flushTiles (_Scene->getDriver(), (uint16)tileSet->getTile256(tl), 1);
+			_Landscape->getLandscape().flushTiles (_Scene->getDriver(), (uint16)tileSet->getTile256(tl), 1);
 		}
 		for (tl=0; tl<CTileSet::count; tl++)
 		{
@@ -146,7 +146,7 @@ void	CLandscapeUser::flushTiles (NLMISC::IProgressCallback &progress)
 			progress.progress ((float)tile/(float)tileCount);
 			tile++;
 
-			_Landscape->Landscape.flushTiles (_Scene->getDriver(), (uint16)tileSet->getTransition(tl)->getTile (), 1);
+			_Landscape->getLandscape().flushTiles (_Scene->getDriver(), (uint16)tileSet->getTransition(tl)->getTile (), 1);
 		}
 	}
 }
@@ -174,7 +174,7 @@ void	CLandscapeUser::loadAllZonesAround(const CVector &pos, float radius, std::v
 				}
 				else
 				{
-					_Landscape->Landscape.addZone (*Work.Zone);
+					_Landscape->getLandscape().addZone (*Work.Zone);
 
 					delete Work.Zone;
 					std::string zoneadd = Work.NameZoneAdded;
@@ -190,7 +190,7 @@ void	CLandscapeUser::loadAllZonesAround(const CVector &pos, float radius, std::v
 		_ZoneManager.checkZonesAround ((uint)pos.x, (uint)(-pos.y), (uint)radius);
 	}
 	// Yoyo: must check the binds of the zones.
-	_Landscape->Landscape.checkBinds();
+	_Landscape->getLandscape().checkBinds();
 }
 
 // ****************************************************************************
@@ -234,7 +234,7 @@ void	CLandscapeUser::getAllZoneLoaded(std::vector<std::string>	&zoneLoaded) cons
 {
 	// Build the list of zoneId.
 	std::vector<uint16>	zoneIds;
-	_Landscape->Landscape.getZoneList(zoneIds);
+	_Landscape->getLandscape().getZoneList(zoneIds);
 
 	// transcript
 	zoneLoaded.clear();
@@ -280,12 +280,12 @@ void	CLandscapeUser::refreshZonesAround(const CVector &pos, float radius, std::s
 			}
 			else
 			{
-				_Landscape->Landscape.addZone(*Work.Zone);
+				_Landscape->getLandscape().addZone(*Work.Zone);
 
 				// Yoyo: must check the binds of the new inserted zone.
 				try
 				{
-					_Landscape->Landscape.checkBinds(Work.Zone->getZoneId());
+					_Landscape->getLandscape().checkBinds(Work.Zone->getZoneId());
 				}
 				catch (const EBadBind &e)
 				{
@@ -302,7 +302,7 @@ void	CLandscapeUser::refreshZonesAround(const CVector &pos, float radius, std::s
 		// Check if a zone must be removed from landscape
 		if (Work.ZoneRemoved)
 		{
-			_Landscape->Landscape.removeZone (Work.IdZoneToRemove);
+			_Landscape->getLandscape().removeZone (Work.IdZoneToRemove);
 			zoneRemoved = Work.NameZoneRemoved;
 			zoneRemoved = zoneRemoved.substr(0, zoneRemoved.find('.'));
 		}
@@ -339,7 +339,7 @@ void CLandscapeUser::removeAllZones()
 			// Zone to remove?
 			if (Work.ZoneRemoved)
 			{
-				_Landscape->Landscape.removeZone (Work.IdZoneToRemove);
+				_Landscape->getLandscape().removeZone (Work.IdZoneToRemove);
 			}
 		}
 		else
@@ -349,7 +349,7 @@ void CLandscapeUser::removeAllZones()
 	}
 
 	// Then do a full clear
-	_Landscape->Landscape.clear();
+	_Landscape->getLandscape().clear();
 	_ZoneManager.clear();
 }
 
@@ -357,7 +357,7 @@ void CLandscapeUser::removeAllZones()
 void	CLandscapeUser::setupStaticLight (const CRGBA &diffuse, const CRGBA &ambiant, float multiply)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.setupStaticLight(diffuse, ambiant, multiply);
+	_Landscape->getLandscape().setupStaticLight(diffuse, ambiant, multiply);
 }
 
 
@@ -366,37 +366,37 @@ void	CLandscapeUser::setupStaticLight (const CRGBA &diffuse, const CRGBA &ambian
 void	CLandscapeUser::setThreshold (float thre)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.setThreshold(thre);
+	_Landscape->getLandscape().setThreshold(thre);
 }
 // ****************************************************************************
 float	CLandscapeUser::getThreshold () const
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	return _Landscape->Landscape.getThreshold();
+	return _Landscape->getLandscape().getThreshold();
 }
 // ****************************************************************************
 void	CLandscapeUser::setTileNear (float tileNear)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.setTileNear(tileNear);
+	_Landscape->getLandscape().setTileNear(tileNear);
 }
 // ****************************************************************************
 float	CLandscapeUser::getTileNear () const
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	return _Landscape->Landscape.getTileNear();
+	return _Landscape->getLandscape().getTileNear();
 }
 // ****************************************************************************
 void	CLandscapeUser::setTileMaxSubdivision (uint tileDiv)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.setTileMaxSubdivision(tileDiv);
+	_Landscape->getLandscape().setTileMaxSubdivision(tileDiv);
 }
 // ****************************************************************************
 uint	CLandscapeUser::getTileMaxSubdivision ()
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	return _Landscape->Landscape.getTileMaxSubdivision();
+	return _Landscape->getLandscape().getTileMaxSubdivision();
 }
 
 
@@ -412,14 +412,14 @@ std::string	CLandscapeUser::getZoneName(const CVector &pos)
 CVector		CLandscapeUser::getHeightFieldDeltaZ(float x, float y) const
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	return _Landscape->Landscape.getHeightFieldDeltaZ(x,y);
+	return _Landscape->getLandscape().getHeightFieldDeltaZ(x,y);
 }
 
 // ****************************************************************************
 void		CLandscapeUser::setHeightField(const CHeightMap &hf)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.setHeightField(hf);
+	_Landscape->getLandscape().setHeightField(hf);
 }
 
 
@@ -427,35 +427,35 @@ void		CLandscapeUser::setHeightField(const CHeightMap &hf)
 void		CLandscapeUser::enableVegetable(bool enable)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.enableVegetable(enable);
+	_Landscape->getLandscape().enableVegetable(enable);
 }
 
 // ****************************************************************************
 void		CLandscapeUser::loadVegetableTexture(const std::string &textureFileName)
 {
 	NL3D_HAUTO_LOAD_LANDSCAPE;
-	_Landscape->Landscape.loadVegetableTexture(textureFileName);
+	_Landscape->getLandscape().loadVegetableTexture(textureFileName);
 }
 
 // ****************************************************************************
 void		CLandscapeUser::setupVegetableLighting(const CRGBA &ambient, const CRGBA &diffuse, const CVector &directionalLight)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.setupVegetableLighting(ambient, diffuse, directionalLight);
+	_Landscape->getLandscape().setupVegetableLighting(ambient, diffuse, directionalLight);
 }
 
 // ****************************************************************************
 void		CLandscapeUser::setVegetableWind(const CVector &windDir, float windFreq, float windPower, float windBendMin)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.setVegetableWind(windDir, windFreq, windPower, windBendMin);
+	_Landscape->getLandscape().setVegetableWind(windDir, windFreq, windPower, windBendMin);
 }
 
 // ****************************************************************************
 void		CLandscapeUser::setVegetableUpdateLightingFrequency(float freq)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.setVegetableUpdateLightingFrequency(freq);
+	_Landscape->getLandscape().setVegetableUpdateLightingFrequency(freq);
 }
 
 
@@ -463,7 +463,7 @@ void		CLandscapeUser::setVegetableUpdateLightingFrequency(float freq)
 void		CLandscapeUser::setUpdateLightingFrequency(float freq)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.setUpdateLightingFrequency(freq);
+	_Landscape->getLandscape().setUpdateLightingFrequency(freq);
 }
 
 
@@ -484,44 +484,44 @@ bool		CLandscapeUser::isAdditiveEnabled () const
 void		CLandscapeUser::setPointLightDiffuseMaterial(CRGBA diffuse)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.setPointLightDiffuseMaterial(diffuse);
+	_Landscape->getLandscape().setPointLightDiffuseMaterial(diffuse);
 }
 // ****************************************************************************
 CRGBA		CLandscapeUser::getPointLightDiffuseMaterial () const
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	return _Landscape->Landscape.getPointLightDiffuseMaterial();
+	return _Landscape->getLandscape().getPointLightDiffuseMaterial();
 }
 
 // ****************************************************************************
 void		CLandscapeUser::setDLMGlobalVegetableColor(CRGBA gvc)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.setDLMGlobalVegetableColor(gvc);
+	_Landscape->getLandscape().setDLMGlobalVegetableColor(gvc);
 }
 // ****************************************************************************
 CRGBA		CLandscapeUser::getDLMGlobalVegetableColor() const
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	return _Landscape->Landscape.getDLMGlobalVegetableColor();
+	return _Landscape->getLandscape().getDLMGlobalVegetableColor();
 }
 // ****************************************************************************
 void		CLandscapeUser::updateLightingAll()
 {
 	NL3D_HAUTO_LANDSCAPE_UPDATE_LIGHTING_ALL;
-	_Landscape->Landscape.updateLightingAll();
+	_Landscape->getLandscape().updateLightingAll();
 }
 // ****************************************************************************
 void		CLandscapeUser::postfixTileFilename (const char *postfix)
 {
 	NL3D_HAUTO_LANDSCAPE_UPDATE_LIGHTING_ALL;
-	_Landscape->Landscape.TileBank.postfixTileFilename (postfix);
+	_Landscape->getLandscape().TileBank.postfixTileFilename (postfix);
 }
 // ****************************************************************************
 void		CLandscapeUser::postfixTileVegetableDesc (const char *postfix)
 {
 	NL3D_HAUTO_LANDSCAPE_UPDATE_LIGHTING_ALL;
-	_Landscape->Landscape.TileBank.postfixTileVegetableDesc (postfix);
+	_Landscape->getLandscape().TileBank.postfixTileVegetableDesc (postfix);
 }
 
 // ***************************************************************************
@@ -565,56 +565,56 @@ const CVector	&CLandscapeUser::getRefineCenterUser() const
 void CLandscapeUser::addTileCallback(ULandscapeTileCallback *cb)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.addTileCallback(cb);
+	_Landscape->getLandscape().addTileCallback(cb);
 }
 
 // ***************************************************************************
 void CLandscapeUser::removeTileCallback(ULandscapeTileCallback *cb)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.removeTileCallback(cb);
+	_Landscape->getLandscape().removeTileCallback(cb);
 }
 
 // ***************************************************************************
 bool CLandscapeUser::isTileCallback(ULandscapeTileCallback *cb)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	return _Landscape->Landscape.isTileCallback(cb);
+	return _Landscape->getLandscape().isTileCallback(cb);
 }
 
 // ***************************************************************************
 void CLandscapeUser::setZFunc(UMaterial::ZFunc val)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.setZFunc((CMaterial::ZFunc)val);
+	_Landscape->getLandscape().setZFunc((CMaterial::ZFunc)val);
 }
 
 // ***************************************************************************
 const CZone*	CLandscapeUser::getZone (sint zoneId) const
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	return _Landscape->Landscape.getZone(zoneId);
+	return _Landscape->getLandscape().getZone(zoneId);
 }
 
 // ***************************************************************************
 void		CLandscapeUser::setVegetableDensity(float density)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	_Landscape->Landscape.setVegetableDensity(density);
+	_Landscape->getLandscape().setVegetableDensity(density);
 }
 
 // ***************************************************************************
 float		CLandscapeUser::getVegetableDensity() const
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	return _Landscape->Landscape.getVegetableDensity();
+	return _Landscape->getLandscape().getVegetableDensity();
 }
 
 // ***************************************************************************
 float CLandscapeUser::getRayCollision(const NLMISC::CVector &start, const NLMISC::CVector &end)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
-	return _Landscape->Landscape.getRayCollision(start, end);
+	return _Landscape->getLandscape().getRayCollision(start, end);
 }
 
 } // NL3D
