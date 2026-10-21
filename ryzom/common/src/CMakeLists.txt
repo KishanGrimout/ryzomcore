@@ -1,1 +1,2 @@
+ADD_SUBDIRECTORY(seven_zip)
 ADD_SUBDIRECTORY(game_share)
