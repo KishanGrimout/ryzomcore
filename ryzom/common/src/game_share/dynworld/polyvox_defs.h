@@ -38,7 +38,9 @@
 
 class VolumeRWLock
 {
-	mutable NLMISC::CReaderWriter m_lock;
+	// NOTE(dynworld): NLMISC::CFastReaderWriter (ported lock-free reader/writer lock) restored,
+	// matching the legacy fork; the stock CReaderWriter lacked the upgrade/downgrade support.
+	mutable NLMISC::CFastReaderWriter m_lock;
 	template <typename T> static std::atomic<T>& as_atomic(T& value)
 	{
 		static_assert(sizeof(T) == sizeof(std::atomic<T>), "");
@@ -50,8 +52,8 @@ public:
 	void readUnlock() const 	{ m_lock.leaveReader(); }
 	void writeLock() const 		{ m_lock.enterWriter(); }
 	void writeUnlock() const 	{ m_lock.leaveWriter(); }
-	/*void upgradeLock() const { m_lock.upgrade(); }
-	void downgradeLock() const 	{ m_lock.downgrade(); }*/
+	void upgradeLock() const 	{ m_lock.upgrade(); }
+	void downgradeLock() const 	{ m_lock.downgrade(); }
 	bool isLocked() const
 	{
 		bool lockSucceed = m_lock.tryEnterReader();

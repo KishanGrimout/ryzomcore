@@ -20,6 +20,8 @@
 #include "types_nl.h"
 #include "mutex.h"
 
+#include <atomic>
+
 #ifdef NL_CPP17
 #include <shared_mutex>
 #endif
@@ -237,6 +239,47 @@ private:
 
 	T					_Value;
 
+};
+
+/**
+ * NOTE(dynworld): ported from the legacy dynamic-world fork (added there inside reader_writer.{h,cpp}).
+ * Lock-free reader/writer lock with writer-fairness and reader->writer upgrade support.
+ * Serves the voxel volume chunk locking (VolumeRWLock in polyvox_defs.h).
+ */
+class CFastReaderWriter
+{
+	static const uint RW_WAIT = 1;
+	static const uint RW_WRITE = 2;
+	static const uint RW_READ = 4;
+
+	using TLockType = uint32;
+	using TRWLock = std::atomic<TLockType>;
+	TRWLock _RWLock;
+
+public:
+	CFastReaderWriter();
+
+	void enterWriter();
+
+	void leaveWriter();
+
+	bool tryEnterWriter();
+
+	void enterReader();
+
+	void leaveReader();
+
+	bool tryEnterReader();
+
+	// Get a read lock, even if a writer is waiting
+	bool forceEnterReader();
+
+	// Try to upgrade from a read to a write lock atomically
+	bool tryUpgrade();
+
+	void upgrade();
+
+	void downgrade();
 };
 
 } // NLMISC
