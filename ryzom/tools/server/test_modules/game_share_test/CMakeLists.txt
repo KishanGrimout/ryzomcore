@@ -67,3 +67,50 @@ target_link_libraries(ryzom_dynworld_environment_definition_test
         NeL::misc
         Ryzom::gameshare
 )
+
+add_test_executable(ryzom_dynworld_map_sector_test
+        test_dynworld_map_sector.cpp
+)
+
+target_include_directories(ryzom_dynworld_map_sector_test
+        PRIVATE
+        ${CMAKE_SOURCE_DIR}/ryzom/common/src
+        ${POLYVOX_INCLUDE_DIR}
+)
+
+target_link_libraries(ryzom_dynworld_map_sector_test
+        PRIVATE
+        NeL::misc
+        Ryzom::gameshare
+)
+
+add_test_executable(ryzom_dynworld_deferred_command_test
+        test_dynworld_deferred_command.cpp
+)
+
+target_include_directories(ryzom_dynworld_deferred_command_test
+        PRIVATE
+        ${CMAKE_SOURCE_DIR}/ryzom/common/src
+        ${POLYVOX_INCLUDE_DIR}
+)
+
+target_link_libraries(ryzom_dynworld_deferred_command_test
+        PRIVATE
+        NeL::misc
+        Ryzom::gameshare
+)
+
+add_test_executable(ryzom_dynworld_disk_file_db_test
+        test_dynworld_disk_file_db.cpp
+)
+
+target_include_directories(ryzom_dynworld_disk_file_db_test
+        PRIVATE
+        ${CMAKE_SOURCE_DIR}/ryzom/common/src
+)
+
+target_link_libraries(ryzom_dynworld_disk_file_db_test
+        PRIVATE
+        NeL::misc
+        Ryzom::gameshare
+)
