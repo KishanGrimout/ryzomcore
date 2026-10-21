@@ -83,6 +83,8 @@ Audit conclusions already verified (do NOT re-derive):
 
 ### 1. Shared dynworld foundation — complete
 
+Test harness note: ryzom-side gtest home is `ryzom/tools/server/test_modules/<x>_test/` (convention established upstream by PR #826 "enable ryzom tests"; siblings `egs_test`, `session_browser_test`, `shard_unifier_test`). The Oct-16 dynworld foundation commits added four `add_test_executable` targets there under `game_share_test/` — `ryzom_dynworld_voxel_test` (links `NeL::misc` only; voxel is header-only), `ryzom_dynworld_noise_test`, `ryzom_dynworld_mapgen_params_test`, `ryzom_dynworld_environment_definition_test` (those three link `Ryzom::gameshare`). All four build + pass in Release (10 tests). New dynworld tests belong in the same directory as their own `add_test_executable` subtarget (do NOT create a separate dynworld test tree); NeL-misc tests stay in `nel/tools/nel_unit_test/ut_*.test.cpp`. Beware: `build/` contains a stale `ryzom_dynworld_polyvox_defs_test.vcxproj` from a never-committed past-CMake definition — harmless build residue, not a real target.
+
 - [x] Inventory `ryzom/common/src/game_share/dynworld` and map external dependency consumers.
 - [x] Port and test the self-contained `Voxel` type without server or client runtime dependencies.
 - [x] Port and test `mapgen/noise` using existing NeL dependencies; keep ANL isolated to higher-level map generation.
