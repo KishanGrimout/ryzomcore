@@ -1380,7 +1380,7 @@ void CObjectViewer::go ()
 				if(_VegetableLandscape != NULL)
 				{
 					CString vegetMsgBar;
-					vegetMsgBar.Format(_T("%u"), _VegetableLandscape->Landscape.getNumVegetableFaceRendered());
+					vegetMsgBar.Format(_T("%u"), _VegetableLandscape->getLandscape().getNumVegetableFaceRendered());
 					_VegetableDlg->StaticPolyCount.SetWindowText(vegetMsgBar);
 				}
 				else
@@ -3173,17 +3173,17 @@ bool		CObjectViewer::createVegetableLandscape()
 			dlgProgress.ProgressBar.SetPos(0);
 			// load
 			CIFile bankFile(CPath::lookup(_VegetableLandscapeTileBank));
-			_VegetableLandscape->Landscape.TileBank.serial(bankFile);
-			_VegetableLandscape->Landscape.TileBank.makeAllPathRelative();
-			_VegetableLandscape->Landscape.TileBank.makeAllExtensionDDS();
-			_VegetableLandscape->Landscape.TileBank.setAbsPath ("");
+			_VegetableLandscape->getLandscape().TileBank.serial(bankFile);
+			_VegetableLandscape->getLandscape().TileBank.makeAllPathRelative();
+			_VegetableLandscape->getLandscape().TileBank.makeAllExtensionDDS();
+			_VegetableLandscape->getLandscape().TileBank.setAbsPath ("");
 
 			// progress
 			dlgProgress.ProgressBar.SetPos(50);
 			// load
 			CIFile farbankFile(CPath::lookup(_VegetableLandscapeTileFarBank));
-			_VegetableLandscape->Landscape.TileFarBank.serial(farbankFile);
-			if ( ! _VegetableLandscape->Landscape.initTileBanks() )
+			_VegetableLandscape->getLandscape().TileFarBank.serial(farbankFile);
+			if ( ! _VegetableLandscape->getLandscape().initTileBanks() )
 			{
 				nlwarning( "You need to recompute bank.farbank for the far textures" );
 			}
@@ -3202,9 +3202,9 @@ bool		CObjectViewer::createVegetableLandscape()
 				// count nbText to load.
 				sint	ts;
 				sint	nbTextTotal= 0;
-				for (ts=0; ts<_VegetableLandscape->Landscape.TileBank.getTileSetCount (); ts++)
+				for (ts=0; ts<_VegetableLandscape->getLandscape().TileBank.getTileSetCount (); ts++)
 				{
-					CTileSet *tileSet=_VegetableLandscape->Landscape.TileBank.getTileSet (ts);
+					CTileSet *tileSet=_VegetableLandscape->getLandscape().TileBank.getTileSet (ts);
 					nbTextTotal+= tileSet->getNumTile128();
 					nbTextTotal+= tileSet->getNumTile256();
 					nbTextTotal+= CTileSet::count;
@@ -3212,23 +3212,23 @@ bool		CObjectViewer::createVegetableLandscape()
 
 				// load.
 				sint	nbTextDone= 0;
-				for (ts=0; ts<_VegetableLandscape->Landscape.TileBank.getTileSetCount (); ts++)
+				for (ts=0; ts<_VegetableLandscape->getLandscape().TileBank.getTileSetCount (); ts++)
 				{
-					CTileSet *tileSet=_VegetableLandscape->Landscape.TileBank.getTileSet (ts);
+					CTileSet *tileSet=_VegetableLandscape->getLandscape().TileBank.getTileSet (ts);
 					sint tl;
 					for (tl=0; tl<tileSet->getNumTile128(); tl++, nbTextDone++)
 					{
-						_VegetableLandscape->Landscape.flushTiles (CNELU::Driver, (uint16)tileSet->getTile128(tl), 1);
+						_VegetableLandscape->getLandscape().flushTiles (CNELU::Driver, (uint16)tileSet->getTile128(tl), 1);
 						dlgProgress.ProgressBar.SetPos(nbTextDone*100/nbTextTotal);
 					}
 					for (tl=0; tl<tileSet->getNumTile256(); tl++, nbTextDone++)
 					{
-						_VegetableLandscape->Landscape.flushTiles (CNELU::Driver, (uint16)tileSet->getTile256(tl), 1);
+						_VegetableLandscape->getLandscape().flushTiles (CNELU::Driver, (uint16)tileSet->getTile256(tl), 1);
 						dlgProgress.ProgressBar.SetPos(nbTextDone*100/nbTextTotal);
 					}
 					for (tl=0; tl<CTileSet::count; tl++, nbTextDone++)
 					{
-						_VegetableLandscape->Landscape.flushTiles (CNELU::Driver, (uint16)tileSet->getTransition(tl)->getTile (), 1);
+						_VegetableLandscape->getLandscape().flushTiles (CNELU::Driver, (uint16)tileSet->getTransition(tl)->getTile (), 1);
 						dlgProgress.ProgressBar.SetPos(nbTextDone*100/nbTextTotal);
 					}
 				}
@@ -3237,12 +3237,12 @@ bool		CObjectViewer::createVegetableLandscape()
 
 			// misc setup.
 			// ================
-			_VegetableLandscape->Landscape.setThreshold(_VegetableLandscapeThreshold);
-			_VegetableLandscape->Landscape.setTileNear(_VegetableLandscapeTileNear);
-			_VegetableLandscape->Landscape.setupStaticLight(_VegetableLandscapeDiffuse, _VegetableLandscapeAmbient, 1);
-			_VegetableLandscape->Landscape.loadVegetableTexture(_VegetableTexture);
-			_VegetableLandscape->Landscape.setupVegetableLighting(_VegetableAmbient, _VegetableDiffuse, _VegetableLightDir);
-			_VegetableLandscape->Landscape.setVegetableWind(_VegetableWindDir, _VegetableWindFreq, _VegetableWindPower, _VegetableWindBendMin);
+			_VegetableLandscape->getLandscape().setThreshold(_VegetableLandscapeThreshold);
+			_VegetableLandscape->getLandscape().setTileNear(_VegetableLandscapeTileNear);
+			_VegetableLandscape->getLandscape().setupStaticLight(_VegetableLandscapeDiffuse, _VegetableLandscapeAmbient, 1);
+			_VegetableLandscape->getLandscape().loadVegetableTexture(_VegetableTexture);
+			_VegetableLandscape->getLandscape().setupVegetableLighting(_VegetableAmbient, _VegetableDiffuse, _VegetableLightDir);
+			_VegetableLandscape->getLandscape().setVegetableWind(_VegetableWindDir, _VegetableWindFreq, _VegetableWindPower, _VegetableWindBendMin);
 
 
 			// Load the zones.
@@ -3262,7 +3262,7 @@ bool		CObjectViewer::createVegetableLandscape()
 				// load
 				zoneFile.serial(zone);
 				// append to landscape
-				_VegetableLandscape->Landscape.addZone(zone);
+				_VegetableLandscape->getLandscape().addZone(zone);
 				// progress
 				dlgProgress.ProgressBar.SetPos(i*100/nbZones);
 
@@ -3289,7 +3289,7 @@ bool		CObjectViewer::createVegetableLandscape()
 
 			// Create collisions objects.
 			_VegetableCollisionManager= new CVisualCollisionManager;
-			_VegetableCollisionManager->setLandscape(&_VegetableLandscape->Landscape);
+			_VegetableCollisionManager->setLandscape(&_VegetableLandscape->getLandscape());
 			_VegetableCollisionEntity= _VegetableCollisionManager->createEntity();
 		}
 		catch (const Exception &e)
@@ -3354,7 +3354,7 @@ void		CObjectViewer::enableLandscapeVegetable(bool enable)
 	// update view.
 	if(_VegetableLandscape)
 	{
-		_VegetableLandscape->Landscape.enableVegetable(_VegetableEnabled);
+		_VegetableLandscape->getLandscape().enableVegetable(_VegetableEnabled);
 	}
 }
 
@@ -3366,18 +3366,18 @@ void		CObjectViewer::refreshVegetableLandscape(const NL3D::CTileVegetableDesc &t
 	if(_VegetableLandscape)
 	{
 		// first disable the vegetable, to delete any vegetation
-		_VegetableLandscape->Landscape.enableVegetable(false);
+		_VegetableLandscape->getLandscape().enableVegetable(false);
 
 		// Then change all the tileSet of all the TileBanks.
-		for (sint ts=0; ts<_VegetableLandscape->Landscape.TileBank.getTileSetCount (); ts++)
+		for (sint ts=0; ts<_VegetableLandscape->getLandscape().TileBank.getTileSetCount (); ts++)
 		{
-			CTileSet *tileSet=_VegetableLandscape->Landscape.TileBank.getTileSet (ts);
+			CTileSet *tileSet=_VegetableLandscape->getLandscape().TileBank.getTileSet (ts);
 			// change the vegetableTileDesc of this tileSet.
 			tileSet->setTileVegetableDesc(tvdesc);
 		}
 
 		// re-Enable the vegetable (if wanted).
-		_VegetableLandscape->Landscape.enableVegetable(_VegetableEnabled);
+		_VegetableLandscape->getLandscape().enableVegetable(_VegetableEnabled);
 	}
 }
 
@@ -3387,21 +3387,21 @@ void		CObjectViewer::setVegetableWindPower(float w)
 {
 	_VegetableWindPower= w;
 	if(_VegetableLandscape)
-		_VegetableLandscape->Landscape.setVegetableWind(_VegetableWindDir, _VegetableWindFreq, _VegetableWindPower, _VegetableWindBendMin);
+		_VegetableLandscape->getLandscape().setVegetableWind(_VegetableWindDir, _VegetableWindFreq, _VegetableWindPower, _VegetableWindBendMin);
 }
 // ***************************************************************************
 void		CObjectViewer::setVegetableWindBendStart(float w)
 {
 	_VegetableWindBendMin= w;
 	if(_VegetableLandscape)
-		_VegetableLandscape->Landscape.setVegetableWind(_VegetableWindDir, _VegetableWindFreq, _VegetableWindPower, _VegetableWindBendMin);
+		_VegetableLandscape->getLandscape().setVegetableWind(_VegetableWindDir, _VegetableWindFreq, _VegetableWindPower, _VegetableWindBendMin);
 }
 // ***************************************************************************
 void		CObjectViewer::setVegetableWindFrequency(float w)
 {
 	_VegetableWindFreq= w;
 	if(_VegetableLandscape)
-		_VegetableLandscape->Landscape.setVegetableWind(_VegetableWindDir, _VegetableWindFreq, _VegetableWindPower, _VegetableWindBendMin);
+		_VegetableLandscape->getLandscape().setVegetableWind(_VegetableWindDir, _VegetableWindFreq, _VegetableWindPower, _VegetableWindBendMin);
 }
 
 

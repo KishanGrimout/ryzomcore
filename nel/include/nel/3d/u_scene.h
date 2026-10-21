@@ -272,7 +272,7 @@ public:
 	virtual	void			deleteSkeleton(USkeleton &skel)=0;
 
 	/// Create a landscape. There could be many Landscape per Scene (Driver? :). But never tested :).
-	virtual	ULandscape		*createLandscape()=0;
+	virtual	ULandscape		*createLandscape(ULandscape *land = NULL)=0;
 	/// delete a landscape.
 	virtual	void			deleteLandscape(ULandscape *land)=0;
 

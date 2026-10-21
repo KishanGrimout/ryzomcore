@@ -774,20 +774,20 @@ int runViewer(std::vector<SPaintZone> &zones, NL3D::CTileBank &bank, ZPPAINT::CP
 
 		// The painting landscape (paint.cpp myThread).
 		NL3D::CLandscapeModel *theLand = (NL3D::CLandscapeModel *)scene.createModel(NL3D::LandscapeModelId);
-		theLand->Landscape.setTileNear(10000.f);
-		theLand->Landscape.TileBank = bank;
-		theLand->Landscape.enableAutomaticLighting(false);
-		theLand->Landscape.setupAutomaticLightDir(g_LightDirection);
-		theLand->Landscape.setupStaticLight(g_LightDiffuse, g_LightAmbiant, g_LightMultiply);
+		theLand->getLandscape().setTileNear(10000.f);
+		theLand->getLandscape().TileBank = bank;
+		theLand->getLandscape().enableAutomaticLighting(false);
+		theLand->getLandscape().setupAutomaticLightDir(g_LightDirection);
+		theLand->getLandscape().setupStaticLight(g_LightDiffuse, g_LightAmbiant, g_LightMultiply);
 
 		for (size_t i = 0; i < zones.size(); ++i)
 		{
 			NL3D::CZone zone;
 			buildDisplayZone(zones[i], zone);
-			if (!theLand->Landscape.addZone(zone))
+			if (!theLand->getLandscape().addZone(zone))
 				fprintf(stderr, "WARNING: addZone failed for zone %u '%s'\n", zones[i].ZoneId, zones[i].Name.c_str());
 		}
-		theLand->Landscape.setRefineMode(true);
+		theLand->getLandscape().setRefineMode(true);
 
 		// Camera looking at the bbox center from a sensible distance (standalone starts from
 		// a canonical three-quarter view).
@@ -1020,7 +1020,7 @@ int runViewer(std::vector<SPaintZone> &zones, NL3D::CTileBank &bank, ZPPAINT::CP
 
 		if (core)
 		{
-			core->attachLandscape(&theLand->Landscape);
+			core->attachLandscape(&theLand->getLandscape());
 			paintListener.Core = core;
 			paintListener.Camera = camera;
 			paintListener.EditorUI = editorUI;
@@ -1042,7 +1042,7 @@ int runViewer(std::vector<SPaintZone> &zones, NL3D::CTileBank &bank, ZPPAINT::CP
 
 		// Scene point lights (CPaintLight parity - unconditional in the plugin's myThread)
 		{
-			uint nPaintLights = ZPCTX::setupPaintLights(lm, theLand->Landscape, scene);
+			uint nPaintLights = ZPCTX::setupPaintLights(lm, theLand->getLandscape(), scene);
 			if (g_verbose || nPaintLights)
 				printf("paint lights: %u point-light models\n", nPaintLights);
 		}
@@ -1125,8 +1125,8 @@ int runViewer(std::vector<SPaintZone> &zones, NL3D::CTileBank &bank, ZPPAINT::CP
 			// frame so screenshots show the Painter panel over the terrain.
 			udriver->clearBuffers(NLMISC::CRGBA(90, 90, 90));
 			uscene->render();
-			theLand->Landscape.setRefineMode(false);
-			theLand->Landscape.refineAll(pos);
+			theLand->getLandscape().setRefineMode(false);
+			theLand->getLandscape().refineAll(pos);
 			udriver->clearBuffers(NLMISC::CRGBA(90, 90, 90));
 			uscene->render();
 			// Dev-only: ZONE_PAINTER_SHOT_MODE=color|displace selects mode for panel shots .
@@ -1501,11 +1501,11 @@ int runViewer(std::vector<SPaintZone> &zones, NL3D::CTileBank &bank, ZPPAINT::CP
 				const NLMISC::CVector camPos = camMat.getPos();
 				// Full refine pair (mode true seed → refineAll → second render). Mode may already
 				// be false from the early seed; re-open progressive mode so refineAll rebuilds.
-				theLand->Landscape.setRefineMode(true);
+				theLand->getLandscape().setRefineMode(true);
 				udriver->clearBuffers(NLMISC::CRGBA(90, 90, 90));
 				uscene->render();
-				theLand->Landscape.setRefineMode(false);
-				theLand->Landscape.refineAll(camPos);
+				theLand->getLandscape().setRefineMode(false);
+				theLand->getLandscape().refineAll(camPos);
 				udriver->clearBuffers(NLMISC::CRGBA(90, 90, 90));
 				uscene->render();
 			}
@@ -1824,10 +1824,10 @@ int runViewer(std::vector<SPaintZone> &zones, NL3D::CTileBank &bank, ZPPAINT::CP
 				uscene->render();
 				// First frame: full refine then re-render so the swapped buffer is not the
 				// coarse seed tessellation (same refine-then-second-render as shot).
-				if (theLand->Landscape.getRefineMode())
+				if (theLand->getLandscape().getRefineMode())
 				{
-					theLand->Landscape.setRefineMode(false);
-					theLand->Landscape.refineAll(camKey.getPos());
+					theLand->getLandscape().setRefineMode(false);
+					theLand->getLandscape().refineAll(camKey.getPos());
 					udriver->clearBuffers(NLMISC::CRGBA(90, 90, 90));
 					uscene->render();
 				}

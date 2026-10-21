@@ -333,12 +333,12 @@ void displayZones()
 	CNELU::swapBuffers();
 	
 	Landscape = (CLandscapeModel*)CNELU::Scene->createModel(LandscapeModelId);
-	Landscape->Landscape.setNoiseMode (ViewerCfg.LandscapeNoise);
-	Landscape->Landscape.setTileNear(ViewerCfg.LandscapeTileNear);
-	Landscape->Landscape.setThreshold(ViewerCfg.LandscapeThreshold);
+	Landscape->getLandscape().setNoiseMode (ViewerCfg.LandscapeNoise);
+	Landscape->getLandscape().setTileNear(ViewerCfg.LandscapeTileNear);
+	Landscape->getLandscape().setThreshold(ViewerCfg.LandscapeThreshold);
 
-	Landscape->Landscape.enableAutomaticLighting (ViewerCfg.AutoLight);
-	Landscape->Landscape.setupAutomaticLightDir (ViewerCfg.LightDir);
+	Landscape->getLandscape().enableAutomaticLighting (ViewerCfg.AutoLight);
+	Landscape->getLandscape().setupAutomaticLightDir (ViewerCfg.LightDir);
 
 	// Enable Additive Tiles.
 	Landscape->enableAdditive(true);
@@ -356,7 +356,7 @@ void displayZones()
 		heightMap.OriginY= ViewerCfg.HeightFieldOriginY;
 		heightMap.SizeX = ViewerCfg.HeightFieldSizeX;
 		heightMap.SizeY = ViewerCfg.HeightFieldSizeY;
-		Landscape->Landscape.setHeightField(heightMap);
+		Landscape->getLandscape().setHeightField(heightMap);
 	}
 
 	
@@ -368,7 +368,7 @@ void displayZones()
 	try 
 	{
 		CIFile bankFile (ViewerCfg.BanksPath + "/" + ViewerCfg.Bank);
-		Landscape->Landscape.TileBank.serial(bankFile);
+		Landscape->getLandscape().TileBank.serial(bankFile);
 	}
 	catch(const Exception &)
 	{
@@ -377,15 +377,15 @@ void displayZones()
 	}
 
 	if (!ViewerCfg.TilesPath.empty())
-		Landscape->Landscape.TileBank.setAbsPath (ViewerCfg.TilesPath + "/");
+		Landscape->getLandscape().TileBank.setAbsPath (ViewerCfg.TilesPath + "/");
 
 	if (ViewerCfg.UseDDS)
 	{
-		Landscape->Landscape.TileBank.makeAllExtensionDDS();
+		Landscape->getLandscape().TileBank.makeAllExtensionDDS();
 	}
 
 	if (ViewerCfg.AllPathRelative)
-		Landscape->Landscape.TileBank.makeAllPathRelative();
+		Landscape->getLandscape().TileBank.makeAllPathRelative();
 
 	string::size_type idx = ViewerCfg.Bank.find(".");
 	string farBank = ViewerCfg.Bank.substr(0,idx);
@@ -398,7 +398,7 @@ void displayZones()
 	try
 	{
 		CIFile farbankFile(ViewerCfg.BanksPath + "/" + farBank);
-		Landscape->Landscape.TileFarBank.serial(farbankFile);
+		Landscape->getLandscape().TileFarBank.serial(farbankFile);
 	}
 	catch(const Exception &)
 	{
@@ -406,23 +406,23 @@ void displayZones()
 		nlerror (tmp.c_str());
 	}
 	
-	if ( ! Landscape->Landscape.initTileBanks() )
+	if ( ! Landscape->getLandscape().initTileBanks() )
 	{
 		nlwarning( "You need to recompute bank.farbank for the far textures" );
 	}
 	string seasonPostfix = farBank.substr(idx,3);
-	Landscape->Landscape.TileBank.postfixTileFilename (seasonPostfix.c_str());
-	Landscape->Landscape.TileBank.postfixTileVegetableDesc (seasonPostfix.c_str());
+	Landscape->getLandscape().TileBank.postfixTileFilename (seasonPostfix.c_str());
+	Landscape->getLandscape().TileBank.postfixTileVegetableDesc (seasonPostfix.c_str());
 
 	// Init light color
 	CNELU::clearBuffers(CRGBA(0,0,0));
 	ViewerCfg.TextContext.printfAt(0.5f,0.5f,"Initializing Light...");
 	CNELU::swapBuffers();
 	
-	Landscape->Landscape.setupStaticLight (ViewerCfg.LandDiffuse, ViewerCfg.LandAmbient, 1.1f);
+	Landscape->getLandscape().setupStaticLight (ViewerCfg.LandDiffuse, ViewerCfg.LandAmbient, 1.1f);
 
 	// Init collision manager
-	CollisionManager.init( &(Landscape->Landscape), 200);
+	CollisionManager.init( &(Landscape->getLandscape()), 200);
 	
 
 	// Preload of TileBank
@@ -430,16 +430,16 @@ void displayZones()
 	ViewerCfg.TextContext.printfAt(0.5f,0.5f,"Loading TileBank...");
 	CNELU::swapBuffers();
 	
-	for (int ts=0; ts<Landscape->Landscape.TileBank.getTileSetCount (); ts++)
+	for (int ts=0; ts<Landscape->getLandscape().TileBank.getTileSetCount (); ts++)
 	{
-		CTileSet *tileSet=Landscape->Landscape.TileBank.getTileSet (ts);
+		CTileSet *tileSet=Landscape->getLandscape().TileBank.getTileSet (ts);
 		sint tl;
 		for (tl=0; tl<tileSet->getNumTile128(); tl++)
-			Landscape->Landscape.flushTiles (CNELU::Scene->getDriver(), (uint16)tileSet->getTile128(tl), 1);
+			Landscape->getLandscape().flushTiles (CNELU::Scene->getDriver(), (uint16)tileSet->getTile128(tl), 1);
 		for (tl=0; tl<tileSet->getNumTile256(); tl++)
-			Landscape->Landscape.flushTiles (CNELU::Scene->getDriver(), (uint16)tileSet->getTile256(tl), 1);
+			Landscape->getLandscape().flushTiles (CNELU::Scene->getDriver(), (uint16)tileSet->getTile256(tl), 1);
 		for (tl=0; tl<CTileSet::count; tl++)
-			Landscape->Landscape.flushTiles (CNELU::Scene->getDriver(), (uint16)tileSet->getTransition(tl)->getTile (), 1);
+			Landscape->getLandscape().flushTiles (CNELU::Scene->getDriver(), (uint16)tileSet->getTransition(tl)->getTile (), 1);
 	}
 		
 
@@ -458,7 +458,7 @@ void displayZones()
 			file.close();
 
 			// Add it to landscape.
-			Landscape->Landscape.addZone(zone);
+			Landscape->getLandscape().addZone(zone);
 
 			// Add it to collision manager.
 			CollisionManager.addZone(zone.getZoneId());
@@ -595,13 +595,13 @@ void displayZones()
 
 
 		// Change TileNear
-		float tileNear = Landscape->Landscape.getTileNear();
+		float tileNear = Landscape->getLandscape().getTileNear();
 		if(CNELU::AsyncListener.isKeyPushed(KeyHOME))
 			tileNear += tileNearStep;
 		if(CNELU::AsyncListener.isKeyPushed(KeyEND))
 			tileNear -= tileNearStep;
 		if(tileNear<0) tileNear = 0;
-		Landscape->Landscape.setTileNear(tileNear);
+		Landscape->getLandscape().setTileNear(tileNear);
 
 
 		// Change Z-Far
@@ -615,14 +615,14 @@ void displayZones()
 
 
 		// Change Threshold
-		float threshold = Landscape->Landscape.getThreshold();
+		float threshold = Landscape->getLandscape().getThreshold();
 		if(CNELU::AsyncListener.isKeyPushed(KeyINSERT))
 			threshold += thresholdStep;
 		if(CNELU::AsyncListener.isKeyPushed(KeyDELETE))
 			threshold -= thresholdStep;
 		if(threshold<0.001f) threshold = 0.001f;
 		if(threshold>0.1f) threshold = 0.1f;
-		Landscape->Landscape.setThreshold(threshold);
+		Landscape->getLandscape().setThreshold(threshold);
 
 
 		// Switch between wired and filled scene display

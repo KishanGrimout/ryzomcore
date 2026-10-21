@@ -37,7 +37,7 @@ namespace NL3D
  */
 class CLandscapeUser : public ULandscape
 {
-private:
+protected:
 	// The Scene.
 	CScene				*_Scene;
 	// The landscape, owned by the scene.
@@ -49,11 +49,11 @@ public:
 
 	/// \name Object
 	// @{
-	CLandscapeUser(CScene *scene)
+	CLandscapeUser(CScene *scene, NLMISC::CClassId landscapeModelId = LandscapeModelId)
 	{
 		nlassert(scene);
 		_Scene= scene;
-		_Landscape= (CLandscapeModel*)_Scene->createModel(LandscapeModelId);
+		_Landscape= (CLandscapeModel*)_Scene->createModel(landscapeModelId);
 	}
 	virtual	~CLandscapeUser() NL_OVERRIDE;
 	// @}

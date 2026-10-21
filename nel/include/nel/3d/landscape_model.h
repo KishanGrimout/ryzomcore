@@ -46,7 +46,10 @@ public:
 	static	void	registerBasic();
 
 public:
-	CLandscape		Landscape;
+	CLandscape	&getLandscape()
+	{
+		return *Landscape;
+	}
 
 	/** Set additive value
 	  *
@@ -108,7 +111,7 @@ public:
 	virtual	void	profileRender() NL_OVERRIDE;
 
 	/// Actual Clip and Render!! See Implementation for Why this scheme
-	void			clipAndRenderLandscape();
+	virtual void	clipAndRenderLandscape();
 
 
 	/// \name ShadowMap Behavior. Receive only
@@ -119,11 +122,14 @@ public:
 	// @}
 
 protected:
-	CLandscapeModel();
-	virtual ~CLandscapeModel() NL_OVERRIDE {}
+	CLandscapeModel(CLandscape* landscape = NULL);
+	virtual ~CLandscapeModel() NL_OVERRIDE;
 
-private:
+	// NOTE(dynworld): the following members were private in stock NeL; the dynamic-world landscape models
+	// (derived CLandscapeModel / CLandscapeUser classes) need to access them.
 	static CTransform	*creator() {return new CLandscapeModel;}
+
+	CLandscape*		Landscape;
 
 	bool	_ActiveAdditive;
 	float	_Additive;

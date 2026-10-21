@@ -46,7 +46,7 @@ public:
 
 	virtual void					setLandscape(ULandscape *landscape) NL_OVERRIDE
 	{
-		_Manager.setLandscape(&(dynamic_cast<CLandscapeUser*>(landscape)->getLandscape()->Landscape));
+		_Manager.setLandscape(&(dynamic_cast<CLandscapeUser*>(landscape)->getLandscape()->getLandscape()));
 	}
 
 	virtual UVisualCollisionEntity	*createEntity() NL_OVERRIDE

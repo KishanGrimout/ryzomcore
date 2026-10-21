@@ -596,7 +596,7 @@ void zpSetShowArrows(bool on)
 	g_ShowArrows = on;
 	if (g_PaintCtx.Land && g_PaintCtx.Bank)
 	{
-		NL3D::CLandscape &land = g_PaintCtx.Land->Landscape;
+		NL3D::CLandscape &land = g_PaintCtx.Land->getLandscape();
 		if (on)
 		{
 			// The arrow tile lives at the _texture_tiles ROOT, which the bank resolve does
@@ -2064,7 +2064,7 @@ void zpSeasonApplyFlush()
 	// Live flush (preferred over full session reload): re-remap CPath season postfixes,
 	// releaseTiles so CTextureFile re-looks up, optional preload flush.
 	ZPCTX::reloadLandscapeSeasonTextures(*g_PaintCtx.Bank, g_PaintCtx.BankPath,
-	                                     &g_PaintCtx.Land->Landscape, driver, g_PreloadTiles);
+	                                     &g_PaintCtx.Land->getLandscape(), driver, g_PreloadTiles);
 	// Palette previews follow the season : regenerate/invalidate cached thumbs.
 	zpRebuildTilesetPalette();
 }

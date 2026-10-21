@@ -168,8 +168,8 @@ public:
 	 */
 	bool			removeZone(uint16 zoneId);
 
-	/// Disconnect, and Delete all zones.
-	void			clear();
+	/// Disconnect, and Delete all zones. NOTE(dynworld): virtual, see CDynLandscape (dynamic world).
+	virtual void			clear();
 
 	/// Verify the binding of patchs of all zones. throw EBadBind if error.
 	void			checkBinds();
@@ -220,7 +220,8 @@ public:
 	 *	Because no VB are created for invisible patchs.
 	 *	call setDriver() before any clip().
 	 */
-	void			setDriver(IDriver *drv);
+	/// NOTE(dynworld): virtual, see CDynLandscape (dynamic world).
+	virtual void			setDriver(IDriver *drv);
 	/** Set by CLandscapeModel during water reflection renders (NULL
 	  * otherwise): the far passes then select the deeper water clip bias,
 	  * filling the void bleed at water horizons with distant terrain. */
@@ -238,7 +239,7 @@ public:
 	 *	\param refineCenter should be the position of the camera
 	 *	\param frontVector should be the J vector of the camera
 	 */
-	void			render(const CVector &refineCenter, const CVector &frontVector, const CPlane pyramid[NL3D_TESSBLOCK_NUM_CLIP_PLANE], bool doTileAddPass=false, bool doVegetables=true);
+	virtual void			render(const CVector &refineCenter, const CVector &frontVector, const CPlane pyramid[NL3D_TESSBLOCK_NUM_CLIP_PLANE], bool doTileAddPass=false, bool doVegetables=true);
 
 	/// Refine/Geomorph ALL the tesselation of the landscape, from the view point refineCenter. Even if !RefineMode.
 	void			refineAll(const CVector &refineCenter);
@@ -315,12 +316,12 @@ public:
 	 *	\param radius is the radius of the 'cylinder'
 	 *	\param cone if true, the object tested is a cone (radius goes to end)
 	 */
-	float			getCameraCollision(const CVector &start, const CVector &end, float radius, bool cone);
+	virtual float			getCameraCollision(const CVector &start, const CVector &end, float radius, bool cone);
 
 	/** Get the ray collision against the TileFaces (ie only under approx 50 m)
 	 *	return a [0,1] value. 0 => collision at start. 1 => no collision.
 	 */
-	float			getRayCollision(const CVector &start, const CVector &end);
+	virtual float			getRayCollision(const CVector &start, const CVector &end);
 
 	// @}
 
@@ -815,11 +816,14 @@ private:
 	bool			_AutomaticLighting;
 	CVector			_AutomaticLightDir;
 
-private:
+protected:
 	// Internal only. Force load of the tile (with TileBank).
 	void			loadTile(uint16 tileId);
 	void			releaseTile(uint16 tileId);
+	// NOTE(dynworld): public slice (legacy shape) for the dynamic-world material pipeline.
+public:
 	ITexture		*findTileTexture(const std::string &textName, bool clamp);
+protected:
 	CPatchRdrPass	*findTileRdrPass(const CPatchRdrPass &pass);
 
 	// Tile LightMap mgt. NB: a lightmap is now a 2x2 tiles lightmap (10x10 pixels).

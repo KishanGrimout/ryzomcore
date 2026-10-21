@@ -422,11 +422,11 @@ bool captureTopDownThumbnail(NLMISC::CBitmap &out, const std::vector<uint> *zone
 
 	// Render with refine convergence (ligo renders repeatedly for the same reason);
 	// no swapBuffers anywhere - the scribbled backbuffer is redrawn before any swap.
-	g_PaintCtx.Land->Landscape.setRefineMode(true);
+	g_PaintCtx.Land->getLandscape().setRefineMode(true);
 	udriver->clearBuffers(NLMISC::CRGBA(40, 40, 40));
 	uscene->render();
-	g_PaintCtx.Land->Landscape.setRefineMode(false);
-	g_PaintCtx.Land->Landscape.refineAll(camMat.getPos());
+	g_PaintCtx.Land->getLandscape().setRefineMode(false);
+	g_PaintCtx.Land->getLandscape().refineAll(camMat.getPos());
 	for (int pass = 0; pass < 3; ++pass)
 	{
 		udriver->clearBuffers(NLMISC::CRGBA(40, 40, 40));
@@ -439,7 +439,7 @@ bool captureTopDownThumbnail(NLMISC::CBitmap &out, const std::vector<uint> *zone
 	// Restore camera + live refine mode
 	camera->setMatrix(oldMat);
 	camera->setFrustum(oldFrust);
-	g_PaintCtx.Land->Landscape.setRefineMode(true);
+	g_PaintCtx.Land->getLandscape().setRefineMode(true);
 
 	if (full.getWidth() == 0 || full.getHeight() == 0)
 		return false;

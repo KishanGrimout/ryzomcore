@@ -836,12 +836,14 @@ void			CSceneUser::deleteSkeleton(USkeleton &skel)
 
 // ***************************************************************************
 
-ULandscape		*CSceneUser::createLandscape()
+ULandscape		*CSceneUser::createLandscape(ULandscape *land)
 {
 	NL3D_HAUTO_ELT_SCENE;
-
+	CLandscapeUser *newLand = (CLandscapeUser*) land;
+	if (newLand == NULL)
+		newLand = new CLandscapeUser(&_Scene);
 	// The component is auto added/deleted to _Scene in ctor/dtor.
-	return _Landscapes.insert(new CLandscapeUser(&_Scene));
+	return _Landscapes.insert(newLand);
 }
 void			CSceneUser::deleteLandscape(ULandscape *land)
 {
