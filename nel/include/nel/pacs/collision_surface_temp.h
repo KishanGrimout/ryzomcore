@@ -303,7 +303,7 @@ public:
 
 
 	/// CGlobalRetriever instance possibly colliding movement.
-	std::vector<sint32>				CollisionInstances;
+	std::vector<uint64>				CollisionInstances;
 
 
 	/// For testMove/doMove, prec settings.

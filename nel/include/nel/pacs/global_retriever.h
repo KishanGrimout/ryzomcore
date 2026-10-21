@@ -203,7 +203,7 @@ public:
 	/** Select the instances that are in contact with the given bbox.
 	 * The selected instances are stored in CCollisionSurfaceTemp.CollisionInstances
 	 */
-	bool							selectInstances(const NLMISC::CAABBox &bbox, CCollisionSurfaceTemp &cst, UGlobalPosition::TType type = UGlobalPosition::Unspecified) const;
+	virtual bool					selectInstances(const NLMISC::CAABBox &bbox, CCollisionSurfaceTemp &cst, UGlobalPosition::TType type = UGlobalPosition::Unspecified) const;
 
 	/// Get the retriever bank associated to this global retriever.
 	const CRetrieverBank			*getRetrieverBank() const { return _RetrieverBank; }
@@ -275,7 +275,7 @@ public:
 
 
 	/// Retrieves the position of an estimated point in the global retriever (double instead.)
-	UGlobalPosition					retrievePosition(const NLMISC::CVectorD &estimated, double threshold, UGlobalPosition::TType retrieveSpec) const;
+	UGlobalPosition					retrievePosition(const NLMISC::CVectorD &estimated, double threshold, UGlobalPosition::TType retrieveSpec) const NL_OVERRIDE;
 
 
 
@@ -405,7 +405,7 @@ public:
 	 * \return list of collision against surface, ordered by increasing time. this is a synonym for
 	 * cst.CollisionDescs. NB: this array may be modified by CGlobalRetriever on any collision call.
 	 */
-	const TCollisionSurfaceDescVector	*testCylinderMove(const UGlobalPosition &start, const NLMISC::CVector &delta,
+	virtual const TCollisionSurfaceDescVector	*testCylinderMove(const UGlobalPosition &start, const NLMISC::CVector &delta,
 		float radius, CCollisionSurfaceTemp &cst) const;
 	/** Test a movement of a bbox against surface world.
 	 * \param start is the start position of the movement.
@@ -431,7 +431,7 @@ public:
 	 *	of the data needed to performing his task.
 	 * \return new position of the entity.
 	 */
-	UGlobalPosition		doMove(const UGlobalPosition &start, const NLMISC::CVector &delta, float t, CCollisionSurfaceTemp &cst, bool rebuildChains=false) const;
+	virtual UGlobalPosition		doMove(const UGlobalPosition &start, const NLMISC::CVector &delta, float t, CCollisionSurfaceTemp &cst, bool rebuildChains=false) const;
 	/** retrieve a surface by its Id. NULL if not found or if -1.
 	 */
 	const CRetrievableSurface	*getSurfaceById(const CSurfaceIdent &surfId) const;

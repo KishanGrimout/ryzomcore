@@ -71,7 +71,8 @@ public:
 	};
 
 	/// The id of the instance referred by this global position.
-	sint32								InstanceId;
+	/// NOTE(dynworld): sint64 so dynamic-world sector ids (TGenericSectorId = uint64) can be stored in it.
+	sint64								InstanceId;
 
 	/// The local position within the CLocalRetriever referred by the instance (cf. InstanceId)
 	ULocalPosition						LocalPosition;

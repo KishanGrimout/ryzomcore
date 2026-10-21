@@ -135,7 +135,8 @@ public:
 	/// Get all the primitives in the container
 	virtual	void				getPrimitives(std::vector<const UMovePrimitive *> &dest) const NL_OVERRIDE;
 
-private:
+	// NOTE(dynworld): protected (was private) so derived dynamic-world move containers can tune the cell size.
+protected:
 	/// Current test time
 	uint32						_TestTime;
 
