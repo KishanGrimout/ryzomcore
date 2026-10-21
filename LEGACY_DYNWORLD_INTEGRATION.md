@@ -28,7 +28,7 @@ Recipes:
 - Extract one file's legacy delta: locate its marker with `Select-String -Path <patch> -Pattern 'diff --git a/code/<path>'`, then read that section up to the next marker (a small PowerShell script writing the section to `C:\Users\mynam\AppData\Local\Temp\opencode` works well).
 - Compare legacy working copy vs current repo (more reliable for *modified* files): `git -C D:\Programmation\ryzomcore\code diff --no-index --stat D:\Programmation\ryzomcore_old\ryzomcore_dev\code\<path> D:\Programmation\ryzomcore\code\<path>` (the current repo root corresponds to legacy `code/`).
 - If the legacy-vs-current diff is much bigger than the patch section for that file, the excess is repository modernization drift, not dynworld work; port only the patch delta.
-- Build & test: configured VS solution at `build\RyzomCore.sln` (or `cmake --build build --config Debug --target <target>`); tests via `ctest --test-dir build` or run the `unit_test` binaries under `build\bin`; `build_test\` holds a second configure used previously. CMake source-list changes require re-running configure before building.
+- Build & test: configured VS solution at `build\RyzomCore.sln` (or `cmake --build build --config Release --target <target>`). **Validation config is Release, on user instruction (2026-10-21)**: `nelmisc_r.lib`, `ryzom_gameshare_r.lib`, test binary `build\bin\Release\nel_misc_test.exe` (Release-only test note: `ut_misc_vectori.test.cpp::invalidFloatingPointConversionsAreClamped` is `#if !defined(NL_DEBUG)`, so Release runs 62 tests vs 61 in Debug — expected; Release run passes 62/62). Tests via `ctest --test-dir build` or run the `unit_test` binaries under `build\bin`; `build_test\` holds a second configure used previously. CMake source-list changes require re-running configure before building. All Phase-2 validations recorded in Debug were re-verified in Release (2026-10-21): `nelmisc_r`, `nelpacs_r`, `nel3d_r`, `ryzom_gameshare_r`, `nel_misc_test` 62/62, plus consumer canaries `zone_lighter.exe`/`ig_lighter.exe`/`unbuild_land.exe` (build via per-project MSBuild, since `cmake --build --target <tool>` hits MSB1009 for tool targets).
 
 Audit conclusions already verified (do NOT re-derive):
 
@@ -113,7 +113,7 @@ Units are small and independently buildable; do them in the listed order (N1 →
 
 #### U-N1 — PACS retriever widening (prerequisite for U-N3)
 
-- [ ] Port.
+- [x] Done. `collision_surface_temp.h` (`CollisionInstances` → `std::vector<uint64>`), `u_global_position.h` (`InstanceId` → `sint64` + note), `u_global_retriever.h` (3-arg `retrievePosition` now pure `virtual ... =0`, comment added), `global_retriever.h` (`virtual` on `selectInstances`/`testCylinderMove`/`doMove`, `NL_OVERRIDE` on the 3-arg implementation). Validation: `nelpacs` builds clean; `nel_misc_test` 61/61 pass (exit 0). NB: the run initially failed on `CUTMiscParallelTaskManager.drainsQueuedAndNestedTasks` — pre-existing arithmetic bug in the test itself (43 expected, but `CWorkerContextTask` never increments that counter, so max = 32 counting + 9 recursive = 41). Fixed the constant to 41 with a comment; manager behavior was correct (both worker-context tasks did run, `2u` expectation passed).
 
 Files and exact changes:
 
@@ -128,7 +128,7 @@ Validation: build `nelpacs`; run the existing NeL PACS unit tests.
 
 #### U-N2 — `CMoveContainer` subclass exposure
 
-- [ ] Port.
+- [x] Done. `move_container.h`: first `private:` block (members incl. `-_CellWidth`/`_CellHeight`) is now `protected:` (commented); the `clear()` block stays private as it has no dyn consumer. Validation: `nelpacs` rebuilds clean (header change recompiled the pacs cpps via PCH).
 
 `nel/include/nel/pacs/move_container.h`: make the `private:` block containing `_CellWidth`/`_CellHeight` `protected:` so `CDynMoveContainer`'s ctor can set them to 16. Legacy also protected the `clear()`/`_TestTime` blocks — only open what has a consumer.
 
@@ -136,41 +136,25 @@ Validation: build `nelpacs` + PACS unit tests.
 
 #### U-N3 — game_share dyn-PACS adapters
 
-- [ ] Port `dyn_retriever_bank.{h,cpp}`, `dyn_global_retriever.{h,cpp}`, `dyn_move_container.{h,cpp}` from the legacy working copy (same relative path `code/ryzom/common/src/game_share/dynworld/`) and register them in `ryzom/common/src/game_share/CMakeLists.txt` (`SRC_DYNWORLD` for the three .cpp, `PRIV_DYNWORLD_H` for the four .h).
-
-Content: thin subclasses — `CRetrieverBank` (nothing extra needed: ctor, `allLoaded`, `loadRetriever`/`unloadRetriever`, `diff` are all public in the current repo), `CGlobalRetriever` subclass with `CMapBase* m_map` and LOD-selection/height overrides (13 total overrides; adapt any `_InternalCST` access to the modern `getInternalCST()` accessor), `CMoveContainer` subclass (its `.cpp` is ~27 lines; assigns `_CellWidth`/`_CellHeight = 16.`). `CDynGlobalRetriever` defines the tuning globals `g_prefetchBound`/`g_forceRegenerate` referenced by client code.
-
-Dependencies: U-N1, U-N2. Validation: build `Ryzom::gameshare`.
+- [x] Done. Copied `dyn_retriever_bank.{h,cpp}`, `dyn_move_container.{h,cpp}`, `dyn_global_retriever.{h,cpp}` from the legacy working copy into `ryzom/common/src/game_share/dynworld/`, with adaptations: dropped legacy `#include "stdpch.h"` (game_share target has no PCH; ported dynworld files include directly) and added explicit includes (`nel/misc/hierarchical_timer.h` for the H_AUTO macros, `<limits>`); replaced all compiled-path `_InternalCST` accesses with the modern `getInternalCST()` accessor (the `#if 0` reference blocks keep the legacy code untouched, commented or excluded). Registered the 3 cpps in `SRC_DYNWORLD` and the 3 headers in `PRIV_DYNWORLD_H` of `game_share/CMakeLists.txt`. Note for future sessions: files copied out of the Mercurial working copy are read-only — clear `IsReadOnly` before editing. Validation: `ryzom_gameshare` builds clean (exit 0).
 
 #### U-N4 — Landscape subclassing chain (central 3D unit)
 
-- [ ] Port.
-
-Goal: allow the client to inject a derived landscape implementation (`CDynLandscapeModel`/`CDynLandscape`/`CDynLandscapeUser`) without touching NeL call sites.
-
-- `nel/include/nel/3d/landscape_model.h` + `nel/src/3d/landscape_model.cpp`: value member `CLandscape Landscape` → heap `CLandscape* Landscape` + `getLandscape()` accessor; protected ctor `CLandscapeModel(CLandscape* = NULL)` (NULL → `new CLandscape()`); new dtor `delete Landscape`; make `clipAndRenderLandscape()` virtual; move the section boundary so `_RenderWorldMatrix`, `CurrentPyramid`, `ClusteredPyramid*`, and `creator()` are protected; ~50 mechanical `Landscape.` → `Landscape->` rewrites in the .cpp.
-- `nel/include/nel/3d/landscape_user.h` + `nel/src/3d/landscape_user.cpp`: members `protected`; ctor gains `NLMISC::CClassId landscapeModelId = LandscapeModelId`; ~40 `_Landscape->Landscape.` → `_Landscape->getLandscape().` renames.
-- `nel/include/nel/3d/landscape.h`: add `virtual` to `clear`, `setDriver`, `render`, `getCameraCollision`, `getRayCollision` (only these five; CDynLandscape only calls base methods otherwise).
-- `nel/include/nel/3d/u_scene.h` + `nel/include/nel/3d/scene_user.h` + `nel/src/3d/scene_user.cpp`: `createLandscape()` → `createLandscape(ULandscape* land = NULL)` (declaration, pure-virtual declaration, and implementation that inserts the caller-built `CLandscapeUser`-derived object).
-- `nel/src/3d/scene.cpp`: one line `pLM->Landscape.initAnimatedLightIndex` → `pLM->getLandscape()...`.
-- `nel/include/nel/3d/visual_collision_manager_user.h`: one line `getLandscape()->Landscape` → `getLandscape()->getLandscape()`.
-
-IMPORTANT — same-commit call-site migration: `nel/tools/3d/plugin_max/nel_patch_paint/paint.cpp` (12 sites using `landscape.Landscape.…`) and `ryzom/client/src/decal.cpp` (~line 633, `landscapeModel->Landscape.` → `getLandscape()`). The legacy fork never built the Max plugin so those sites stayed stale there; do not skip them.
-
-Validation: build `nel3d` and the affected tool targets; landscape render regression (legacy landscape sessions must render unchanged).
+- [x] Done. Applied to: `landscape_model.h` (public `getLandscape()`, `virtual clipAndRenderLandscape()`, `CLandscapeModel(CLandscape* = NULL)` protected ctor, declared dtor, `creator()` + all members protected incl. new `CLandscape* Landscape`); `landscape_model.cpp` (pointer ctor + `new CLandscape()` default, dtor `delete Landscape`, all `Landscape.` member accesses → `Landscape->`; NOTE the modern water-reflection clip sites that the legacy patch predates needed the same treatment); `landscape.h` (`virtual` on `clear`/`setDriver`/`render`/`getCameraCollision`/`getRayCollision` + `findTileTexture` placed in a public slice between `protected` blocks, exactly like legacy); `landscape_user.h` (`protected` members, ctor `CLandscapeUser(CScene*, NLMISC::CClassId = LandscapeModelId)`); `landscape_user.cpp` (55 × `_Landscape->Landscape.` → `_Landscape->getLandscape().`); `u_scene.h` + `scene_user.{h,cpp}` + `scene.cpp` (`createLandscape(ULandscape* land = NULL)`; `pLM->getLandscape().initAnimatedLightIndex`); `visual_collision_manager_user.h` (`getLandscape()->getLandscape()`).
+- Same-commit call-site migration — the audit's "13 sites" undercounted. Full sweep found stale `.Landscape`/`->Landscape` member accesses also in: `nel/tools/3d/ligo/plugin_max/script.cpp`, `nel/tools/3d/object_viewer/object_viewer.cpp`, `nel/tools/3d/zone_painter/{board_session,save_ops,script_and_ui,viewer}.cpp`, `nel/tools/3d/zviewer/zviewer.cpp`, `studio/src/plugins/object_viewer/vegetable/vegetable_editor.cpp`, plus `nel_patch_paint/paint.cpp` (audited) and `ryzom/client/src/decal.cpp` (audited). All migrated to `getLandscape()` (pointer and `&`-taken cases both). The only remaining pattern is a comment in `zone_painter/main.cpp`.
+- Validation status: `nel3d` builds clean; real consumer canaries `zone_lighter`, `ig_lighter`, `unbuild_land` build clean. `object_viewer` and the Max plugins (`nel_patch_paint`, `ligo/plugin_max`) are NOT in the current build configuration — their migrated sources are text-verified only; `ryzom/client/src/decal.cpp` gets compile validation when the client target builds (U-C1).
 
 #### U-N5 — `CInstanceGroup::CInstance` init fix
 
-- [ ] Port.
+- [x] Done. `nel/src/3d/scene_group.cpp` ctor now deterministically sets `nParent = -1`, `SunContribution = 0`, `Light[0..NumStaticLightPerInstance)= 0xFF` (comment added). Validation: `nel3d` rebuild clean.
 
-`nel/src/3d/scene_group.cpp`: in the `CInstance` ctor, initialize previously garbage members: `nParent = -1`, `SunContribution = 0`, `Light[i] = 0xFF`. Correctness/determinism fix for the runtime-generated instance groups used by `CDynInstanceGroupUser`.
-
-Validation: build `nel3d`.
 
 #### Optional NeL units (explicit decisions, not blockers)
 
-- **U-M1 — `nlNSleep` + task-poll retiming** (depends on nothing): `nel/include/nel/misc/common.h` + `nel/src/misc/common.cpp` gain `void nlNSleep(uint32 ns)` (waitable timer / nanosleep); `CTaskManager::sleepTask()` switches `nlSleep(10000)` → `nlSleep(500)` (0.5 ms). This changes polling throughput globally for all `CTaskManager` users — decide deliberately, then combine with U-N3 if accepted.
+- **U-M1 — `nlNSleep` + task-poll retiming** (depends on nothing): `nel/include/nel/misc/common.h` + `nel/src/misc/common.cpp` gain `void nlNSleep(uint32 ns)` (legacy impl: waitable timer / nanosleep); `CTaskManager::sleepTask()` switches `nlSleep(10)` (10 ms, verified in current repo at `task_manager.h:71`) → `nlNSleep(500000)` (intended 0.5 ms — CAREFUL: the legacy Windows `nlNSleep` passes nanoseconds directly to `SetWaitableTimer`, which counts 100-ns units, so it actually sleeps 50 ms there; only the Unix branch is correct. If ported, fix the units and consider `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`). This changes polling throughput globally for all `CTaskManager` users (notably `CAsyncFileManager`) — decide deliberately. The ported `CParallelTaskManager` uses its own `nlSleep(1)` and is unaffected.
 - **U-M2 — runnable-stats profiling stack** (defer to U-C7): `nel/include/nel/misc/thread.h` (`NL_RUNNABLE_STATS`, `IRunnable::TStats`) + `nel/include/nel/misc/task_manager.h`/`nel/src/misc/task_manager.cpp` (`CTasksStats` singleton + stats hooks), all behind `#ifndef FINAL`. Only consumer is legacy `main_loop_debug.cpp` `displayDebugGeneration()` (`CTasksStats::getInstance().dump()`).
+- **U-M3 — `CFastReaderWriter` port** (done on user request after session review):
+  - [x] Done. The lock-free reader/writer lock the legacy fork appended inside `reader_writer.{h,cpp}` (it was never stock/upstream) is now ported: declaration after `CRWSynchronized` in `nel/include/nel/misc/reader_writer.h` (needed `#include <atomic>`; legacy's `#include "tds.h"` dropped — nothing in the class references it), full implementation appended in `nel/src/misc/reader_writer.cpp`. Two documented adaptations: the legacy `NL_PROF_F()`/PIX scoped-profiling calls were removed (project rule), and the legacy spin-backoff `nlNSleep(100)` became `std::this_thread::yield()` (the legacy `nlNSleep` implementation passes nanoseconds directly to `SetWaitableTimer`, which counts 100-ns units — platform-ambiguous on Windows; the scheduler yield is portable). `ryzom/common/src/game_share/dynworld/polyvox_defs.h` `VolumeRWLock` restored to `mutable NLMISC::CFastReaderWriter m_lock;` with `upgradeLock()`/`downgradeLock()` re-enabled — matching the legacy fork exactly. Validation: `nelmisc` and `ryzom_gameshare` build clean; `nel_misc_test` 61/61. Context: `VolumeRWLock` is the lock type of the live voxel volume (`TVolume = PolyVox::PagedVolume<TVoxel, VolumeRWLock>` in `map.cpp` `new TVolume(pager, …, MultiThreadChunkCache)`, used by `master_pager`/`map_cache_manager`/`mapgen`). NOTE: the lock interacts thread-wise with U-M1 (legacy spin design assumed a low-granularity sleep kernel); if U-M1 is accepted later it is a fairer backoff, but the yield-based port is not dependent on it.
 - **PIX tooling — excluded** by project rule: `CMakeModules/FindPix.cmake`, `NL_PROF*`/`NL_USE_PIX` in `hierarchical_timer.h`, `WITH_PIX` option, PIX includes/libs in `nel/src/misc/CMakeLists.txt`.
 
 ### 3. Server integration — planned as units U-S1 … U-S5
@@ -329,7 +313,7 @@ Dependencies: none strictly (safe after U-C3/U-C4 for validation). Validation: c
 ## Skip list (legacy noise — do not port)
 
 - **PIX (project rule):** `FindPix.cmake`, all `NL_PROF*`/`NL_USE_PIX` code, `WITH_PIX` option, PIX links in `nel/src/misc/CMakeLists.txt`.
-- **nel/misc already-present or obsolete:** `system_info` `getNumHWThreads()` (ported parallel_task_manager calls `std::thread::hardware_concurrency()` directly); `CFastReaderWriter` (no live consumers; `polyvox_defs.h` uses `NLMISC::CReaderWriter`; recursive variants only in `.orig` backups); `string_common.h`/`variable.h`/`algo.cpp` cosmetic churn; legacy ms-flags in `nel.cmake` (MSVC12 flags, `-std=c++14`, `/Zm` removals — modern target-based C++17 config is authoritative); `FindExternal.cmake` blank-line no-op.
+- **nel/misc already-present or obsolete:** `system_info` `getNumHWThreads()` (ported parallel_task_manager calls `std::thread::hardware_concurrency()` directly); `CFastReaderWriter` was SKIPPED first and then ported as U-M3 on user request (see that section); `string_common.h`/`variable.h`/`algo.cpp` cosmetic churn; legacy ms-flags in `nel.cmake` (MSVC12 flags, `-std=c++14`, `/Zm` removals — modern target-based C++17 config is authoritative); `FindExternal.cmake` blank-line no-op.
 - **NeL 3D comment-only:** `material.h`, `u_instance_group.h`, `vegetable_manager.h`, `zone_search.h`, `landscape.cpp`, `zone.cpp`, dead `friend class CTransformUser` in `instance_group_user.h`.
 - **NeL PACS obsolete:** `global_retriever.cpp`, `local_retriever.{h,cpp}` (`__Tips` → `_Tips` hygiene; the `_Tips` refs in current .cpp sit in dead commented blocks), `move_container.cpp`, `retriever_instance.{h,cpp}` (typo + dead-code deletion), `u_move_container.h`, and the `primitive_world_image.{h,cpp}` 3D-bbox addition (defined but never read anywhere in the legacy tree).
 - **server:** `frontend_service` `nlSleep(0)`→`nlSleep(1)`; `ai_service` whitespace/comment/`<functional>`; `gpm_service` comment/typo cleanups + `WPM_VISION_CELL_CHECK_ON_UPDATE` guard + `PLAYER_POSITION_HISTORY_MAX_SIZE` constant; EGS `guild_inv.cpp`/`outpost_squad.cpp`/`shard_unifier_client.cpp`/`entity_callbacks.cpp`/`character_inventory_manipulation.cpp` include-shuffles and typos; EGS/IOS PCH gutting; `/bigobj` (already present in current CMake); `msg.xml` `DISABLE_LOGOUT_BUTTON` rename; `generate_module_interface.xslt` banner (verify once — skip if current generated files already carry it); cfg path/SQL/listen-host local-environment lines; the gpm2 `world_entity.cpp` `&&`→`||` bot-check bug (active bug — deliberately excluded).
