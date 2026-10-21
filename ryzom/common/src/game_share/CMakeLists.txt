@@ -130,7 +130,7 @@ TARGET_LINK_LIBRARIES(ryzom_gameshare
 		NeL::net
 		NeL::ligo
 		NeL::georges
-		NeL::sevenzip
+		Ryzom::sevenzip
 		PRIVATE
 		ZLIB::ZLIB
 )
