@@ -127,7 +127,9 @@ TEST_F(CUTMiscParallelTaskManager, drainsQueuedAndNestedTasks)
         manager.addTask(new CWorkerContextTask(manager, workerContextTasks), 0, 2);
     }
 
-    EXPECT_EQ(43u, completed.load());
+    // 32 counting tasks + 9 recursive tasks (depth 8 => itself + 8 children).
+    // CWorkerContextTask only increments workerContextTasks, not this counter.
+    EXPECT_EQ(41u, completed.load());
     EXPECT_EQ(2u, workerContextTasks.load());
 }
 
