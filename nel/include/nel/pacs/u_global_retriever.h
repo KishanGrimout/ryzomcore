@@ -94,9 +94,10 @@ public:
 
 	/**
 	  * Retrieves the position of an estimated point in the global retriever (double instead.),
-	  * with specification of whether it is on landscape or in interior
+	  * with specification of whether it is on landscape or in interior.
+	  * NOTE(dynworld): pure virtual so dynamic-world retrieval (per-sector voxels) can override it.
 	  */
-	UGlobalPosition					retrievePosition(const NLMISC::CVectorD &estimated, double threshold, UGlobalPosition::TType retrieveSpec) const;
+	virtual UGlobalPosition			retrievePosition(const NLMISC::CVectorD &estimated, double threshold, UGlobalPosition::TType retrieveSpec) const =0;
 
 	/**
 	  * Retrieves the position of an estimated point in the global retriever.
