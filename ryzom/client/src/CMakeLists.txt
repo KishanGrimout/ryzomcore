@@ -222,7 +222,6 @@ IF(WITH_RYZOM_CLIENT)
               NeL::3d
               NeL::gui
               NeL::sound
-              NeL::sevenzip
               NeL::web
               Ryzom::clientsheets
               Ryzom::gameshare
