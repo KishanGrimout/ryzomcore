@@ -941,7 +941,7 @@ private:
 	// contextual mouse handling
 	static void checkCursor();
 	// Forward click from contextual cursor to current tool
-	static void mouseClick(bool rightButton, bool dblClick);
+	static void mouseClick(NLMISC::TMouseButton button, bool dblClick);
 	// callback to reload the editor when one of the config files changed
 	static void reloadEditorCallback(const std::string &filename);
 	// update the display of decals created when the player select an instance in the scene

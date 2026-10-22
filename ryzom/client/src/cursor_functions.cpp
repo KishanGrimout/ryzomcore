@@ -39,8 +39,11 @@
 #include "interface_v3/guild_manager.h"
 #include "nel/3d/u_instance.h"
 #include "main_loop.h"
+#include "dynworld/dyn_continent.h"
+#include "dynworld/map_client.h"
 // GAME SHARE
 #include "game_share/bot_chat_types.h"
+#include "game_share/dynworld/material_library.h"
 // r2
 #include "r2/editor.h"
 
@@ -74,29 +77,30 @@ static NLMISC::CRefPtr<NLMISC::CCDBNodeLeaf> s_UserCharFade;
 // FUNCTIONS //
 ///////////////
 void checkUnderCursor();
-void contextSelect			(bool rightClick, bool dblClick);
-void contextAttack			(bool rightClick, bool dblClick);
-void contextQuarter			(bool rightClick, bool dblClick);
-void contextLoot			(bool rightClick, bool dblClick);
-void contextPickUp			(bool rightClick, bool dblClick);
-void contextTradeItem		(bool rightClick, bool dblClick);
-void contextTradePhrase		(bool rightClick, bool dblClick);
-void contextDynamicMission	(bool rightClick, bool dblClick);
-void contextStaticMission	(bool rightClick, bool dblClick);
-void contextTradePact		(bool rightClick, bool dblClick);
-void contextCreateGuild		(bool rightClick, bool dblClick);
-void contextNews			(bool rightClick, bool dblClick);
-void contextTeleport		(bool rightClick, bool dblClick);
-void contextFaction 		(bool rightClick, bool dblClick);
-void contextCosmetic		(bool rightClick, bool dblClick);
-void contextTalk			(bool rightClick, bool dblClick);
-void contextExtractRM		(bool rightClick, bool dblClick);
-void contextMission			(bool rightClick, bool dblClick);
-void contextWebPage			(bool rightClick, bool dblClick);
-void contextWebIG			(bool rightClick, bool dblClick);
-void contextRingMission		(bool rightClick, bool dblClick);
-void contextOutpost			(bool rightClick, bool dblClick);
-void contextBuildTotem		(bool rightClick, bool dblClick);
+void contextSelect		(TMouseButton button, bool dblClick);
+void contextAttack		(TMouseButton button, bool dblClick);
+void contextQuarter		(TMouseButton button, bool dblClick);
+void contextLoot		(TMouseButton button, bool dblClick);
+void contextPickUp		(TMouseButton button, bool dblClick);
+void contextTradeItem		(TMouseButton button, bool dblClick);
+void contextTradePhrase		(TMouseButton button, bool dblClick);
+void contextDynamicMission		(TMouseButton button, bool dblClick);
+void contextStaticMission		(TMouseButton button, bool dblClick);
+void contextTradePact		(TMouseButton button, bool dblClick);
+void contextCreateGuild		(TMouseButton button, bool dblClick);
+void contextNews		(TMouseButton button, bool dblClick);
+void contextTeleport		(TMouseButton button, bool dblClick);
+void contextFaction		(TMouseButton button, bool dblClick);
+void contextCosmetic		(TMouseButton button, bool dblClick);
+void contextTalk		(TMouseButton button, bool dblClick);
+void contextExtractRM		(TMouseButton button, bool dblClick);
+void contextMission		(TMouseButton button, bool dblClick);
+void contextWebPage		(TMouseButton button, bool dblClick);
+void contextWebIG		(TMouseButton button, bool dblClick);
+void contextRingMission		(TMouseButton button, bool dblClick);
+void contextOutpost		(TMouseButton button, bool dblClick);
+void contextBuildTotem		(TMouseButton button, bool dblClick);
+void contextSetVoxel		(TMouseButton button, bool dblClick);
 //-----------------------------------------------
 // initContextualCursor :
 // Initialize Contextual Cursor.
@@ -135,6 +139,7 @@ void initContextualCursor()
 	ContextCur.add(true,	"OUTPOST",			string(""),							0.0f,	checkUnderCursor,	contextOutpost);
 	ContextCur.add(true,	"RING MISSION",		string(""),							0.0f,	checkUnderCursor,	contextRingMission);
 	ContextCur.add(true,	"BUILD_TOTEM",		string("uimGcmChooseBuilding"),		0.0f,	checkUnderCursor,	contextBuildTotem);
+	ContextCur.add(true,	"VOXEL",			string("uimGcmExtractRM"),			0.0f,	checkUnderCursor,	contextSetVoxel);
 }// initContextualCursor //
 
 //-----------------------------------------------
@@ -260,6 +265,10 @@ void checkUnderCursor()
 	// Get the pointer position (in pixel)
 	sint32 x, y;
 	cursor->getPointerPos(x, y);
+
+	// reset voxel selection
+	if (CDynContinent::MAP)
+		CDynContinent::MAP->unselectVoxel();
 
 	// Over the interface ?
 	if (CWidgetManager::getInstance()->getWindowUnder(x, y) == nullptr)
@@ -575,6 +584,43 @@ void checkUnderCursor()
 					cursor->setCursor("curs_default.tga");
 					selectedInstanceURL.clear();
 				}
+				else if (CDynContinent::MAP != NULL && CDynContinent::MAP->isVoxelSelectionActive())
+				{
+					// voxels selection here
+					// TODO: use map deferred command
+					CDynContinent::MAP->selectVoxelUnderPos(cursX, cursY);
+					if (CDynContinent::MAP->isVoxelSelected())
+					{
+						SlotUnderCursor = CLFECOMMON::INVALID_SLOT; // invalidate previous entity selection
+						// TODO: use map deferred command
+						Voxel selectedVoxel = CDynContinent::MAP->getVoxelAt(CDynContinent::MAP->voxelUnderCursor());
+						std::string matNameStr("");
+						if (selectedVoxel.getType() == Voxel::Raw)
+						{
+							const char* matName = CMaterialLibrary::instance().getMaterialName(selectedVoxel.getMaterial());
+							const char* envName = CMaterialLibrary::instance().getEnvironmentName(selectedVoxel.getBiome());
+							if (envName != nullptr)
+								matNameStr = envName;
+							if (matName != nullptr)
+							{
+								matNameStr += " ";
+								matNameStr += matName;
+								matNameStr += " (" + toString((uint)selectedVoxel.getDensity()) + ")";
+							}
+						}
+						else if (selectedVoxel.getType() == Voxel::Object)
+						{
+							CSheetId sheetId(selectedVoxel.getSheetId());
+							matNameStr = sheetId.toString();
+						}
+						else
+						{
+							matNameStr = "Unknown voxel";
+						}
+						if (ContextCur.context("VOXEL", 0.f, matNameStr))
+							return;
+					}
+				}
 			}
 
 			SlotUnderCursor = CLFECOMMON::INVALID_SLOT;
@@ -595,7 +641,7 @@ void checkUnderCursor()
 // Select what is under the cursor.
 // \Warning Be sure the checkUnderCursor and contextSelect are done after entites removed.
 //-----------------------------------------------
-void contextSelect(bool /* rightClick */, bool /* dblClick */)
+void contextSelect(TMouseButton /* button */, bool /* dblClick */)
 {
 	// Push a message with the entity target (in slot).
 	if(SlotUnderCursor != CLFECOMMON::INVALID_SLOT)
@@ -608,9 +654,9 @@ void contextSelect(bool /* rightClick */, bool /* dblClick */)
 //-----------------------------------------------
 // contextAttack :
 //-----------------------------------------------
-void contextAttack(bool rightClick, bool dblClick)
+void contextAttack(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -627,9 +673,9 @@ void contextAttack(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextQuarter :
 //-----------------------------------------------
-void contextQuarter(bool rightClick, bool dblClick)
+void contextQuarter(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -639,9 +685,9 @@ void contextQuarter(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextLoot :
 //-----------------------------------------------
-void contextLoot(bool rightClick, bool dblClick)
+void contextLoot(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -651,9 +697,9 @@ void contextLoot(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextPickUp :
 //-----------------------------------------------
-void contextPickUp(bool rightClick, bool dblClick)
+void contextPickUp(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -663,9 +709,9 @@ void contextPickUp(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextTradeItem :
 //-----------------------------------------------
-void contextTradeItem(bool rightClick, bool dblClick)
+void contextTradeItem(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -675,9 +721,9 @@ void contextTradeItem(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextTradePhrase :
 //-----------------------------------------------
-void contextTradePhrase(bool rightClick, bool dblClick)
+void contextTradePhrase(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -687,9 +733,9 @@ void contextTradePhrase(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextDynamicMission :
 //-----------------------------------------------
-void contextDynamicMission(bool rightClick, bool dblClick)
+void contextDynamicMission(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -699,9 +745,9 @@ void contextDynamicMission(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextStaticMission :
 //-----------------------------------------------
-void contextStaticMission(bool rightClick, bool dblClick)
+void contextStaticMission(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -711,9 +757,9 @@ void contextStaticMission(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextTradePact :
 //-----------------------------------------------
-void contextTradePact(bool rightClick, bool dblClick)
+void contextTradePact(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -723,9 +769,9 @@ void contextTradePact(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextCreateGuild :
 //-----------------------------------------------
-void contextCreateGuild(bool rightClick, bool dblClick)
+void contextCreateGuild(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -735,9 +781,9 @@ void contextCreateGuild(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextNews :
 //-----------------------------------------------
-void contextNews(bool rightClick, bool dblClick)
+void contextNews(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -747,9 +793,9 @@ void contextNews(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextTeleport :
 //-----------------------------------------------
-void contextTeleport(bool rightClick, bool dblClick)
+void contextTeleport(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -759,9 +805,9 @@ void contextTeleport(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextFaction :
 //-----------------------------------------------
-void contextFaction(bool rightClick, bool dblClick)
+void contextFaction(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -771,9 +817,9 @@ void contextFaction(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextCosmetic :
 //-----------------------------------------------
-void contextCosmetic(bool rightClick, bool dblClick)
+void contextCosmetic(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -783,9 +829,9 @@ void contextCosmetic(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextTalk :
 //-----------------------------------------------
-void contextTalk(bool rightClick, bool dblClick)
+void contextTalk(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -838,9 +884,9 @@ void contextTalk(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextExtractRM :
 //-----------------------------------------------
-void contextExtractRM(bool rightClick, bool dblClick)
+void contextExtractRM(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -851,9 +897,9 @@ void contextExtractRM(bool rightClick, bool dblClick)
 // contextMission :
 // Callback for dynamic missions
 //-----------------------------------------------
-void contextMission(bool rightClick, bool dblClick)
+void contextMission(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -863,9 +909,9 @@ void contextMission(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextWebPage :
 //-----------------------------------------------
-void contextWebPage(bool rightClick, bool dblClick)
+void contextWebPage(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -875,9 +921,9 @@ void contextWebPage(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextWebIG :
 //-----------------------------------------------
-void contextWebIG(bool rightClick, bool dblClick)
+void contextWebIG(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	CInterfaceManager *IM = CInterfaceManager::getInstance();
 	CInterfaceElement *pGC = CWidgetManager::getInstance()->getElementFromId("ui:interface:bot_chat_object");
@@ -905,9 +951,9 @@ void contextWebIG(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextOutpost
 //-----------------------------------------------
-void contextOutpost(bool rightClick, bool dblClick)
+void contextOutpost(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -917,9 +963,9 @@ void contextOutpost(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextRingMission
 //-----------------------------------------------
-void contextRingMission(bool rightClick, bool dblClick)
+void contextRingMission(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
@@ -929,11 +975,47 @@ void contextRingMission(bool rightClick, bool dblClick)
 //-----------------------------------------------
 // contextBuildTotem :
 //-----------------------------------------------
-void contextBuildTotem(bool rightClick, bool dblClick)
+void contextBuildTotem(TMouseButton button, bool dblClick)
 {
-	if(rightClick)
+	if(button == rightButton)
 		return;
 	if( ClientCfg.DblClickMode && !dblClick)
 		return;
 	UserEntity->moveToTotemBuildingPhrase(SlotUnderCursor,MaxExtractionDistance, std::numeric_limits<uint>::max(), std::numeric_limits<uint>::max(), true );
 }// contextBuildTotem //
+
+//-----------------------------------------------
+// contextSetVoxel :
+//-----------------------------------------------
+Voxel::DensityType g_voxelFillSpeed = 255; // increased density per second
+void contextSetVoxel(TMouseButton button, bool dblClick)
+{
+	if (dblClick)
+		return;
+
+	if (button == leftButton)
+	{
+		// TODO: use map deferred command
+		Voxel selectedVoxel = CDynContinent::MAP->getVoxelAt(CDynContinent::MAP->voxelUnderCursor());
+		if (selectedVoxel.getDensity() != Voxel::MaxDensity)
+		{
+			Voxel::DensityType newDensity = std::min<uint>(g_voxelFillSpeed + selectedVoxel.getDensity(), Voxel::MaxDensity);
+			selectedVoxel.setDensity(newDensity);
+			// TODO: use map deferred command
+			CDynContinent::MAP->setVoxelAt(CDynContinent::MAP->voxelUnderCursor(), selectedVoxel);
+		}
+		else
+		{
+			selectedVoxel.setDensity(g_voxelFillSpeed);
+			// TODO: use map deferred command
+			CDynContinent::MAP->setVoxelAt(CDynContinent::MAP->emptyVoxelUnderCursor(), selectedVoxel);
+		}
+	}
+	else if (button == middleButton)
+	{
+		Voxel emptyVoxel;
+		emptyVoxel.setType(Voxel::Air);
+		// TODO: use map deferred command
+		CDynContinent::MAP->setVoxelAt(CDynContinent::MAP->voxelUnderCursor(), emptyVoxel);
+	}
+}// contextSetVoxel //

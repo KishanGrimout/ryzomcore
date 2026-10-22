@@ -40,7 +40,7 @@ class CContextualCursor
 public:
 	/// Callback function to call per context.
 	typedef void (*TFunc) (void);
-	typedef void (*TFunc2) (bool,bool);
+	typedef void(*TFunc2) (NLMISC::TMouseButton, bool);
 
 protected:
 	typedef struct
@@ -77,7 +77,7 @@ public:
 	// Check if there is an entity under the cursor.
 	void check();
 	/// Execute the Action according to the cursor state.
-	void execute(bool rightClick, bool dblClick);
+	void execute(NLMISC::TMouseButton button, bool dblClick);
 };
 
 

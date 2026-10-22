@@ -268,11 +268,11 @@ Dependencies: U-N3, U-C4. Validation: `ryzom_client` Release build clean. Runtim
 
 #### U-C6 — interaction/UI
 
-- [ ] Port.
+- [x] Done (2026-10-22). Cross-cutting click-parameter change (`bool rightClick` → `NLMISC::TMouseButton`, adds middle-button support) applied to: `contextual_cursor.{h,cpp}` (`TFunc2` typedef + `execute()`), `cursor_functions.cpp` (all `contextXxx` decls/defs + `r2`-editor routing), `motion/user_controls.{h,cpp}` (`execActionCursorPos` + `_MiddleClickStart/_MiddleClickEnd` members + middle dbl-click tracking + middle-release action hook), `motion/modes/ai_mode.cpp` (same middle-click tracking + call sites), `r2/editor.{h,cpp}` (`CEditor::mouseClick` → `button == leftButton` / `else if (button == rightButton)`.).
+- `cursor_functions.cpp`: dynworld includes, "VOXEL" context (`uimGcmExtractRM` cursor texture), `CDynContinent::MAP->unselectVoxel()` reset in `checkUnderCursor`, and the voxel-under-cursor selection branch (r2-instance else path) with a `CMaterialLibrary` name + density readout; new `contextSetVoxel` + module-local `Voxel::DensityType g_voxelFillSpeed = 255` (left = fill/raise density, middle = carve to Air; density ops on `CDynContinent::MAP`, TODO markers for deferred commands as in legacy).
+- Adaptations: legacy `ucstring` cursor name → `std::string` (mainline `CContextualCursor::context` exposes `const std::string &cursName`); mainline's `CContextualCursor::execute` needed the same treatment in user_controls' `dblClickLeft` reuse for the middle click (legacy had renamed nothing there). `contextARKitect` doesn't exist in current (mainline removed it; signature change N/A). Patch comment-typo hunks (`poiner`, `persitent`, `nex`) skipped per skip list.
 
-Cross-cutting signature change applied to all 5 files together: `contextual_cursor.{h,cpp}`, `cursor_functions.cpp`, `motion/user_controls.{h,cpp}`, `motion/modes/ai_mode.cpp`, `r2/editor.cpp` — click parameter `bool rightClick` → `NLMISC::TMouseButton` (adds middle-button support). Then `cursor_functions.cpp` VOXEL context menu via `CDynContinent::MAP->selectVoxelUnderPos/getVoxelAt/setVoxelAt`; `contextual_cursor.cpp` (CMaterialLibrary-based context detection).
-
-Dependencies: U-C4 (for `CDynContinent::MAP`); `decal.cpp` accessor change should already be done inside U-N4's same-commit migration. Validation: build + manual UI test.
+Dependencies: U-C4 (for `CDynContinent::MAP`). Validation: `ryzom_client` Release build clean. Manual UI test deferred (needs a dynworld session).
 
 #### U-C7 — debug tooling
 
