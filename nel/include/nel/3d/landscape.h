@@ -733,6 +733,8 @@ private:
 
 	/// \name VertexBuffer mgt.
 	// @{
+protected:
+	/// NOTE(dynworld): protected instead of private, used by CDynLandscape (dynamic world).
 	CRefPtr<IDriver>			_Driver;
 	CLandscapeVBAllocator		_Far0VB;
 	CLandscapeVBAllocator		_Far1VB;
