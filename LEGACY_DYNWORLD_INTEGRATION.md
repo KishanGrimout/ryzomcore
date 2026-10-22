@@ -297,10 +297,11 @@ Dependencies: none strictly (safe after U-C3/U-C4 for validation). Validation: `
 
 ### 5. Assets, configuration, and end-to-end validation
 
-- [ ] CI-relevant builds + tests: `nel misc/3d/pacs` (+ unit tests), `Ryzom::gameshare`, `Ryzom::servershare`, `ryzom_gpm2_service`, EGS, SU, SBS, `ryzom_client`.
+- [x] CI-relevant builds + tests (2026-10-22): Release builds clean for `nel3d`, `nelpacs`, `nel_misc_test`, `Ryzom::gameshare`, `Ryzom::servershare`, all 9 dynworld test targets, `ryzom_gpm2_service`, EGS, SU, SBS, `ryzom_client`. Tests: `nel_misc_test` 71/71, `nel_ligo_test` 1/1 (needed `redist\nel_tools_win_x64` on PATH for `libxml2.dll` — pre-existing repo dependency, unrelated), dynworld tests 35/35 (voxel 4, noise 3, mapgen_params 2, environment_definition 1, polyvox_defs 3, map_sector 10, disk_file_db 5, deferred_command 5, map_cache 2).
+- [ ] Local shard runtime: FS on `127.0.0.1`, `gpm2_service` + `used_continents.cfg` (`IsDynamicContinent = 1`), join a dynamic-continent session via the SU/SBS `joinDynamicWorld` web path. NB: the repo ships no server cfg set (U-S5) — needs the deployment-time cfg assembly from the legacy server cfg set as recorded there.
 - [ ] Local shard runtime: FS on `127.0.0.1`, `gpm2_service` + `used_continents.cfg` (`IsDynamicContinent = 1`), join a dynamic-continent session via the SU/SBS `joinDynamicWorld` web path.
 - [ ] Client round-trip: console `dyn_setvoxel` → EGS (`CLIENT:DYN_WORLD:SET_VOXEL`) → GPMS (`SET_VOXEL`) → `CMapServer::setVoxelAt()`; verify persistence through `map_cache_manager`/`slave_pager`.
-- [ ] Render smoke test: `g_rebuildShaders = 1`, `g_useVP = 1`, `g_usePP = 1` vs `g_renderLegacyLandscape = 1` contrast; ShowInfos 6 for generation stats (if U-M2 ported).
+- [ ] Render smoke test: `g_rebuildShaders = 1`, `g_useVP = 1`, `g_usePP = 1` vs `g_renderLegacyLandscape = 1` contrast; ShowInfos 6 for generation stats (U-M2 stats block stripped, so no CTasksStats dump section).
 - [ ] Regression: legacy (non-dyn) landscape sessions unchanged after U-N4's landscape pointer rewrite.
 
 ## Cross-cutting risks and decisions
