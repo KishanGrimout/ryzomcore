@@ -229,6 +229,7 @@ public:
 		LaunchEditor,
 		JoinSession,
 		JoinMainland,
+		JoinDynWorld,
 		NbJoinModes
 	};
 

@@ -51,6 +51,7 @@ namespace NLGEORGES
 }
 
 class CContinent;
+class CDynContinent;
 struct CFogState;
 
 /**
@@ -68,6 +69,9 @@ public:
 
 	/// preload continent sheets
 	void preloadSheets();
+
+	/// preload dynamic continent
+	void preloadDynContinent();
 
 	/// Load & setup all continent.
 	void load();
@@ -144,6 +148,7 @@ protected:
 	/// Current continent selected.
 	CContinent	*_Current;
 	CContinent	*_Hibernated;
+	CDynContinent *_Dynamic;
 
 	/// Map to find region name by alias
 	std::map<uint32, std::string> aliasToRegionMap;

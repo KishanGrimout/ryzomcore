@@ -1625,6 +1625,7 @@ void CEntityCL::updateCluster()
 // snapToGround :
 // Snap entity to the ground.
 //---------------------------------------------------
+bool g_noSnap = true;
 void CEntityCL::snapToGround()
 {
 	// While PACS not done, do not try to snap.
@@ -1693,6 +1694,9 @@ void CEntityCL::snapToGround()
 		// No primitive, vect = current pos.
 		else
 			vect = pos();
+
+		if (g_noSnap)
+			needSnap = false;
 
 		// Snap to the ground.
 		if(needSnap && _CollisionEntity)

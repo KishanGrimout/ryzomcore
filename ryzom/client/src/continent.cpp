@@ -933,7 +933,7 @@ void CContinent::unselect()
 	removeOutpost();
 
 	// Unregister callback on streaming
-	CAsyncFileManager::getInstance().registerTaskPriorityCallback(nullptr);
+	CAsyncFileManager::getInstance().unregisterTaskPriorityCallback(&ChangeTaskPriority);
 
 	// Remove the primitive for all entitites (new PACS coming soon and need new primitives).
 	EntitiesMngr.removeCollision();

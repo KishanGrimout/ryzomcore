@@ -249,11 +249,16 @@ Dependencies: U-N4, U-N5, U-C2. Validation: full `ryzom_client` build in Release
 
 #### U-C4 — session/flow integration
 
-- [ ] Port.
+- [x] Done (2026-10-22). Files and deltas:
+  - `continent.{h,cpp}`: `setup`/`select`/`unselect` → `virtual` (for `CDynContinent` to override; U-C2 base); dtor `registerTaskPriorityCallback(nullptr)` → `unregisterTaskPriorityCallback(&ChangeTaskPriority)` (both methods live on `CAsyncFileManager : CTaskManager`). `CChangeTaskPriority::getTaskPriority` already returned `currentPriority` in mainline (legacy `_Next` chain forwarding is dead code there) — no edit needed.
+  - `continent_manager.{h,cpp}`: `CDynContinent` fwd decl + `preloadDynContinent()` decl + `_Dynamic` member; in cpp: `dynworld/dyn_continent.h` include, `extern bool IsInDynWorldSession;`, call `preloadDynContinent()` at the end of `preloadSheets()` (the "TODO DYN: temp" `dynamic` continent cloned from the *newbieland* sheet selection name), and the dynworld routing at the top of `select(const CVectorD &pos, ...)`.
+  - `net_manager.cpp`: `bool IsInDynWorldSession = false;` (the read-side was already wired through `CUserCharMsg` incl. the game_share bit-3 field and the EGS `IsDynamicContinent` write side from U-N/U-S units).
+  - `init_main_loop.cpp`: `nel/3d/scene_user.h` + dynworld + `game_share/dynworld/material_library.h` includes; `extern bool IsInDynWorldSession;`; `CMaterialLibrary::instance().initialize("material_library.cfg")` at the end of the XML-db init block; landscape creation goes through `ULandscape* newLand = NULL; if (IsInDynWorldSession) { CDynLandscapeModel::registerBasic(); newLand = new CDynLandscapeUser(Scene); } Landscape = Scene->createLandscape(newLand);` — U-N4 `createLandscape(ULandscape* = NULL)` signature, mainline call sites unchanged.
+  - `far_tp.{h,cpp}`: `JoinDynWorld` mode (enum after `JoinMainland`, `_URLTable` keeps 3 initializers like legacy); shadowing `TSessionId sessionId(0)` removed from `JoinMainland` case (function param used by the new case); `JoinDynWorld` case calls `sb.joinDynamicWorld(charId, sessionId, ClientApp)` — SU/`ring_session_manager_itf` side already in place from U-S2/S3 (`st_dynworld` session type, JDW proxy + `on_joinDynamicWorld`).
+  - `entity_cl.cpp`: `bool g_noSnap = true;` before `snapToGround()` + `if (g_noSnap) needSnap = false;` (no PACS ground-snap inside dynamic worlds; toggled by a U-C7 command).
+- Adaptations/skips: the patch's comment-spelling hunks (`persitent`→`persistent`, `poiner`→`pointer`, `sheet_manager.h` grammar) and three pure whitespace/reindent hunks in `init_main_loop.cpp` skipped per the skip list. Legacy `sheet_manager.h` "plant sheet data exposure" turned out to be that grammar-only hunk — the plant data itself was already public from U-N5 groundwork.
 
-`continent.{h,cpp}` (virtual `setup`/`select()`/`unselect()`, `unregisterTaskPriorityCallback` in dtor); `continent_manager.cpp` (`preloadDynContinent()` silent "dynamic" continent from the newbieland sheet; route `select()` when `IsInDynWorldSession`); `init_main_loop.cpp` (`CMaterialLibrary::instance().initialize("material_library.cfg")`; in session: `registerBasic()` + `newLand = new CDynLandscapeUser(Scene)`, `Landscape = Scene->createLandscape(newLand)` — new signature from U-N4); `far_tp.{h,cpp}` (`joinDynamicWorld` path superseding the SHARD join in `JoinDynWorld` mode); `sheet_manager.h` (expose plant sheet data for PLANT voxel use); `entities.cpp`/`entity_cl.cpp` (`g_noSnap` minor hooks).
-
-Dependencies: U-C3, U-S1, U-S4. Validation: build `ryzom_client`; Phase 5 shard-join flow.
+Dependencies: U-C3, U-S1, U-S4. Validation: `ryzom_client` Release build clean. Runtime shard-join flow validation deferred to Phase 5.
 
 #### U-C5 — PACS hookup
 
