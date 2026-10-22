@@ -53,6 +53,7 @@
 #endif
 
 #define RZ_PRIM_ZEXT_BLOCK_AVOIDANCE	2.0f
+extern bool IsInDynWorldSession;
 
 
 H_AUTO_DECL(RZ_IGCallback)
@@ -215,7 +216,7 @@ void CIGCallback::CIGInstance::instanceGroupAdded()
 			NLPACS::UMoveContainer::getPACSCoordsFromMatrix(pos, angle, instanceMatrix);
 			// insert the matching primitive block
 			addedPrims.clear();
-			_Owner->_MoveContainer->addCollisionnablePrimitiveBlock(pbIt->second, 0, 1, &addedPrims, angle, pos, true, scale);
+			_Owner->_MoveContainer->addCollisionnablePrimitiveBlock(pbIt->second, 0, 1, &addedPrims, angle, pos, !IsInDynWorldSession, scale);
 			// Yoyo: For each primitive, increment its height, to avoid blocking bugs
 			for(uint i=0;i<addedPrims.size();i++)
 			{

@@ -29,6 +29,15 @@
 #include "user_entity.h"
 #include "ig_callback.h"
 #include "ig_client.h"
+#include "dynworld/dyn_continent.h"
+#include "dynworld/map_client.h"
+#include "game_share/dynworld/dyn_retriever_bank.h"
+#include "game_share/dynworld/dyn_global_retriever.h"
+#include "game_share/dynworld/dyn_move_container.h"
+
+// NeL
+#include "nel/pacs/retriever_bank.h"
+#include "nel/pacs/global_retriever.h"
 
 #ifdef DEBUG_NEW
 #define new DEBUG_NEW
@@ -65,6 +74,8 @@ const uint16 UserDataLift	= 1;
 const uint16 UserDataDoor	= 2;
 const uint16 UserDataEntity	= 3;
 
+extern bool IsInDynWorldSession;
+
 
 ///////////////
 // FUNCTIONS //
@@ -79,6 +90,15 @@ void initPACS(const char* rbank, const char* gr, NLMISC::IProgressCallback &/* p
 	nlassertex(RB==nullptr,   ("RB should be Null before the init."));
 	nlassertex(GR==nullptr,   ("GR should be Null before the init."));
 	nlassertex(PACS==nullptr, ("PACS should be Null before the init."));
+
+	if (IsInDynWorldSession)
+	{
+		RB = new CDynRetrieverBank(false);
+		GR = new CDynGlobalRetriever((CDynRetrieverBank*)RB, CDynContinent::MAP);
+		((CDynGlobalRetriever*)GR)->initAll(false);	// don't init instances as we serialized them
+		PACS = new CDynMoveContainer (((CDynGlobalRetriever*)GR), 16, 16, RYZOM_ENTITY_SIZE_MAX, 2, NELPACS_DEFAULT_MAX_TEST_ITERATION, NELPACS_DEFAULT_OT_SIZE);
+		return;
+	}
 
 	if(rbank != nullptr && gr != nullptr)
 	{
