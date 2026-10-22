@@ -240,15 +240,12 @@ Dependencies: U-C1; U-N3 indirectly (its globals). Validation: `ryzom_client`, `
 
 #### U-C3 — landscape stack (new client modules)
 
-- [ ] Port in order: `dyn_landscape_model.{h,cpp}` → `dyn_landscape.{h,cpp}` → `dyn_landscape_user.{h,cpp}` → `dyn_landscapeig_manager.{h,cpp}` → `dyn_instance_group_user.{h,cpp}`.
+- [x] Done (2026-10-22). Ported all five modules verbatim from legacy `code/ryzom/client/src/dynworld/` (in the dependency order of the unit, but as one cohesive build: `dyn_landscape_model` + `dyn_landscape` first, then `dyn_landscape_user` (1635 lines), `dyn_landscapeig_manager`, `dyn_instance_group_user`; `dyn_landscape.cpp` in fact includes `dynworld/dyn_landscape_user.h`, so the set is atomic). Adaptations:
+  - `CDynLandscape::render()` signature extended with the mainline-added trailing `bool doVegetables = true` param (current `CLandscape::render` overload; `(void)doVegetables;` in the impl — the dynworld renderer replaces the whole render path, vegetables included).
+  - `nel/include/nel/3d/landscape.h`: the `_Driver`/VB-allocator data section changed `private:` → `protected:` with a NOTE(dynworld) comment — legacy base had it protected and `CDynLandscape` manipulates `_Driver`/`_Far0VB`/...directly; U-N4 already made `clear()`/`setDriver()` virtual in this header, so this continues that pattern.
+  - PIX profiling: the fork's `NL_PROF`/`NL_PROF_F` macros are PIX tooling (skip list) and don't exist in the current `hierarchical_timer.h`; the 6 call sites in `dyn_landscapeig_manager.cpp`/`dyn_landscape_user.cpp` commented out with `//NLMISC-PIX-STRIPPED` (same treatment as the U-N-tagged `NL_PROF_F` in `map.cpp`).
 
-- `dyn_landscape_model` (~10 KB): `CDynLandscapeModel : CLandscapeModel` passing `new CDynLandscape()` to the param ctor; `DynLandscapeModelId = CClassId(0x5a573b56, 0x6b395830)`; overrides virtual `clipAndRenderLandscape()` (requires U-N4).
-- `dyn_landscape` (~15 KB): `CDynLandscape : CLandscape` — virtual `render()`/`mayRayCollision` overrides → mesh `castRay`; loads `dyn_landscape.vp1/.arbfp1` via base-name `CPath::lookup` + `compileVertex/PixelProgram`, `setUniform*`, triplanar; renders `CRegionMesh` + voxel highlight box; tunables `g_useVP`, `g_usePP`, `g_rebuildShaders`, `g_renderLegacyLandscape`, `g_clipBV`, `g_tighten`, `g_discardMaterial`, `g_texCoordGenMode` (module-local).
-- `dyn_landscape_user` (~55 KB / 1635 lines — the big one): `CDynLandscapeUser : CLandscapeUser` + `IVoxelListener`; 3-LOD mesh generation with `CSectorTransition`, deferred `CGenerateMeshCommand`/`CPrefetchSectorCommand`, `getPriorityToPlayer(CVectorI)`, `CMaterialLibrary::initialize("material_library.cfg")` + `bindMaterials`, texture set → `CTileBank` (uses `findTileTexture`, now public via U-N4 chain).
-- `dyn_landscapeig_manager` (~16 KB): per-sector plant IG loader (`CSector<6>`, `CGenerateIgCommand`, shape-bank preload/refcount, `flushTextures`, `IGCallbacks->addIG`).
-- `dyn_instance_group_user` (~19 KB): `CDynInstanceGroupUser : NL3D::UInstanceGroup` building IGs at runtime from PLANT-type `Voxel::Object` sheets (requires `CPlantSheet::getShapeName` and the U-N5 init fix).
-
-Dependencies: U-N4, U-N5, U-C2. Validation: build `ryzom_client`; headless init smoke test if feasible.
+Dependencies: U-N4, U-N5, U-C2. Validation: full `ryzom_client` build in Release — all six `dyn_*.obj` compiled and linked (`dyn_landscape_model`, `dyn_landscape`, `dyn_landscape_user`, `dyn_landscapeig_manager`, `dyn_instance_group_user`, plus U-C2's). Shader-asset loading (`dyn_landscape.vp1/.arbfp1`) is deferred to U-C8 code paths; headless init smoke test if feasible later.
 
 #### U-C4 — session/flow integration
 
