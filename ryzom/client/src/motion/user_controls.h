@@ -80,6 +80,8 @@ protected:
 	NLMISC::TTime	_LeftClickEnd;
 	NLMISC::TTime	_RightClickStart;
 	NLMISC::TTime	_RightClickEnd;
+	NLMISC::TTime	_MiddleClickStart;
+	NLMISC::TTime	_MiddleClickEnd;
 	NLMISC::TTime	_TimeBeforeMouseSlide;
 	NLMISC::TTime	_TimeLongClick;
 
@@ -143,7 +145,7 @@ private:
 	void commonSetView();
 
 	// Execute action depending on the cursor position (left/right click).
-	void execActionCursorPos(bool rightClick, bool dblClick);
+	void execActionCursorPos(NLMISC::TMouseButton button, bool dblClick);
 
 	// test merge the camera Yaw and user Yaw. Only in some cases
 	void testApplyCameraYawToUser();

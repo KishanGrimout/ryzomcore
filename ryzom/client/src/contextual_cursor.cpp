@@ -76,7 +76,7 @@ void CContextualCursor::check()
 // execute :
 // Execute the Action according to the cursor state.
 //-----------------------------------------------
-void CContextualCursor::execute(bool rightClick, bool dblClick)
+void CContextualCursor::execute(TMouseButton button, bool dblClick)
 {
 	// Call the function associated.
 	TContext::iterator it = _Contexts.find(_Context);
@@ -84,7 +84,7 @@ void CContextualCursor::execute(bool rightClick, bool dblClick)
 	{
 		TFunctions &functions =  (*it).second;
 		if(functions.execFunc)
-			functions.execFunc(rightClick, dblClick);
+			functions.execFunc(button, dblClick);
 	}
 }// execute //
 

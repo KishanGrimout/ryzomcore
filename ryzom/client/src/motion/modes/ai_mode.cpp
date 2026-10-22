@@ -124,13 +124,28 @@ void CUserControls::aiMode()
 		_RightClickEnd = T1;
 	}
 
+	// Middle Click and Dbl Click
+	bool dblClickMiddle = false;
+	if (EventsListener.isMouseButtonPushed(middleButton))
+	{
+		_MiddleClickStart = T1;
+	}
+	if (EventsListener.isMouseButtonReleased(middleButton))
+	{
+		if (T1 <= _MiddleClickEnd + CWidgetManager::getInstance()->getUserDblClickDelay())
+		{
+			dblClickMiddle = true;
+		}
+		_MiddleClickEnd = T1;
+	}
+
 	if (EventsListener.isMouseButtonReleased (rightButton))
 	{
 		// Short Right Click -> Check Action
 		if((T1-_RightClickStart) <= _TimeLongClick)
 		{
 			if(ClientCfg.SelectWithRClick)
-				execActionCursorPos(true,dblClickRight);
+				execActionCursorPos(rightButton, dblClickRight);
 
 			// Launch Context Menu
 			if (!R2::isEditionCurrent()) // context menu managed in a different fashion for R2ED
@@ -198,7 +213,7 @@ void CUserControls::aiMode()
 
 		// Is the left click activated.
 		if (EventsListener.isMouseButtonReleased (leftButton))
-			execActionCursorPos(true,dblClickLeft);
+			execActionCursorPos(rightButton,dblClickLeft);
 	}
 
 

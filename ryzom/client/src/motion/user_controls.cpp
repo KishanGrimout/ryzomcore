@@ -122,6 +122,8 @@ void CUserControls::init()
 	_LeftClickEnd		= 0;
 	_RightClickStart	= 0;
 	_RightClickEnd		= 0;
+	_MiddleClickStart = 0;
+	_MiddleClickEnd = 0;
 	_TimeBeforeMouseSlide	= 50;
 	_TimeLongClick			= 200;
 
@@ -773,6 +775,21 @@ void CUserControls::commonMove()
 		_RightClickEnd = T1;
 	}
 
+	// Middle Click and Dbl Click
+	bool dblClickMiddle = false;
+	if (EventsListener.isMouseButtonPushed(middleButton))
+	{
+		_MiddleClickStart = T1;
+	}
+	if (EventsListener.isMouseButtonReleased(middleButton))
+	{
+		if (T1 <= _MiddleClickEnd + CWidgetManager::getInstance()->getUserDblClickDelay())
+		{
+			dblClickMiddle = true;
+		}
+		_MiddleClickEnd = T1;
+	}
+
 	_CurrentFrameFreeLookCalled= false;
 	if(_FreeLook)
 	{
@@ -806,7 +823,7 @@ void CUserControls::commonMove()
 					if(ClientCfg.SelectWithRClick || R2::isEditionCurrent())
 					{
 						// nb : the ring editor also need that kind of events
-						execActionCursorPos(true,dblClickRight);
+						execActionCursorPos(rightButton, dblClickRight);
 					}
 
 					// Launch Context Menu
@@ -831,12 +848,25 @@ void CUserControls::commonMove()
 				// Short Left Click -> Check Action
 				if((T1-_LeftClickStart) <= _TimeLongClick)
 				{
-					execActionCursorPos(false, dblClickLeft);
+					execActionCursorPos(leftButton, dblClickLeft);
 				}
 
 				// Give back the mouse handling to the interface.
 				CWidgetManager::getInstance()->enableMouseHandling(true);
 				EventsListener.enableMouseSmoothing(false);
+			}
+
+			// if leftbutton release while right MouseButton UP
+			if (EventsListener.isMouseButtonReleased(middleButton) && EventsListener.isMouseButtonUp(rightButton) && EventsListener.isMouseButtonUp(leftButton))
+			{
+				// Cursor mode.
+				SetMouseCursor();
+
+				// Short Left Click -> Check Action
+				if ((T1 - _MiddleClickStart) <= _TimeLongClick)
+				{
+					execActionCursorPos(middleButton, dblClickLeft);
+				}
 			}
 
 
@@ -1184,7 +1214,7 @@ string CUserControls::modeStr() const
 // execActionCursorPos :
 // Execute action depending on the cursor position (left/right click).
 //-----------------------------------------------
-void CUserControls::execActionCursorPos(bool rightClick, bool dblClick)
+void CUserControls::execActionCursorPos(TMouseButton button, bool dblClick)
 {
 	// Check there is no interface under the cursor.
 	if( CWidgetManager::getInstance()->isMouseOverWindow())
@@ -1192,7 +1222,7 @@ void CUserControls::execActionCursorPos(bool rightClick, bool dblClick)
 	// Update the cursor.
 	ContextCur.check();
 	// Execute Action.
-	ContextCur.execute(rightClick,dblClick);
+	ContextCur.execute(button, dblClick);
 }// execActionCursorPos //
 
 

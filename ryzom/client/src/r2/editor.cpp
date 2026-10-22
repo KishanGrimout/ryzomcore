@@ -4554,18 +4554,18 @@ void CEditor::checkCursor()
 
 
 // *********************************************************************************************************
-void CEditor::mouseClick(bool rightButton, bool /* dblClick */)
+void CEditor::mouseClick(TMouseButton button, bool /* dblClick */)
 {
 	//H_AUTO(R2_CEditor_mouseClick)
 	CHECK_EDITOR
 	CTool *currentTool = getEditor().getCurrentTool();
 	if (!currentTool) return;
-	if (!rightButton)
+	if (button == leftButton)
 	{
 		// nb : result not handled there (no defaut action for left click)
 		currentTool->onMouseLeftButtonClicked();
 	}
-	else
+	else if (button == rightButton)
 	{
 		bool handled = currentTool->onMouseRightButtonClicked();
 		if (!handled)
