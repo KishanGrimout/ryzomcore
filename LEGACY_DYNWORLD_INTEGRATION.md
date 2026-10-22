@@ -223,13 +223,10 @@ Validation: with U-S3 smoke test.
 
 #### U-C1 — client scaffolding
 
-- [ ] Port.
+- [x] Done (2026-10-22). `client_cfg.h`: added the `ChunksMemoryCache` `uint32` member in a `// DYNWORLD //` block after `BackgroundDownloader` (legacy position); `client_cfg.cpp`: ctor default `ChunksMemoryCache = 1024U; // 1 Gb by default` and `READ_INT_FV(ChunksMemoryCache)` after the commented-out `READ_BOOL_FV(BackgroundDownloader)` (macro exists, already used for `SelectedSlot`). Skipped legacy whitespace noise (blank line after `LoginSupportURL`). `net_manager.cpp` needed nothing more — `IsInDynWorldSession` global + `CUserCharMsg::read` feed landed with U-S1; client consumers will `extern` it as they appear in U-C2+. Client `CMakeLists.txt`: `FILE(GLOB SRC_DYNWORLD dynworld/*.cpp dynworld/*.h)` + `SOURCE_GROUP("dynworld" ...)` + `target_sources(ryzom_client PRIVATE ${SRC_DYNWORLD})` (target-based, matching this CMakeLists' idiom; empty glob OK).
+- **PolyVox/ANL interface fix**: the roadmap-flagged payoff order was real — `${POLYVOX_INCLUDE_DIR}`/`${ANL_INCLUDE_DIR}` were directory-scoped includes inside `game_share/CMakeLists.txt`, invisible to consumers (`map_client.cpp` in U-C2 will include PolyVox directly). Promoted to `TARGET_INCLUDE_DIRECTORIES(ryzom_gameshare PUBLIC ${POLYVOX_INCLUDE_DIR} ${ANL_INCLUDE_DIR})`; removed the now-redundant explicit `${POLYVOX_INCLUDE_DIR}` from `gpm2_service`'s target include dirs (comment left in the file explaining the propagation).
 
-- `ryzom/client/src/client_cfg.{h,cpp}`: `uint32 ChunksMemoryCache` (Mb) + `READ_INT_FV` entry.
-- `ryzom/client/src/net_manager.cpp`: the `IsInDynWorldSession` global is already defined there and fed by the `CUserCharMsg` read (done in U-S1 — the signature change forced the call-site adapter). Remaining: `extern` it wherever client consumers appear (U-C2+).
-- `ryzom/client/src/CMakeLists.txt`: `FILE(GLOB SRC_DYNWORLD dynworld/*.cpp dynworld/*.h)` + `SOURCE_GROUP("dynworld")` + `target_sources(ryzom_client PRIVATE ${SRC_DYNWORLD})` (target-based convention; legacy glob-era patch had an `ADD_EXECUTABLE` append). CRITICAL payoff-order issue: `map_client.cpp` includes `PolyVox/MarchingCubesSurfaceExtractor.h` directly; PolyVox/ANL are currently discovered only inside `ryzom/common/src/game_share/CMakeLists.txt` with directory-scope `INCLUDE_DIRECTORIES` that do not reach the client target. Fix by promoting PolyVox headers to `Ryzom::gameshare` PUBLIC interface, or re-running `FIND_PACKAGE(PolyVox)` in the client + `target_include_directories(ryzom_client ...)`.
-
-Dependencies: U-S1 (for the flag definition). Validation: client builds with an (empty) `src/dynworld` glob.
+Dependencies: U-S1 (for the flag definition). Validation: client builds with an (empty) `src/dynworld` glob; `ryzom_gpm2_service` relink clean with the include propagation change.
 
 #### U-C2 — core client dyn modules
 

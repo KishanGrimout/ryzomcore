@@ -884,6 +884,11 @@ struct CClientConfig
 	// tmp for background downloader integration
 	bool				BackgroundDownloader;
 
+	//////////////
+	// DYNWORLD //
+	//////////////
+	uint32 ChunksMemoryCache; // in Mb
+
 public:
 	/// Constructor.
 	CClientConfig();

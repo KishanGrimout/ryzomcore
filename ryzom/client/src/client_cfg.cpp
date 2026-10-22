@@ -750,6 +750,8 @@ CClientConfig::CClientConfig()
 
 	BackgroundDownloader = false;
 
+	ChunksMemoryCache = 1024U; // 1 Gb by default
+
 }// CClientConfig //
 
 
@@ -1955,6 +1957,8 @@ void CClientConfig::setValues()
 
 	// vl: BackgroundDownloader is hardcoded to false and we don't want to run it, even if the cfg wants it
 	//READ_BOOL_FV(BackgroundDownloader)
+
+	READ_INT_FV(ChunksMemoryCache)
 
 }// load //
 

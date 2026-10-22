@@ -13,6 +13,7 @@ IF(WITH_RYZOM_CLIENT)
   FILE(GLOB SRC_INTERFACE interface_v3/*.h interface_v3/*.cpp)
   FILE(GLOB SRC_MODE motion/modes/*.cpp motion/modes/*.h)
   FILE(GLOB SRC_R2 r2/*.h r2/*.cpp r2/dmc/*.h r2/dmc/*.cpp)
+  FILE(GLOB SRC_DYNWORLD dynworld/*.cpp dynworld/*.h)
 
   # Filter out the source files not actually compiled.
   LIST(REMOVE_ITEM SRC
@@ -40,6 +41,7 @@ IF(WITH_RYZOM_CLIENT)
   SOURCE_GROUP("_interface_v3" FILES ${SRC_INTERFACE})
   SOURCE_GROUP("_motion_modes" FILES ${SRC_MODE})
   SOURCE_GROUP("_r2" FILES ${SRC_R2})
+  SOURCE_GROUP("dynworld" FILES ${SRC_DYNWORLD})
 
   # VS grouping for convenience
   FILE(GLOB RZCLIENT_NETWORK
@@ -231,6 +233,8 @@ IF(WITH_RYZOM_CLIENT)
               CURL::libcurl
               ZLIB::ZLIB
   )
+  # dynworld sources land here; keep the list explicit like the other groups
+  target_sources(ryzom_client PRIVATE ${SRC_DYNWORLD})
 
   IF(NOT APPLE AND NOT WIN32)
     TARGET_LINK_LIBRARIES(ryzom_client PRIVATE ${X11_LIBRARIES})
