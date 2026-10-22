@@ -1,0 +1,21 @@
+struct LandscapeFP_Input
+{
+  float3 position : POSITION;
+  float3 posWorld : TEXCOORD0;
+  float3 normal   : TEXCOORD1;
+};
+
+float4 DynLanscape_fp(uniform sampler2D diffuse0, uniform sampler2D diffuse1, uniform sampler2D alpha, LandscapeFP_Input IN) : COLOR
+{	
+  float4 sampleX = tex2D(diffuse0, IN.posWorld.yz);
+  float4 sampleY = tex2D(diffuse0, IN.posWorld.xz);
+  float4 sampleZ;
+  if (IN.normal.z > 0)
+	sampleZ = tex2D(diffuse1, IN.posWorld.xy);
+  else
+	sampleZ = tex2D(diffuse0, IN.posWorld.xy);
+
+  float4 blendedColor = sampleX * IN.normal.x + sampleY * IN.normal.y + sampleZ * IN.normal.z;
+
+  return blendedColor;	
+}

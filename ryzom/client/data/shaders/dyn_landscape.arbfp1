@@ -1,0 +1,59 @@
+!!ARBfp1.0
+OPTION ARB_precision_hint_fastest;
+
+PARAM c[1] = { { 1, 0 } };
+PARAM fogFactor = program.env[2];
+PARAM	IMV[4]	= { state.matrix.modelview.invtrans };
+
+TEMP R0;
+TEMP R1;
+TEMP R2;
+TEMP R3;
+
+# texture 1 on X plane
+TEX R0, fragment.texcoord[0].zyzw, texture[1], 2D;
+MUL R2, fragment.texcoord[1].x, R0;
+
+# texture 1 on Y plane
+TEX R0, fragment.texcoord[0].zxzw, texture[1], 2D;
+MAD R2, fragment.texcoord[1].y, R0, R2;
+
+# texture 0 on the floor, texture 1 on the ceiling for Z plane
+SLT R1.x, c[0].y, fragment.texcoord[2].z;
+ABS R3.x, R1;
+
+TEX R0, fragment.texcoord[0].yxzw, texture[1], 2D;
+TEX R1, fragment.texcoord[0].yxzw, texture[0], 2D;
+
+CMP R3.x, -R3, c[0].y, c[0];
+CMP R0, -R3.x, R0, R1;
+
+MAD R3, R0, fragment.texcoord[1].z, R2;
+
+# eye space normal normalized
+DP3 R2.x, IMV[0], fragment.texcoord[2];
+DP3 R2.y, IMV[1], fragment.texcoord[2];
+DP3 R2.z, IMV[2], fragment.texcoord[2];
+DP3 R2.w, R2, R2;
+RSQ R2.w, R2.w;
+MUL R2, R2, R2.w;
+
+# sun ambient
+MUL	R1, state.light[0].ambient, R3;
+
+# sun diffuse
+DP3	R0.x, R2, state.light[0].position;			# R0.x= normal*-lightDir
+LIT	R0.y, R0.xxxx;				# R0.y= R0.x clamped
+MAD	R1, R0.y, R3, R1;		# R2= summed vertex color.
+
+# apply fog
+MAD_SAT R0.x, fragment.fogcoord.x, fogFactor.x, fogFactor.y;
+LRP R1, R0.x, R1, state.fog.color;
+
+# apply alpha
+MOV R1.a, fragment.texcoord[2].w;
+MUL R1.a, R1.a, fogFactor.z;
+
+MOV result.color, R1;
+
+END

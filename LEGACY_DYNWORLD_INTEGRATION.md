@@ -288,12 +288,12 @@ Dependencies: U-C2/U-C4 (commands touch live map state). Validation: build; run 
 
 #### U-C8 — shaders and dynworld data assets
 
-- [ ] Copy.
+- [x] Done (2026-10-22).
+- Copied verbatim from the legacy tip into `ryzom/client/data/shaders/` (directory created; it didn't exist in the current tree): `dyn_landscape.vp1`, `dyn_landscape.arbfp1`, plus the `.cg` authoring pair `dyn_landscape_vp.cg`/`dyn_landscape_fp.cg` (all 4 present both in the patch diff and the legacy working copy — the earlier ".cg absent" survey note was wrong). Loaded at runtime by `CDynLandscape::readShaderFiles()` via `CPath::lookup` (`DynLandscapeProgramName` + `.vp1`/`.arbfp1` exts); only constructed when entering a dynworld session (U-C4 `/U-C3` chain).
+- Copied verbatim `ryzom/common/data_leveldesign/dynworld/` (15 files): `material_library.cfg` (Environments/Materials var lists exactly as `CMaterialLibrary::initialize()` reads them), `environments/*.cfg` (desert/forest/jungle/lakes/prime_roots), `materials/*.cfg` (bark/chipboard/cinder/earth/goo/humus/mud/saw_dust/wood). Initialized client-side from `init_main_loop.cpp` U-C4 hook (`"material_library.cfg"`); sub-cfg resolution uses `CConfigFile::load(name, true)` → `CPath` lookup, discoverability at runtime is a client.cfg `DataPath` matter (legacy dev trees resolved `data_leveldesign/`/`shaders/` through local uncommitted cfg additions — no code delta exists for it; covered by the Phase 5 runtime checklist). Flora plant sheets must remain resident before `initialize()` runs (already ordered by the U-C4 XML-db-block placement and U-S groundwork).
+- Skipped: patch `msg.xml` hunks (the `DYN_WORLD`/`SET_VOXEL` branch is already in the tree from U-S4; the legacy `DUMMY`→`DISABLE_LOGOUT_BUTTON` rename is a non-dynworld local tweak that mainline never adopted).
 
-- `ryzom/client/data/shaders/dyn_landscape.vp1` + `dyn_landscape.arbfp1` ONLY (see Working-context note: the `.cg` pair is absent at the legacy tip). Loaded via `CPath::lookup("dyn_landscape")` + `CIFile::serialBuffer` — verify the client search path already covers `data/shaders` per the existing convention.
-- `ryzom/common/data_leveldesign/dynworld/`: `material_library.cfg` (Environments = forest/jungle/desert/lakes/prime_roots + 9 material cfgs), `environments/*.cfg` (`Name`/`Id`/`DefaultSoil`/`Seed`/`WaterLevel`/`Flags`/`globalOffset`/`NP_*` + flora plant sheet-ID lists), `materials/*.cfg` (`Type` `Raw|Refined`, `DensityMin/Max`, `Textures`/"Env:X"-prefixed tile names per environment). Resolution uses `CConfigFile::load(name, true)`/`CPath::lookup` → make `data_leveldesign/dynworld` discoverable for both client and gpm2 service. IMPORTANT: flora plant sheets must be resident before `CMaterialLibrary::initialize()` runs.
-
-Dependencies: none strictly (safe after U-C3/U-C4 for validation). Validation: client/gpm2 startup without missing-file errors; env config load logs.
+Dependencies: none strictly (safe after U-C3/U-C4 for validation). Validation: `ryzom_client` Release build clean (content-only change, no CMake glob impact); startup without missing-file errors deferred to Phase 5 with the local shard config.
 
 ### 5. Assets, configuration, and end-to-end validation
 

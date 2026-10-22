@@ -1,0 +1,44 @@
+!!VP1.0
+#transform vertex in view space
+MOV R0, v[OPOS];
+DP4	  R1.x,   c[0],   R0;
+DP4   R1.y,   c[1],   R0;
+DP4   R1.z,   c[2],   R0;
+DP4   R1.w,   c[3],   R0;
+
+MOV   o[HPOS], R1;               # transformed pos
+DP4   o[FOGC].x, c[10], R0;      # fog value
+MUL   R0, R0, c[5].xxxx;         # texture scale
+MOV   o[TEX0], R0;               # scaled local pos
+MOV   R0, v[NRML];               # untransformed normal
+MOV   R0.w, v[7].x;              # alpha value in w
+MOV   o[TEX2], R0;               # untransformed normal with alpha in w
+
+####
+# blending factors from normal
+
+# absolute value of the normal
+MOV R1, v[NRML];
+MAX R0, R1, -R1;
+
+# tighten
+ADD R0, R0, -c[4].xxxx;
+MAX R0, R0,  c[4].yyyy;
+
+# amplification
+MUL R0, R0, R0;
+MUL R0, R0, R0;
+MUL R0, R0, R0;
+
+# sum the 3 components of the normal
+ADD R1, R0.x, R0.y;
+ADD R1, R1, R0.z;
+
+# divide each component by this factor
+RCP R1.x, R1.x;
+RCP R1.y, R1.y;
+RCP R1.z, R1.z;
+MUL R0, R0, R1;
+
+MOV o[TEX1], R0; # modified normal used for triplanar texturing
+END
