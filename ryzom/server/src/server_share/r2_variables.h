@@ -23,5 +23,6 @@
 
 // Is the shard a ring shard
 extern NLMISC::CVariable<bool>    		IsRingShard;
+extern NLMISC::CVariable<bool>    		IsDynamicContinent;
 
 #endif // R2_VARIABLES_H
