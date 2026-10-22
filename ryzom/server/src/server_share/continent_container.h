@@ -42,6 +42,8 @@
 #include "nel/pacs/u_global_position.h"
 #include "nel/pacs/u_primitive_block.h"
 
+class CMapServer;
+
 /**
  * <Class description>
  * \author Benjamin Legros
@@ -55,7 +57,7 @@ protected:
 	class CContinentMoveContainer
 	{
 	public:
-		CContinentMoveContainer() : GlobalRetriever(NULL), RetrieverBank(NULL), MoveContainer(NULL), AllowAutoSpawn(false) {}
+		CContinentMoveContainer() : GlobalRetriever(NULL), RetrieverBank(NULL), MoveContainer(NULL), Map(NULL), AllowAutoSpawn(false) {}
 		/// Then name of the continent
 		std::string								Name;
 		/// The PACS global retriever for this continent
@@ -64,6 +66,8 @@ protected:
 		NLPACS::URetrieverBank					*RetrieverBank;			// Bank of global retriever
 		/// The PACS move container for this continent
 		NLPACS::UMoveContainer					*MoveContainer;			// Move container
+		/// The dynamic map for this continent DYN WORLD
+		CMapServer								*Map;
 		/// True if entities are allowed to try spawning in this continent if no continent index is provided
 		bool									AllowAutoSpawn;
 	};
@@ -214,6 +218,17 @@ public:
 			return NULL;
 		}
 		return _Continents[index].RetrieverBank;
+	}
+
+	/// Get dynmap for continent DYN WORLD
+	CMapServer* getDynMap(sint index)
+	{
+		if (index < 0 || index >= (sint)_Continents.size())
+		{
+			nlwarning("getDynMap(): invalid index %d", index);
+			return NULL;
+		}
+		return _Continents[index].Map;
 	}
 
 
