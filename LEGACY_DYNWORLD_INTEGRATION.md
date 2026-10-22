@@ -202,13 +202,20 @@ Dependencies: U-S1, U-S3. Validation: `ryzom_shard_unifier_service` (with the re
 
 #### U-S5 — server configuration
 
-- [ ] Port.
+- [x] Done (2026-10-22, adapted): **the current repo ships no Ryzom server cfg set** (`ryzom/server/` contains only `CMakeLists.txt`; `used_continents.cfg`, `gpm_service.cfg`, `common.cfg`, etc. are assembled at deployment time and were already absent upstream — verified, no `*.cfg` matches anywhere from the repo root). Importing the legacy tree's 40-file cfg set wholesale would violate the "delta only" rule, so no cfg files were added. The three dynworld cfg deltas are recorded here verbatim for any future deployment/runtime validation (they apply to the legacy cfg set in `D:\Programmation\ryzomcore_old\ryzomcore_dev\code\ryzom\server\`, which carries `gpm2_service.cfg`/`gpm2_service_default.cfg` ready-made):
 
-- New `ryzom/server/gpm2_service.cfg` + `gpm2_service_default.cfg` (`#include used_continents.cfg`, mirrors gpm's structure; per-continent `IsDynamicContinent = 1` line here or in used_continents).
-- `ryzom/server/used_continents.cfg`: `IsDynamicContinent = 1` for the dynamic continent entry.
-- `ryzom/server/gpm_service.cfg`: `LoadPacsCol = 0` (dynamic continents load no `.rbank`/`.gr`).
+  - `used_continents.cfg` — appended after the `"newbieland", "20"` block:
+    ```cfg
+    IsDynamicContinent = 1;
+    ```
+  - `gpm_service.cfg` — appended after `VerboseMIRROR = 0;`:
+    ```cfg
+    LoadPacsCol = 0;
+    ```
+  - `gpm2_service.cfg`/`gpm2_service_default.cfg` — new files (legacy working copy, minus env noise): default = `#include "common.cfg"`, `CheckPlayerSpeed = 0;`, `SecuritySpeedFactor = 1.5;`, `LoadPacsPrims = 0;`, `LoadPacsCol = 1;`; main cfg = comment header `// Use with commandline: gpm_service -C. -L. --nobreak --writepid`, `#include "gpm2_service_default.cfg"`, `AESAliasName = "gpms"` (same mirror id as gpm), the five `GraphVars += { ... }` mirror lines, `Paths = { ".", "../common/data_common", "../common/data_leveldesign" }` (legacy's extra `"../../../../ryzomcore-data"` line = author-local env noise, skipped per skip list), `#include "used_continents.cfg"`, mirror limits `DatasetSizefe_temp = 600000;` / `DatasetSizefame = 26000;`, `IsRingShard = 0;`, `VerboseMIRROR = 0;`, `LoadPacsCol = 1;`.
+  - Remaining legacy cfg diffs to NOT port (skip list): the env-noise `ryzomcore-data`/`../../leveldesign` relative-path additions in `ai`/`backup`/`dss`/`egs`/`fs`/`ios`/`logger`/`mirror`/`monitor`/`tick` cfgs, `DBHost`/`FSListenHost` → `127.0.0.1`, `ReadWorkOnly = 1`.
 
-Environment noise to skip: `ryzomcore-data`/`../../leveldesign` relative-path additions in ai/backup/dss/egs/fs/ios/logger/mirror/monitor/tick cfgs, `DBHost`/`FSListenHost` → `127.0.0.1`, `ReadWorkOnly = 1` (author's local dev environment).
+Dependencies: U-S3. Validation: n/a for building (no code touched); the Phase 5 runtime smoke needs these three deltas applied to a deployed cfg set.
 
 Validation: with U-S3 smoke test.
 
