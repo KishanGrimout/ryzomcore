@@ -232,15 +232,15 @@ public:
 	CContinent();
 
 	/// setup the continent from a sheet (use the SheetName that MUST be set)
-	void setup();
+	virtual void setup();
 
 	/**
 	 * Update global parameters like the texture for the micro veget.
 	 */
-	void select(const NLMISC::CVectorD &pos, NLMISC::IProgressCallback &progress, bool complete, bool unhibernate, EGSPD::CSeason::TSeason season);
+	virtual void select(const NLMISC::CVectorD &pos, NLMISC::IProgressCallback &progress, bool complete, bool unhibernate, EGSPD::CSeason::TSeason season);
 
 	/// This will remove extra rsc used by the continent (fog maps ..)
-	void unselect();
+	virtual void unselect();
 
 	/** Test whether the next call to updateStreamable will be blocking.
 	  * This happen for example when the player is too near of a village and when asynchronous loading is not sufficient.

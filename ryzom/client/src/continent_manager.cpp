@@ -40,6 +40,7 @@
 
 // Client
 #include "continent_manager.h"
+#include "dynworld/dyn_continent.h"
 #include "client_cfg.h"
 #include "sheet_manager.h"
 #include "sound_manager.h"
@@ -71,6 +72,7 @@ extern UGlobalRetriever	*GR;
 extern URetrieverBank	*RB;
 extern class CIGCallback		*IGCallbacks;
 extern NLLIGO::CLigoConfig LigoConfig;
+extern bool IsInDynWorldSession;
 
 UMoveContainer			*PACSHibernated = nullptr;
 UGlobalRetriever		*GRHibernated = nullptr;
@@ -213,6 +215,17 @@ void CContinentManager::preloadSheets()
 			nlwarning("cant find continent sheet : %s.", continentSheetName.c_str());
 		}
 	}
+
+	preloadDynContinent();
+}
+
+//-----------------------------------------------
+void CContinentManager::preloadDynContinent()
+{
+	// TODO DYN: temp
+	_Dynamic = new CDynContinent;
+	_Dynamic->SheetName = _Continents["newbieland"]->SheetName;
+	_Continents.insert(make_pair("dynamic", _Dynamic));
 }
 
 //-----------------------------------------------
@@ -391,6 +404,11 @@ void CContinentManager::select(const string &name, const CVectorD &pos, NLMISC::
 //-----------------------------------------------
 void CContinentManager::select(const CVectorD &pos, NLMISC::IProgressCallback &progress)
 {
+	if (IsInDynWorldSession)
+	{
+		select("dynamic", pos, progress);
+		return;
+	}
 
 	CVector2f fPos;
 	fPos.x = (float)pos.x;

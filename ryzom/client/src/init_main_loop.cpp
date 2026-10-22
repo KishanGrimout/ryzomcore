@@ -47,6 +47,7 @@
 #include "nel/3d/u_water_env_map.h"
 #include "nel/3d/material.h"
 #include "nel/3d/fxaa.h"
+#include "nel/3d/scene_user.h" // TODO DYN: remove this when ref to CSceneUser removed in the file
 // Sound
 #include "nel/sound/u_audio_mixer.h"
 // Client
@@ -82,6 +83,9 @@
 #include "interface_v3/inventory_manager.h"
 #include "interface_v3/bot_chat_page_all.h"
 #include "main_loop.h"
+#include "dynworld/dyn_landscape_user.h"
+#include "dynworld/dyn_landscape_model.h"
+#include "dynworld/dyn_continent.h"
 
 #include "net_manager.h"
 #include "ig_callback.h"
@@ -105,6 +109,7 @@
 #include "game_share/light_cycle.h"
 #include "sound_manager.h"
 #include "precipitation_clip_grid.h"
+#include "game_share/dynworld/material_library.h"
 
 #include "nel/misc/check_fpu.h"
 
@@ -132,6 +137,8 @@ namespace R2
 }
 
 extern bool SetMousePosFirstTime;
+
+extern bool IsInDynWorldSession;
 
 extern EGSPD::CSeason::TSeason	ManualSeasonValue;
 UTextureFile			*LoadingBitmap = nullptr;
@@ -538,6 +545,8 @@ void initMainLoop()
 		initLast = initCurrent;
 		initCurrent = ryzomGetLocalTime();
 		//nlinfo ("PROFILE: %d seconds (%d total) for Initializing XML database", (uint32)(initCurrent-initLast)/1000, (uint32)(initCurrent-initStart)/1000);
+
+		CMaterialLibrary::instance().initialize("material_library.cfg");
 	}
 
 	// Create interface database
@@ -800,7 +809,13 @@ void initMainLoop()
 		{
 			nmsg = "Creating Landscape ...";
 			ProgressBar.newMessage ( ClientCfg.buildLoadingString(nmsg) );
-			Landscape = Scene->createLandscape();
+			ULandscape* newLand = NULL;
+			if (IsInDynWorldSession) // TODO DYN: clean this cast...
+			{
+				CDynLandscapeModel::registerBasic();
+				newLand = new CDynLandscapeUser(Scene);
+			}
+			Landscape = Scene->createLandscape(newLand);
 			if(Landscape == nullptr)
 				nlerror("initMainLoop : Cannot create a Landscape.");
 

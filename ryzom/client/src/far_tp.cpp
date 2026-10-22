@@ -823,7 +823,6 @@ retryJoinEdit:
 		case JoinMainland:
 //retryJoinMainland:
 			{
-				TSessionId sessionId(0);
 				sb.joinMainland(charId, ClientApp);
 
 				bool ret = sb.waitOneMessage(CSessionBrowserImpl::getMessageName("on_joinSessionResult"));
@@ -836,6 +835,43 @@ retryJoinEdit:
 					throw "Error joining session";
 				}
 				// ok, the join is accepted !, the other far TP work is done in the callback
+			}
+			break;
+		case JoinDynWorld:
+			{
+				sb.joinDynamicWorld(charId, sessionId, ClientApp);
+
+				bool ret = sb.waitOneMessage(CSessionBrowserImpl::getMessageName("on_joinSessionResult"));
+
+				if (!ret)
+					throw "Protocol error";
+
+				if (sb._LastJoinSessionResult == 2)
+				{
+					// the edit session did not exist, create a new one
+// 					sb.scheduleSession(charId, TSessionType::st_edit, "", "", TSessionLevel::sl_a, /*TAccessType::at_private, */TRuleType::rt_strict, TEstimatedDuration::et_long, 0, TAnimMode(), TRaceFilter(), TReligionFilter(), TGuildFilter(), TShardFilter(), TLevelFilter(), std::string(), TSessionOrientation(), true, true);
+// 					ret = sb.waitOneMessage(CSessionBrowserImpl::getMessageName("on_scheduleSessionResult"));
+// 					if (!ret || sb._LastScheduleSessionResult!= 0)	throw "schedule error";
+// 					sessionId = sb._LastScheduleSessionId;
+// 
+// 					// invite the char in the session
+// 					sb.inviteCharacter(charId, sessionId, charId, TSessionPartStatus::sps_edit_invited);
+// 					ret = sb.waitOneMessage(CSessionBrowserImpl::getMessageName("on_invokeResult"));
+// 					if (!ret || sb._LastInvokeResult != 0)	throw "Invitation Error";
+// 
+// 					// now, start the edit session
+// 					sb.startSession(charId, sessionId);
+// 					ret = sb.waitOneMessage(CSessionBrowserImpl::getMessageName("on_invokeResult"));
+// 					if (!ret || sb._LastInvokeResult != 0)	throw "start session error";
+// 
+// 					// retry to join
+// 					goto retryJoinEdit;
+				}
+				else if (sb._LastJoinSessionResult != 0)
+				{
+					// some error during the join
+					throw "Error joining session";
+				}
 			}
 			break;
 		default:
