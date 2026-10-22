@@ -167,13 +167,12 @@ Validation: build `nelpacs` + PACS unit tests.
 
 #### U-S1 — shared protocol and message interfaces (independent of Phase 2)
 
-- [ ] Port.
+- [x] Done (2026-10-22). `CUserCharMsg`: `write`/`read` gain `bool isInDynWorldSession` (bit 3; the userRole/flags field serial width 3→4 bits) in `msg_client_server.h`. Adapters: EGS `character.cpp` passes `false` for now (real value `IsDynamicContinent.get()` wired in U-S4); client `net_manager.cpp` defines the legacy `bool IsInDynWorldSession = false;` global next to `IsInRingSession` and reads into it (U-C1's step — moved forward because the signature change forces the call site edit; extern declarations still to add at each client consumer); `client_drone/simulated_client.cpp` reads into an unused local (tool absent at the legacy tip, adapted minimally). `tools/client/client_multi/net_manager.cpp` uses a legacy object-style `CUserCharMsg` (no write/read) — untouched, tool not in the current build.
+- `msg.xml`: appended the `DYN_WORLD` branch (`SET_VOXEL`, `sendto="EGS"`, format `s32 s32 s32 u8 u8 u8 u8`) before `</client_messages_description>`, restyled to the current file's modernized formatting (2-space, one-line leaves). DECISION: the legacy patch's stray trailing `<leaf name="DUMMY" description="stupid server....."/>` inside the new branch was omitted — copy-paste noise, same spirit as the excluded `DUMMY`→`DISABLE_LOGOUT_BUTTON` rename. Verified `CGenericXmlMsgHeaderManager::init` tolerates partial-attribute leaves, and session types persist as strings, not ints.
+- `ring_session_manager_itf.{xml,h}`: hand-ported together — `TSessionType` gains `st_dynworld` inserted BEFORE `st_mainland` (enum + `nb_enum_items` 4→5 + index table 3/4 + string table; st_mainland's numeric value shifts 3→4 as the roadmap cross-cutting risk 2 intends; SU DB stores session types as strings (`_SessionType.toString()`), so existing DB rows are unaffected; wire serialization is only between programs from this branch); `JDW` web invoke `joinDynamicWorld(charId, sessionId, clientApplication)` added to the `.xml` (after the `joinSessionResultExt` return block) and mirrored in the hand-managed `.h` (callback table entry before `JML`, `cb_joinDynamicWorld` skeleton before `cb_joinMainland` with legacy `NULL`→`nullptr` per current file convention, pure virtual `on_joinDynamicWorld`, and the `CRingSessionManagerWebClient::joinDynamicWorld` wrapper). XSLT skip-item verified skippable: the current `generate_module_interface.xslt` already emits the AGPL banner (with `encoding="UTF-8"` vs legacy `ascii` — current repo modernization wins) and the generated/header files already carry it.
+- Required companions (U-S4 slivers pulled forward): the new pure virtual made the two concrete web-itf implementers abstract, so their legacy `on_joinDynamicWorld` implementations had to land in this unit — SU `ring_session_manager.cpp` (verbatim legacy: a single `_joinSessionCommon(from, charId, sessionId, clientApplication, false)` call placed after `on_joinMainland`) and SBS `session_browser_server.cpp` (verbatim legacy: auth-check + forward to SU via `CRingSessionManagerWebClientItf::joinDynamicWorld`). No other subclasses exist (`simulation_service` has only comments). Remaining U-S4 SU scope: the `joinSessionIntoSession` restructure into `switch(sessionType)` with the `st_dynworld` case.
 
-- `ryzom/common/src/game_share/msg_client_server.h`: `CUserCharMsg::write/read` gains `isInDynWorldSession` (bit 3; stream width 3→4 bits). Wire-visible: any unpatched client keeps working (extra bit inert).
-- `ryzom/common/data_common/msg.xml`: append the `CLIENT:DYN_WORLD:SET_VOXEL` branch (format `s32 s32 s32 u8 u8 u8 u8`, targets EGS). Do NOT port the adjacent `DUMMY` → `DISABLE_LOGOUT_BUTTON` rename (legacy noise).
-- `ryzom/common/src/game_share/ring_session_manager_itf.{xml,h}`: add `st_dynworld` to `TSessionType` (insert BEFORE `st_mainland` — the numeric values are DB/wire-visible), extend index/string tables, add the `JDW` web invoke `joinDynamicWorld(charId, sessionId, clientApplication)`. The `.h` is checked into `game_share` (hand-managed, not generated for server_share modules) — hand-port XML + header together in this unit.
-
-Validation: build `Ryzom::servershare` consumers: `ryzom_shard_unifier_service`, `ryzom_session_browser_server`, plus a `ryzom_gpm_service` regression build.
+Validation: Release builds all clean — `ryzom_shard_unifier_service`, `ryzom_session_browser_service` (current target name; exe `ryzom_session_browser_service.exe`), `ryzom_gpm_service` regression, plus EGS (`ryzom_entities_game_service`) and the full `ryzom_client` as canaries for the msg header changes. `client_drone` is not in the current configure — `simulated_client.cpp` is text-verified until the client tools build catches up.
 
 #### U-S2 — server_share continent containers
 
@@ -205,8 +204,8 @@ Dependencies: U-S2, ported `material_library`. Validation: build `ryzom_gpm2_ser
 
 - EGS `ryzom/server/src/entities_game_service/client_messages.cpp`: add the `CLIENT:DYN_WORLD:SET_VOXEL` client callback → mirror/impulse relay `SET_VOXEL` to GPMS.
 - EGS `ryzom/server/src/entities_game_service/player_manager/character.cpp`: pass `IsDynamicContinent.get()` into `CUserCharMsg::write`.
-- SU `ryzom/server/src/shard_unifier_service/ring_session_manager.cpp`: restructure `joinSessionIntoSession` into `switch(sessionType)`; new `case st_dynworld` behaves like a mainland join (`_joinSessionCommon`); add `on_joinDynamicWorld`.
-- SBS `ryzom/server/src/session_browser_server/session_browser_server.cpp`: `on_joinDynamicWorld` web callback → forwards `joinDynamicWorld` to SU.
+- SU `ryzom/server/src/shard_unifier_service/ring_session_manager.cpp`: restructure `joinSessionIntoSession` into `switch(sessionType)`; new `case st_dynworld` behaves like a mainland join (`_joinSessionCommon`); add `on_joinDynamicWorld`. NOTE: the SU and SBS `on_joinDynamicWorld` implementations already landed verbatim with U-S1 (the new pure virtual made their classes abstract); only this restructure remains.
+- SBS `ryzom/server/src/session_browser_server/session_browser_server.cpp`: `on_joinDynamicWorld` web callback → forwards `joinDynamicWorld` to SU. **Already landed in U-S1** (see above) — nothing to do here.
 - `ryzom/server/shard_start_cmake.bat` / `shard_stop_cmake.bat`: pick `ryzom_gpm2_service` instead of `ryzom_gpm_service`. Keep the `session_browser_server` binary name in the stop script (matches the current target name; the legacy rename to `session_browser_service` is stale).
 
 Dependencies: U-S1, U-S3. Validation: build EGS/SU/SBS; integration test of a shard join onto a dss-less dynamic-continent session.
@@ -230,7 +229,7 @@ Validation: with U-S3 smoke test.
 - [ ] Port.
 
 - `ryzom/client/src/client_cfg.{h,cpp}`: `uint32 ChunksMemoryCache` (Mb) + `READ_INT_FV` entry.
-- `ryzom/client/src/net_manager.cpp`: define/extern the `IsInDynWorldSession` global consumed at the flag-bit read in `CUserCharMsg` handling (~line 427 area).
+- `ryzom/client/src/net_manager.cpp`: the `IsInDynWorldSession` global is already defined there and fed by the `CUserCharMsg` read (done in U-S1 — the signature change forced the call-site adapter). Remaining: `extern` it wherever client consumers appear (U-C2+).
 - `ryzom/client/src/CMakeLists.txt`: `FILE(GLOB SRC_DYNWORLD dynworld/*.cpp dynworld/*.h)` + `SOURCE_GROUP("dynworld")` + `target_sources(ryzom_client PRIVATE ${SRC_DYNWORLD})` (target-based convention; legacy glob-era patch had an `ADD_EXECUTABLE` append). CRITICAL payoff-order issue: `map_client.cpp` includes `PolyVox/MarchingCubesSurfaceExtractor.h` directly; PolyVox/ANL are currently discovered only inside `ryzom/common/src/game_share/CMakeLists.txt` with directory-scope `INCLUDE_DIRECTORIES` that do not reach the client target. Fix by promoting PolyVox headers to `Ryzom::gameshare` PUBLIC interface, or re-running `FIND_PACKAGE(PolyVox)` in the client + `target_include_directories(ryzom_client ...)`.
 
 Dependencies: U-S1 (for the flag definition). Validation: client builds with an (empty) `src/dynworld` glob.
@@ -309,7 +308,7 @@ Dependencies: none strictly (safe after U-C3/U-C4 for validation). Validation: c
 ## Cross-cutting risks and decisions
 
 1. **U-N4 pointer rewrite ripple** — public API break in a hot 3D path (~50 deref rewrites + the virtual render call graph); the 13 stale call sites (`paint.cpp` ×12, `decal.cpp` ×1) are the trap. Same-commit migration mandatory.
-2. **`st_dynworld` enum ordering** — inserting before `st_mainland` shifts its numeric value; wire/DB-visible. Both ends must change in the same unit (U-S1), and nothing in between may rely on old values.
+2. **`st_dynworld` enum ordering** — inserting before `st_mainland` shifts its numeric value; wire/DB-visible. Both ends must change in the same unit (U-S1), and nothing in between may rely on old values. U-S1 landed it: session types persist in the ring DB as strings (`_SessionType.toString()`), so existing rows survive; the raw enum only crosses the wire between programs from this branch.
 3. **`sleepTask` retiming (U-M1)** — global throughput change for every `CTaskManager` user, not just dynworld paging.
 4. **PolyVox header visibility in the client target** — the first thing to break when U-C1/U-C2 land; fix the interface explicitly rather than with include-dir leaks.
 5. **Master pager cache path commented out** — decide whether master-side regeneration is intentional when U-S2/S3 connect `CMapServer` cluster-wide.

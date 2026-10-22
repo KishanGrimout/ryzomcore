@@ -353,10 +353,11 @@ void CSimulatedClient::setInitPos( NLMISC::CBitMemStream &impulse )
 	uint8 serverSeasonValue;
 	uint32 userRole;
 	bool isInRingSession;
+	bool isInDynWorldSession; // dynworld: bit not used by this tool
 	TSessionId highestMainlandSessionId;
 	uint32 firstConnectedTime;
 	uint32 playedTime;
-	CUserCharMsg::read( impulse, posState, serverSeasonValue, userRole, isInRingSession, highestMainlandSessionId, firstConnectedTime, playedTime );
+	CUserCharMsg::read( impulse, posState, serverSeasonValue, userRole, isInRingSession, isInDynWorldSession, highestMainlandSessionId, firstConnectedTime, playedTime );
 	
 	UserEntity.pos(CVectorD((float)posState.X/1000.0f, (float)posState.Y/1000.0f, (float)posState.Z/1000.0f));
 	UserEntity.front(CVector((float)cos(posState.Heading), (float)sin(posState.Heading), 0.f));

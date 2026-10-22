@@ -477,6 +477,16 @@ public:
 		CRingSessionManagerWebClientItf::joinMainland(charId, clientApplication);
 	}
 
+	// A character asks to join a dynamic world shard.
+	// Will return a joinSessionResult.
+	virtual void on_joinDynamicWorld(NLNET::TSockId from, uint32 charId, TSessionId sessionId, const std::string &clientApplication)
+	{
+		nldebug("joinDynamicWorld for char %u", charId);
+		CHECK_AUTH_WITH_CHARID(from, charId);
+		nldebug("  forwarded to SU");
+		CRingSessionManagerWebClientItf::joinDynamicWorld(charId, sessionId, clientApplication);
+	}
+
 	// Ask to join the edit session for the specified character.
 	// If the edit session do not exist, then the SU
 	// create it before internally calling the join session request

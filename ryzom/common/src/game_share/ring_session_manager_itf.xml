@@ -28,6 +28,7 @@
 			<item name="st_edit"/>
 			<item name="st_anim"/>
 			<item name="st_outland"/>
+			<item name="st_dynworld"/>
 			<item name="st_mainland"/>
 		</enum>
 
@@ -718,6 +719,16 @@
 					<!-- CSecurityCode serializes as a uint16 (security_check.h) -->
 					<param type="CSecurityCode"	name="securityCheckForFastDisconnection" byref="true" php_serial="UInt16"/>
 				</return>
+
+
+			<!-- __________________________________________________________ -->
+			<invoke name="joinDynamicWorld" msg="JDW">
+				<doc line="A character asks to join a dynamic world shard."/>
+
+				<param type="uint32"		name="charId"/>
+				<param type="TSessionId"	name="sessionId"/>
+				<param type="std::string"	name="clientApplication" php_serial="String" byref="true"/>
+			</invoke>
 
 
 			<!-- __________________________________________________________ -->

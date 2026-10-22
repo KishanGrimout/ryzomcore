@@ -497,4 +497,8 @@
     <leaf name="SVR_EVENT_MIS_AVL" description="server had an event that might change mission availability" />
     <leaf name="SET_TIMER" description="server sets a new timer period" />
   </branch>
+  <branch name="DYN_WORLD">
+    <leaf name="SET_VOXEL" sendto="EGS" format="s32 s32 s32 u8 u8 u8 u8" description="client changes value of a voxel" />
+    <!-- x y z materialIndex param0 param1 param2 -->
+  </branch>
 </client_messages_description>

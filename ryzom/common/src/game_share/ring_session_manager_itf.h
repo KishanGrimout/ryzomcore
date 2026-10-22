@@ -212,6 +212,7 @@ namespace RSMGR
 			st_edit,
 			st_anim,
 			st_outland,
+			st_dynworld,
 			st_mainland,
 			/// the highest valid value in the enum
 			last_enum_item = st_mainland,
@@ -221,7 +222,7 @@ namespace RSMGR
 			invalid_val,
 
 			/// Number of enumerated values
-			nb_enum_items = 4
+			nb_enum_items = 5
 		};
 
 		/// Index table to convert enum value to linear index table
@@ -235,7 +236,8 @@ namespace RSMGR
 				indexTable.insert(std::make_pair(st_edit, 0));
 				indexTable.insert(std::make_pair(st_anim, 1));
 				indexTable.insert(std::make_pair(st_outland, 2));
-				indexTable.insert(std::make_pair(st_mainland, 3));
+				indexTable.insert(std::make_pair(st_dynworld, 3));
+				indexTable.insert(std::make_pair(st_mainland, 4));
 
 				init = true;
 			}
@@ -250,6 +252,7 @@ namespace RSMGR
 				NL_STRING_CONVERSION_TABLE_ENTRY(st_edit)
 				NL_STRING_CONVERSION_TABLE_ENTRY(st_anim)
 				NL_STRING_CONVERSION_TABLE_ENTRY(st_outland)
+				NL_STRING_CONVERSION_TABLE_ENTRY(st_dynworld)
 				NL_STRING_CONVERSION_TABLE_ENTRY(st_mainland)
 				NL_STRING_CONVERSION_TABLE_ENTRY(invalid_val)
 			};
@@ -2403,6 +2406,7 @@ namespace RSMGR
 				{	"SBS",	CRingSessionManagerWebItf::cb_subscribeSession	},
 				{	"USBS",	CRingSessionManagerWebItf::cb_unsubscribeSession	},
 				{	"JSS",	CRingSessionManagerWebItf::cb_joinSession	},
+				{	"JDW",	CRingSessionManagerWebItf::cb_joinDynamicWorld	},
 				{	"JML",	CRingSessionManagerWebItf::cb_joinMainland	},
 				{	"JES",	CRingSessionManagerWebItf::cb_joinEditSession	},
 				{	"HES",	CRingSessionManagerWebItf::cb_hibernateEditSession	},
@@ -3261,6 +3265,35 @@ namespace RSMGR
 
 		}
 
+		static void cb_joinDynamicWorld (NLNET::CMessage &message, NLNET::TSockId from, NLNET::CCallbackNetBase &netbase)
+		{
+			H_AUTO(joinDynamicWorld_on_joinDynamicWorld);
+#ifdef NL_DEBUG
+			nldebug("CRingSessionManagerWeb::cb_joinDynamicWorld received from class '%s'", typeid(netbase).name());
+#endif
+			ICallbackServerAdaptor *adaptor = static_cast< ICallbackServerAdaptor *>(netbase.getUserData());
+
+			CRingSessionManagerWebItf *callback = (CRingSessionManagerWebItf *)adaptor->getContainerClass();
+
+			if (callback  == nullptr)
+				return;
+			uint32	charId;
+			TSessionId	sessionId;
+			std::string	clientApplication;
+			nlRead(message, serial, charId);
+			nlRead(message, serial, sessionId);
+			nlRead(message, serial, clientApplication);
+
+
+#ifdef NL_DEBUG
+			nldebug("CRingSessionManagerWeb::cb_joinDynamicWorld : calling on_joinDynamicWorld");
+#endif
+
+
+			callback->on_joinDynamicWorld(from, charId, sessionId, clientApplication);
+
+		}
+
 		static void cb_joinMainland (NLNET::CMessage &message, NLNET::TSockId from, NLNET::CCallbackNetBase &netbase)
 		{
 			H_AUTO(joinMainland_on_joinMainland);
@@ -3741,6 +3774,9 @@ namespace RSMGR
 		// A character asks to join (or enter) a running session.
 		// It must have been subscribed or invited to the session to be allowed
 		virtual void on_joinSession(NLNET::TSockId from, uint32 charId, TSessionId sessionId, const std::string &clientApplication) =0;
+
+		// A character asks to join a dynamic world shard.
+		virtual void on_joinDynamicWorld(NLNET::TSockId from, uint32 charId, TSessionId sessionId, const std::string &clientApplication) =0;
 
 		// A character asks to join a shard.
 		// charId: userId << 4 & charSlot
@@ -4337,6 +4373,20 @@ namespace RSMGR
 			nldebug("CRingSessionManagerWebClient::joinSession called");
 #endif
 			NLNET::CMessage message("JSS");
+			nlWrite(message, serial, charId);
+			nlWrite(message, serial, sessionId);
+			nlWrite(message, serial, const_cast < std::string& > (clientApplication));
+
+			_CallbackClient->send(message);
+		}
+		// A character asks to join a dynamic world shard.
+
+		void joinDynamicWorld(uint32 charId, TSessionId sessionId, const std::string &clientApplication)
+		{
+#ifdef NL_DEBUG
+			nldebug("CRingSessionManagerWebClient::joinDynamicWorld called");
+#endif
+			NLNET::CMessage message("JDW");
 			nlWrite(message, serial, charId);
 			nlWrite(message, serial, sessionId);
 			nlWrite(message, serial, const_cast < std::string& > (clientApplication));
