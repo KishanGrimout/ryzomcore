@@ -1,0 +1,23 @@
+struct LandscapeVP_Input
+{
+  float3 position : POSITION;
+  float3 normal   : NORMAL;
+};
+
+struct LandscapeVP_Output
+{
+  float4 position : POSITION;
+  float3 posWorld : TEXCOORD0;
+  float3 normal   : TEXCOORD1;
+};
+
+LandscapeVP_Output DynLanscape_vp(LandscapeVP_Input IN, uniform float4x4 ModelViewProj)
+{	
+  LandscapeVP_Output OUT;
+
+  OUT.position = mul(ModelViewProj, float4(IN.position,1));
+  OUT.posWorld = OUT.position;
+  OUT.normal = IN.normal;
+
+  return OUT;	
+}
