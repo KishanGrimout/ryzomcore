@@ -525,29 +525,31 @@ class CUserCharMsg
 {
 public:
 
-	static void write(NLMISC::CBitMemStream &s, const COfflineEntityState& state, uint8 season, uint32 userRole, bool isInRingSession, TSessionId highestMainlandSessionId, uint32 firstConnectedTime, uint32 playedTime)
+	static void write(NLMISC::CBitMemStream &s, const COfflineEntityState& state, uint8 season, uint32 userRole, bool isInRingSession, bool isInDynWorldSession, TSessionId highestMainlandSessionId, uint32 firstConnectedTime, uint32 playedTime)
 	{
 		nlWrite( s, serial, state );
 		uint32 v = (uint32)season; // can be 0 for "auto"
 		s.serial( v, 3 );
 		v = (uint32)userRole & 0x3; // bits 0-1
 		v |= (((uint32)isInRingSession) << 2); // bit 2
-		s.serial( v, 3 );
+		v |= (((uint32)isInDynWorldSession) << 3); // bit 3
+		s.serial( v, 4 );
 		s.serial( highestMainlandSessionId );
 		s.serial( firstConnectedTime );
 		s.serial( playedTime );
 	}
 
-	static void read(NLMISC::CBitMemStream &s, COfflineEntityState& state, uint8& season, uint32& userRole, bool& isInRingSession, TSessionId& highestMainlandSessionId, uint32& firstConnectedTime, uint32& playedTime)
+	static void read(NLMISC::CBitMemStream &s, COfflineEntityState& state, uint8& season, uint32& userRole, bool& isInRingSession, bool& isInDynWorldSession, TSessionId& highestMainlandSessionId, uint32& firstConnectedTime, uint32& playedTime)
 	{
 		nlRead( s, serial, state );
 		uint32 v = 0;
 		s.serial( v, 3 );
 		season = (uint8)v;
 		v = 0;
-		s.serial( v, 3 );
+		s.serial( v, 4 );
 		userRole = (v & 0x3); // bits 0-1
 		isInRingSession = ((v & 0x4) != 0); // bit 2
+		isInDynWorldSession = ((v & 0x8) != 0); // bit 3
 		s.serial( highestMainlandSessionId );
 		s.serial( firstConnectedTime );
 		s.serial( playedTime );

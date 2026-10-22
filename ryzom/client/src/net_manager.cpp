@@ -146,6 +146,7 @@ extern CClientChatManager				ChatMngr;
 extern bool CharNameValidArrived;
 extern bool CharNameValid;
 bool IsInRingSession = false;
+bool IsInDynWorldSession = false;
 TSessionId HighestMainlandSessionId; // highest in the position stack
 
 extern const char *CDBBankNames[INVALID_CDB_BANK+1];
@@ -426,7 +427,7 @@ void impulseUserChar(NLMISC::CBitMemStream &impulse)
 	extern uint8 ServerSeasonValue;
 	extern bool ServerSeasonReceived;
 	uint32 userRole;
-	CUserCharMsg::read( impulse, posState, ServerSeasonValue, userRole, IsInRingSession, HighestMainlandSessionId, CharFirstConnectedTime, CharPlayedTime );
+	CUserCharMsg::read( impulse, posState, ServerSeasonValue, userRole, IsInRingSession, IsInDynWorldSession, HighestMainlandSessionId, CharFirstConnectedTime, CharPlayedTime );
 	ServerSeasonReceived = true; // set the season that will be used when selecting the continent from the position
 
 	if (UserEntity)

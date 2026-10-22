@@ -3590,6 +3590,15 @@ endOfWelcomeUserResult:
 			_joinSessionCommon(from, charId, (*mainlandShardsByAscLoad.begin()).second, clientApplication, false);
 		}
 
+		// A character asks to join a dynamic world shard.
+		virtual void on_joinDynamicWorld(NLNET::TSockId from, uint32 charId, TSessionId sessionId, const std::string &clientApplication)
+		{
+			//nldebug("RSM : web asks char %u to join mainland", charId);
+
+
+			_joinSessionCommon(from, charId, sessionId, clientApplication, false);
+		}
+
 		// Ask to join the edit session for the specified character.
 		// If the edit session do not exist, then the SBS
 		// create it before sending the join session request to
