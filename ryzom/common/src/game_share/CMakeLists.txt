@@ -124,6 +124,10 @@ endif ()
 
 TARGET_INCLUDE_DIRECTORIES(ryzom_gameshare PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+# PolyVox/ANL headers are used directly by dynworld consumers (client dynworld
+# sources, gpm2); propagate on the interface instead of a directory-scope include.
+TARGET_INCLUDE_DIRECTORIES(ryzom_gameshare PUBLIC ${POLYVOX_INCLUDE_DIR} ${ANL_INCLUDE_DIR})
+
 TARGET_LINK_LIBRARIES(ryzom_gameshare
 		PUBLIC
 		NeL::misc
