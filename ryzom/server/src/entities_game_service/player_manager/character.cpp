@@ -7700,7 +7700,7 @@ void CCharacter::sendUserChar( uint32 userId, uint8 scenarioSeason, const R2::TU
 			}
 		}
 	}
-	CUserCharMsg::write( bms1, getState(), scenarioSeason, userRole.getValue(), IsRingShard.get(), false, highestMainlandSessionId, _FirstConnectedTime, _PlayedTime ); // false: dynworld flag wired with IsDynamicContinent (U-S2/U-S4)
+	CUserCharMsg::write( bms1, getState(), scenarioSeason, userRole.getValue(), IsRingShard.get(), IsDynamicContinent.get(), highestMainlandSessionId, _FirstConnectedTime, _PlayedTime );
 	CMessage msgout1( "IMPULSION_ID" ); // new: now uses Id instead of Uid (CL_ID must have been sent before to the FS)
 	msgout1.serial( _Id );
 	msgout1.serialBufferWithSize((uint8*)bms1.buffer(), bms1.length());

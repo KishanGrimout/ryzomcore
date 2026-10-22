@@ -3223,246 +3223,299 @@ endOfWelcomeUserResult:
 			uint32 storedSessionId = sessionId.asInt();
 			WS::TUserRole enterAs = WS::TUserRole::invalid_val;
 			uint32 instanceId = INVALID_AI_INSTANCE;
-			if (session->getSessionType() != TSessionType::st_mainland)
+			switch (session->getSessionType().getValue())
 			{
-				// This is a Ring session
-
-				// load the character
-				CCharacterPtr charac = CCharacter::load(_RingDb, charId, __FILE__, __LINE__);
-				if (charac == NULL)
+			default:
 				{
-					joinSessionResult(from, charId >> 4, sessionId, 1, "Character not found", TSessionPartStatus::invalid_val);
-					return;
-				}
+					// This is a Ring session
 
-				// check free trial access or banned character for anim session
-				if (session->getSessionType() == TSessionType::st_anim)
-				{
-					// check newcomer flag
-					if (charac->getNewcomer() != session->getNewcomer())
+					// load the character
+					CCharacterPtr charac = CCharacter::load(_RingDb, charId, __FILE__, __LINE__);
+					if (charac == NULL)
 					{
-						if (!hasSessionAccessPrivilege(userId))
-						{
-							nlwarning("Character %u try to join session %u, but newcomer flags differ", charId, sessionId.asInt());
-							joinSessionResult(from, charId>>4, sessionId, 17, "Newcomer flag missmatch", TSessionPartStatus::invalid_val);
-							return;
-						}
-					}
-
-					CNelUserPtr nelUser = CNelUser::load(_NelDb, userId, __FILE__, __LINE__);
-					BOMB_IF(nelUser == NULL, "Failed to load nel user "<<userId, joinSessionResult(from, charId>>4, sessionId, 7, "Nel user not found", TSessionPartStatus::invalid_val); return;);
-					if (nelUser->getExtendedPrivilege().find(":R2_BAN:") != string::npos)
-					{
-						// this guy is banned from ring anim session
-						joinSessionResult(from, charId>>4, sessionId, 16, "User is banned from ring", TSessionPartStatus::invalid_val);
+						joinSessionResult(from, charId >> 4, sessionId, 1, "Character not found", TSessionPartStatus::invalid_val);
 						return;
 					}
 
-					if (session->getOwnerId() != charId
-						&& nelUser->getExtendedPrivilege().find(":TRIAL:") != string::npos)
+					// check free trial access or banned character for anim session
+					if (session->getSessionType() == TSessionType::st_anim)
 					{
-						// check that the scenario launched allow free trials players
-						CSessionLogPtr sessionLog = CSessionLog::load(_RingDb, sessionId, __FILE__, __LINE__);
-						if (sessionLog == NULL)
+						// check newcomer flag
+						if (charac->getNewcomer() != session->getNewcomer())
 						{
-							joinSessionResult(from, charId>>4, sessionId, 18, "Can't find session log to validate sesison access", TSessionPartStatus::invalid_val);
+							if (!hasSessionAccessPrivilege(userId))
+							{
+								nlwarning("Character %u try to join session %u, but newcomer flags differ", charId, sessionId.asInt());
+								joinSessionResult(from, charId>>4, sessionId, 17, "Newcomer flag missmatch", TSessionPartStatus::invalid_val);
+								return;
+							}
+						}
+
+						CNelUserPtr nelUser = CNelUser::load(_NelDb, userId, __FILE__, __LINE__);
+						BOMB_IF(nelUser == NULL, "Failed to load nel user "<<userId, joinSessionResult(from, charId>>4, sessionId, 7, "Nel user not found", TSessionPartStatus::invalid_val); return;);
+						if (nelUser->getExtendedPrivilege().find(":R2_BAN:") != string::npos)
+						{
+							// this guy is banned from ring anim session
+							joinSessionResult(from, charId>>4, sessionId, 16, "User is banned from ring", TSessionPartStatus::invalid_val);
 							return;
 						}
-						CScenarioPtr scenario = CScenario::load(_RingDb, sessionLog->getScenarioId(), __FILE__, __LINE__);
-						if (scenario == NULL)
+
+						if (session->getOwnerId() != charId
+							&& nelUser->getExtendedPrivilege().find(":TRIAL:") != string::npos)
 						{
-							joinSessionResult(from, charId>>4, sessionId, 19, "Can't find scenario info to validate session access", TSessionPartStatus::invalid_val);
-							return;
-						}
-						if (!scenario->getAllowFreeTrial())
-						{
-							// this guy is FREE TRIAL and the scenario didn't allow free trial players
-							joinSessionResult(from, charId>>4, sessionId, 20, "Scenario is not allowed to free trial players", TSessionPartStatus::invalid_val);
-							return;
+							// check that the scenario launched allow free trials players
+							CSessionLogPtr sessionLog = CSessionLog::load(_RingDb, sessionId, __FILE__, __LINE__);
+							if (sessionLog == NULL)
+							{
+								joinSessionResult(from, charId>>4, sessionId, 18, "Can't find session log to validate sesison access", TSessionPartStatus::invalid_val);
+								return;
+							}
+							CScenarioPtr scenario = CScenario::load(_RingDb, sessionLog->getScenarioId(), __FILE__, __LINE__);
+							if (scenario == NULL)
+							{
+								joinSessionResult(from, charId>>4, sessionId, 19, "Can't find scenario info to validate session access", TSessionPartStatus::invalid_val);
+								return;
+							}
+							if (!scenario->getAllowFreeTrial())
+							{
+								// this guy is FREE TRIAL and the scenario didn't allow free trial players
+								joinSessionResult(from, charId>>4, sessionId, 20, "Scenario is not allowed to free trial players", TSessionPartStatus::invalid_val);
+								return;
+							}
 						}
 					}
-				}
 
-				// load the session participant from the character
-				charac->loadSessionParticipants(_RingDb, __FILE__, __LINE__);
+					// load the session participant from the character
+					charac->loadSessionParticipants(_RingDb, __FILE__, __LINE__);
 
-				CSessionParticipantPtr sessionPart;
-				// look for the entry pertaining to the session
-				for (uint i=0; i<charac->getSessionParticipants().size(); ++i)
-				{
-					if (charac->getSessionParticipants()[i]->getSessionId() == sessionId.asInt())
+					CSessionParticipantPtr sessionPart;
+					// look for the entry pertaining to the session
+					for (uint i=0; i<charac->getSessionParticipants().size(); ++i)
 					{
-						// we found it
-						sessionPart.assign(charac->getSessionParticipants()[i], __FILE__, __LINE__);
-						break;
+						if (charac->getSessionParticipants()[i]->getSessionId() == sessionId.asInt())
+						{
+							// we found it
+							sessionPart.assign(charac->getSessionParticipants()[i], __FILE__, __LINE__);
+							break;
+						}
 					}
-				}
-				if (sessionPart == NULL)
-				{
-					// if the session is public, automatically create an invitation as player
-					if (session->getAccessType() == TAccessType::at_public)
+					if (sessionPart == NULL)
 					{
-						sessionPart = CSessionParticipant::createTransient(__FILE__, __LINE__);
-						sessionPart->setCharId(charId);
-						sessionPart->setSessionId(session->getObjectId());
-						sessionPart->setStatus(TSessionPartStatus::sps_play_invited);
+						// if the session is public, automatically create an invitation as player
+						if (session->getAccessType() == TAccessType::at_public)
+						{
+							sessionPart = CSessionParticipant::createTransient(__FILE__, __LINE__);
+							sessionPart->setCharId(charId);
+							sessionPart->setSessionId(session->getObjectId());
+							sessionPart->setStatus(TSessionPartStatus::sps_play_invited);
 
-						// store the participation
-						sessionPart->create(_RingDb);
+							// store the participation
+							sessionPart->create(_RingDb);
+						}
+						else
+						{
+							// check if the user is a GM and have right to access the session
+							bool allowGm = hasSessionAccessPrivilege(userId);
+
+							if (!allowGm)
+							{
+								// no participation and not a GM
+								joinSessionResult(from, charId>>4, sessionId, 3, "Participation not found", TSessionPartStatus::invalid_val);
+								return;
+							}
+						}
+					}
+
+					// retrieve the session server
+					TSessionServersIdx::iterator it(_SessionIndex.find(sessionId));
+					if (it == _SessionIndex.end())
+					{
+						// can't find server for this session !
+						joinSessionResult(from, charId>>4, sessionId, 4, "No server hosting the session", TSessionPartStatus::invalid_val);
+						return;
+					}
+
+					CRingSessionManagerClientProxy ss(it->second);
+					TSessionServerInfo &ssi = _SessionServers[it->second];
+
+					// retrieve the welcome service
+					TWelcomeServices::iterator it3(_WelcomeServices.find(ssi.ShardId));
+					if (it3 == _WelcomeServices.end())
+					{
+						// can't find a welcome service for this shard
+						joinSessionResult(from, charId>>4, sessionId, 5, "No welcome service to connect to shard hosting the session", TSessionPartStatus::invalid_val);
+						return;
+					}
+
+					TWelcomeServiceInfo &wsi = it3->second;
+
+					// match the access priv with ws open state
+					if (!wsi.ShardInfo->getWSOnline())
+					{
+						// the shard reports itself as down
+						joinSessionResult(from, charId >>4, sessionId, 14, string("Shard is down : ")+wsi.ShardInfo->getMOTD(), TSessionPartStatus::invalid_val);
+						return;
+					}
+					if (!_DontUsePerm && !checkAccessRight(userAccessPriv, wsi.ShardInfo->getRequiredState()))
+					{
+						// the shard is up but restricted to another access level
+						joinSessionResult(from, charId >>4, sessionId, 14, toString("Shard is restricted to %s access : %s", wsi.ShardInfo->getRequiredState().toString().c_str(), wsi.ShardInfo->getMOTD().c_str()), TSessionPartStatus::invalid_val);
+						return;
+					}
+
+					wspSwitch = new WS::CWelcomeServiceProxy( it3->second.WSModuleProxy );
+
+					// retrieve the session info
+					TSessionServerInfo::THostedSessions::iterator it2(ssi.HostedSessions.find(sessionId));
+					nlassert(it2 != ssi.HostedSessions.end());
+
+					TRunningSessionInfo &rsi = it2->second;
+					instanceId = rsi.getInstanceId();
+
+					if (sessionPart != NULL)
+					{
+						// normal user with participation
+						if (	sessionPart->getStatus() == TSessionPartStatus::sps_edit_invited
+							||	sessionPart->getStatus() == TSessionPartStatus::sps_editing)
+						{
+							// warn the session server that an editor come in
+							enterAs = WS::TUserRole::ur_editor;
+							ss.addCharacterInSession(this, sessionId, charId, enterAs, charac->getRingAccess(), charac->getNewcomer());
+
+
+							// update the participant status
+							sessionPart->setStatus(TSessionPartStatus::sps_editing);
+						}
+						else if (	sessionPart->getStatus() == TSessionPartStatus::sps_anim_invited
+							||	sessionPart->getStatus() == TSessionPartStatus::sps_animating)
+						{
+							// warn the session server that an animator come in
+							enterAs = WS::TUserRole::ur_animator;
+							ss.addCharacterInSession(this, sessionId, charId, enterAs, charac->getRingAccess(), charac->getNewcomer());
+							// update the participant status
+							sessionPart->setStatus(TSessionPartStatus::sps_animating);
+							mustGrantFastDisconnection = true;
+						}
+						else
+						{
+							enterAs = WS::TUserRole::ur_player;
+							ss.addCharacterInSession(this, sessionId, charId, enterAs, charac->getRingAccess(), charac->getNewcomer());
+							// update the participant status
+							sessionPart->setStatus(TSessionPartStatus::sps_playing);
+							mustGrantFastDisconnection = true;
+						}
+						// save the participant status
+						sessionPart->update(_RingDb);
 					}
 					else
 					{
-						// check if the user is a GM and have right to access the session
-						bool allowGm = hasSessionAccessPrivilege(userId);
-
-						if (!allowGm)
-						{
-							// no participation and not a GM
-							joinSessionResult(from, charId>>4, sessionId, 3, "Participation not found", TSessionPartStatus::invalid_val);
-							return;
-						}
-					}
-				}
-
-				// retrieve the session server
-				TSessionServersIdx::iterator it(_SessionIndex.find(sessionId));
-				if (it == _SessionIndex.end())
-				{
-					// can't find server for this session !
-					joinSessionResult(from, charId>>4, sessionId, 4, "No server hosting the session", TSessionPartStatus::invalid_val);
-					return;
-				}
-
-				CRingSessionManagerClientProxy ss(it->second);
-				TSessionServerInfo &ssi = _SessionServers[it->second];
-
-				// retrieve the welcome service
-				TWelcomeServices::iterator it3(_WelcomeServices.find(ssi.ShardId));
-				if (it3 == _WelcomeServices.end())
-				{
-					// can't find a welcome service for this shard
-					joinSessionResult(from, charId>>4, sessionId, 5, "No welcome service to connect to shard hosting the session", TSessionPartStatus::invalid_val);
-					return;
-				}
-
-				TWelcomeServiceInfo &wsi = it3->second;
-
-				// match the access priv with ws open state
-				if (!wsi.ShardInfo->getWSOnline())
-				{
-					// the shard reports itself as down
-					joinSessionResult(from, charId >>4, sessionId, 14, string("Shard is down : ")+wsi.ShardInfo->getMOTD(), TSessionPartStatus::invalid_val);
-					return;
-				}
-				if (!_DontUsePerm && !checkAccessRight(userAccessPriv, wsi.ShardInfo->getRequiredState()))
-				{
-					// the shard is up but restricted to another access level
-					joinSessionResult(from, charId >>4, sessionId, 14, toString("Shard is restricted to %s access : %s", wsi.ShardInfo->getRequiredState().toString().c_str(), wsi.ShardInfo->getMOTD().c_str()), TSessionPartStatus::invalid_val);
-					return;
-				}
-
-				wspSwitch = new WS::CWelcomeServiceProxy( it3->second.WSModuleProxy );
-
-				// retrieve the session info
-				TSessionServerInfo::THostedSessions::iterator it2(ssi.HostedSessions.find(sessionId));
-				nlassert(it2 != ssi.HostedSessions.end());
-
-				TRunningSessionInfo &rsi = it2->second;
-				instanceId = rsi.getInstanceId();
-
-				if (sessionPart != NULL)
-				{
-					// normal user with participation
-					if (	sessionPart->getStatus() == TSessionPartStatus::sps_edit_invited
-						||	sessionPart->getStatus() == TSessionPartStatus::sps_editing)
-					{
-						// warn the session server that an editor come in
-						enterAs = WS::TUserRole::ur_editor;
+						// this is for a GM without participation
+						if (session->getSessionType() == TSessionType::st_edit)
+							enterAs = WS::TUserRole::ur_editor;
+						else
+							enterAs = WS::TUserRole::ur_player;
+						// allow connection on the DSS
 						ss.addCharacterInSession(this, sessionId, charId, enterAs, charac->getRingAccess(), charac->getNewcomer());
-
-
-						// update the participant status
-						sessionPart->setStatus(TSessionPartStatus::sps_editing);
-					}
-					else if (	sessionPart->getStatus() == TSessionPartStatus::sps_anim_invited
-						||	sessionPart->getStatus() == TSessionPartStatus::sps_animating)
-					{
-						// warn the session server that an animator come in
-						enterAs = WS::TUserRole::ur_animator;
-						ss.addCharacterInSession(this, sessionId, charId, enterAs, charac->getRingAccess(), charac->getNewcomer());
-						// update the participant status
-						sessionPart->setStatus(TSessionPartStatus::sps_animating);
 						mustGrantFastDisconnection = true;
 					}
-					else
-					{
-						enterAs = WS::TUserRole::ur_player;
-						ss.addCharacterInSession(this, sessionId, charId, enterAs, charac->getRingAccess(), charac->getNewcomer());
-						// update the participant status
-						sessionPart->setStatus(TSessionPartStatus::sps_playing);
-						mustGrantFastDisconnection = true;
-					}
-					// save the participant status
-					sessionPart->update(_RingDb);
 				}
-				else
+				break;
+			case TSessionType::st_mainland:
 				{
-					// this is for a GM without participation
-					if (session->getSessionType() == TSessionType::st_edit)
-						enterAs = WS::TUserRole::ur_editor;
-					else
-						enterAs = WS::TUserRole::ur_player;
-					// allow connection on the DSS
-					ss.addCharacterInSession(this, sessionId, charId, enterAs, charac->getRingAccess(), charac->getNewcomer());
-					mustGrantFastDisconnection = true;
-				}
-			}
-			else
-			{
-				// join a mainland session
-				// retrieve the welcome service (TODOliv: optim)
-				for (TWelcomeServices::iterator itws=_WelcomeServices.begin(); itws!=_WelcomeServices.end(); ++itws)
-				{
-					TWelcomeServiceInfo &wsi = itws->second;
-					if (wsi.FixedSessionId == sessionId) // found the mainland WS
+					// join a mainland session
+					// retrieve the welcome service (TODOliv: optim)
+					for (TWelcomeServices::iterator itws=_WelcomeServices.begin(); itws!=_WelcomeServices.end(); ++itws)
 					{
-						// match the access priv with ws open state
-						if (!wsi.ShardInfo->getWSOnline())
+						TWelcomeServiceInfo &wsi = itws->second;
+						if (wsi.FixedSessionId == sessionId) // found the mainland WS
 						{
-							// the shard reports itself as down
-							joinSessionResult(from, charId >>4, sessionId, 14, string("Shard is down : ")+wsi.ShardInfo->getMOTD(), TSessionPartStatus::invalid_val);
-							return;
+							// match the access priv with ws open state
+							if (!wsi.ShardInfo->getWSOnline())
+							{
+								// the shard reports itself as down
+								joinSessionResult(from, charId >>4, sessionId, 14, string("Shard is down : ")+wsi.ShardInfo->getMOTD(), TSessionPartStatus::invalid_val);
+								return;
+							}
+							if (!checkAccessRight(userAccessPriv, wsi.ShardInfo->getRequiredState()))
+							{
+								// the shard is up but restricted to another access level
+								joinSessionResult(from, charId >>4, sessionId, 14, toString("Shard is restricted to %s access : %s", wsi.ShardInfo->getRequiredState().toString().c_str(), wsi.ShardInfo->getMOTD().c_str()), TSessionPartStatus::invalid_val);
+								return;
+							}
+
+							wspSwitch = new WS::CWelcomeServiceProxy( wsi.WSModuleProxy );
+							break;
 						}
-						if (!checkAccessRight(userAccessPriv, wsi.ShardInfo->getRequiredState()))
+					}
+					if (wspSwitch == NULL)
+					{
+						// can't find a welcome service for this shard
+
+						// try to read a shard status in the database
+						CShardPtr shard = CShard::load(_RingDb, sessionId.asInt(), __FILE__, __LINE__);
+						if (shard != NULL)
 						{
-							// the shard is up but restricted to another access level
-							joinSessionResult(from, charId >>4, sessionId, 14, toString("Shard is restricted to %s access : %s", wsi.ShardInfo->getRequiredState().toString().c_str(), wsi.ShardInfo->getMOTD().c_str()), TSessionPartStatus::invalid_val);
-							return;
+							joinSessionResult(from, charId>>4, sessionId, 5, string("Shard closed : ")+shard->getMOTD(), TSessionPartStatus::invalid_val);
+						}
+						else
+						{
+							joinSessionResult(from, charId>>4, sessionId, 5, "No welcome service to connect to the selected shard", TSessionPartStatus::invalid_val);
 						}
 
-						wspSwitch = new WS::CWelcomeServiceProxy( wsi.WSModuleProxy );
-						break;
+						return;
 					}
+					storedSessionId = 0;
+					enterAs = WS::TUserRole::ur_player;
 				}
-				if (wspSwitch == NULL)
+				break;
+			case TSessionType::st_dynworld:
 				{
-					// can't find a welcome service for this shard
-
-					// try to read a shard status in the database
-					CShardPtr shard = CShard::load(_RingDb, sessionId.asInt(), __FILE__, __LINE__);
-					if (shard != NULL)
+					// join a mainland session
+					// retrieve the welcome service (TODOliv: optim)
+					for (TWelcomeServices::iterator itws=_WelcomeServices.begin(); itws!=_WelcomeServices.end(); ++itws)
 					{
-						joinSessionResult(from, charId>>4, sessionId, 5, string("Shard closed : ")+shard->getMOTD(), TSessionPartStatus::invalid_val);
-					}
-					else
-					{
-						joinSessionResult(from, charId>>4, sessionId, 5, "No welcome service to connect to the selected shard", TSessionPartStatus::invalid_val);
-					}
+						TWelcomeServiceInfo &wsi = itws->second;
+						if (wsi.FixedSessionId == sessionId) // found the mainland WS
+						{
+							// match the access priv with ws open state
+							if (!wsi.ShardInfo->getWSOnline())
+							{
+								// the shard reports itself as down
+								joinSessionResult(from, charId >>4, sessionId, 14, string("Shard is down : ")+wsi.ShardInfo->getMOTD(), TSessionPartStatus::invalid_val);
+								return;
+							}
+							if (!checkAccessRight(userAccessPriv, wsi.ShardInfo->getRequiredState()))
+							{
+								// the shard is up but restricted to another access level
+								joinSessionResult(from, charId >>4, sessionId, 14, toString("Shard is restricted to %s access : %s", wsi.ShardInfo->getRequiredState().toString().c_str(), wsi.ShardInfo->getMOTD().c_str()), TSessionPartStatus::invalid_val);
+								return;
+							}
 
-					return;
+							wspSwitch = new WS::CWelcomeServiceProxy( wsi.WSModuleProxy );
+							break;
+						}
+					}
+					if (wspSwitch == NULL)
+					{
+						// can't find a welcome service for this shard
+
+						// try to read a shard status in the database
+						CShardPtr shard = CShard::load(_RingDb, sessionId.asInt(), __FILE__, __LINE__);
+						if (shard != NULL)
+						{
+							joinSessionResult(from, charId>>4, sessionId, 5, string("Shard closed : ")+shard->getMOTD(), TSessionPartStatus::invalid_val);
+						}
+						else
+						{
+							joinSessionResult(from, charId>>4, sessionId, 5, "No welcome service to connect to the selected shard", TSessionPartStatus::invalid_val);
+						}
+
+						return;
+					}
+					storedSessionId = 0;
+					enterAs = WS::TUserRole::ur_player;
 				}
-				storedSessionId = 0;
-				enterAs = WS::TUserRole::ur_player;
+				break;
 			}
 
 			WS::CWelcomeServiceProxy wsp( *wspSwitch );
