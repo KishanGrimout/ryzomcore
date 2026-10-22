@@ -62,6 +62,8 @@
 #include "server_share/client_text.h"
 #include "server_share/client_refusal.h"
 
+#include "game_share/dynworld/voxel.h"
+
 using namespace NLMISC;
 using namespace NLNET;
 using namespace std;
@@ -3572,6 +3574,43 @@ void cbGetNpcIconDesc( NLNET::CMessage& msgin, const std::string & serviceName, 
 }
 
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+//		CLIENT:DYN_WORLD
+///////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+void cbClientSetVoxel(NLNET::CMessage& msgin, const std::string & serviceName, NLNET::TServiceId serviceId)
+{
+	CEntityId id;
+	msgin.serial(id);
+
+	TVoxelPos voxelPos;
+	msgin.serial(voxelPos);
+
+	Voxel voxel;
+	msgin.serial(voxel);
+
+	CEntityBase* entity = CEntityBaseManager::getEntityBasePtr(id);
+
+	if (entity == NULL)
+	{
+		nlwarning("<EntityCallbacks::cbDefaultAttack> Invalid entity Id %s", id.toString().c_str());
+		return;
+	}
+
+	// can entity use actions ?
+	if (!entity->canEntityUseAction())
+		return;
+
+	// transmit to GPMS
+	CMessage msgout("SET_VOXEL");
+	msgout.serial(voxelPos);
+	msgout.serial(voxel);
+
+	sendMessageViaMirror("GPMS", msgout);
+}
+
+
 //----------------------------
 //	CbClientArray
 //----------------------------
@@ -3828,6 +3867,8 @@ TUnifiedCallbackItem CbClientArray[]=
 	{ "CLIENT:RING_MISSION:MISSION_RING_SELECT",cbRingMissionSelectAction },
 
 	{ "CLIENT:NPC_ICON:GET_DESC",				cbGetNpcIconDesc },
+
+	{ "CLIENT:DYN_WORLD:SET_VOXEL",				cbClientSetVoxel },
 };
 
 
