@@ -276,7 +276,11 @@ Dependencies: U-C4 (for `CDynContinent::MAP`). Validation: `ryzom_client` Releas
 
 #### U-C7 — debug tooling
 
-- [ ] Port.
+- [x] Done (2026-10-22). `commands.cpp`: dynworld + material_library includes and the `#if !FINAL_VERSION` block of 19 `NLMISC_COMMAND(dyn_*)` debug commands (`dyn_regenvoxels`, `dyn_regenmesh`, `dyn_prefetchextents`, `dyn_floorheight`, `dyn_cubicgen`, `dyn_renderoldlandscape`, `dyn_refreshpos`, `dyn_snap` → U-C4 `g_noSnap`, `dyn_baselod`/`dyn_maxlod`/`dyn_fardist`, `dyn_setvoxel`/`dyn_addvoxel` (with the `DYN_WORLD:SET_VOXEL` impulse, server handler already in place from U-S4), `dyn_voxelselection`, `dyn_rebuildshaders`, `dyn_useVP`/`dyn_usePP`/`dyn_reloadenvconfig`, `dyn_igdist`); all `extern` globals resolve (map_client/dyn_landscape* client modules from U-C3 + `dyn_global_retriever.cpp`/`mapgen.cpp` from the U-S ports). Legacy `#pragma optimize("", off)` skipped per roadmap note.
+- ShowInfos cycle `%6` → `%7` + updated extern-comment in `debug_client.cpp`; `main_loop.cpp` calls the new `displayDebugGeneration()` on level 6.
+- `main_loop_debug.{h,cpp}`: `displayDebugGeneration()` added — **U-M2 decision: strip**. The `#ifdef NL_RUNNABLE_STATS` / `CTasksStats` runnable-stats block is not ported (the define is set nowhere in the current tree; sole consumer was this dump block; same dead-code reasoning as `RYZOM_BG_DOWNLOADER` in U-C2) — replaced by a `NLMISC-PIX-STRIPPED` note; the `<nel/misc/task_manager.h>` include wasn't needed. U-M2 port remains available on request if runnable-stats profiling ever becomes useful.
+
+Dependencies: U-C2/U-C4/U-C6 (commands touch live map state). Validation: `ryzom_client` Release build clean; run the dyn_* commands locally deferred to Phase 5.
 
 `commands.cpp`: ~20 `NLMISC_COMMAND(dyn_*)` debug commands including `dyn_setvoxel`/`dyn_addvoxel` → `DYN_WORLD:SET_VOXEL` impulse (skip the legacy `#pragma optimize("", off)` suggestion — incidental). `debug_client.cpp` + `interface_v3/action_handler_debug.cpp`: ShowInfos cycle `%6` → `%7`. `main_loop_debug.{h,cpp}`: `displayDebugGeneration()` — decide: port U-M2 stats stack, or strip the `CTasksStats` block from this function.
 

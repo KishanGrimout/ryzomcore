@@ -2038,6 +2038,9 @@ bool mainLoop()
 						if(ShowInfos == 5)
 							displayDebugUIUnderMouse();
 
+						if (ShowInfos == 6)
+							displayDebugGeneration();
+
 						// If show information is Active.
 						displayStreamingDebug();
 
