@@ -518,6 +518,43 @@ void displayDebugFps()
 	}
 }
 
+void displayDebugGeneration()
+{
+	float lineStep = ClientCfg.DebugLineStep;
+	float line;
+
+	// Initialize Pen //
+	//----------------//
+	// Create a shadow when displaying a text.
+	TextContext->setShaded(true);
+	TextContext->setShadeOutline(false);
+	// Set the font size.
+	TextContext->setFontSize(ClientCfg.DebugFontSize);
+	// Set the text color
+	TextContext->setColor(ClientCfg.DebugFontColor);
+
+	// TOP LEFT //
+	//----------//
+	TextContext->setHotSpot(UTextContext::TopLeft);
+	line = 0.9f;
+
+	// Ms per frame
+	{
+		float spf = smoothFPS.getSmoothValue();
+		// Ms per frame
+		TextContext->printfAt(0.f, line, "FPS %.1f ms - %.1f fps", spf * 1000, 1.f / spf);
+		line -= lineStep;
+		// More Smoothed Ms per frame
+		spf = moreSmoothFPS.getSmoothValue();
+		TextContext->printfAt(0.f, line, "Smoothed FPS %.1f ms - %.1f fps", spf * 1000, 1.f / spf);
+		line -= lineStep*2;
+	}
+
+// NLMISC-PIX-STRIPPED: legacy U-M2 runnable-stats profiling stack (NL_RUNNABLE_STATS /
+// CTasksStats) not ported - the define is set nowhere in the current tree and its only
+// consumer was this dump block; port remains available on request.
+}
+
 // ********************************************************************
 // ********************************************************************
 // ********************************************************************

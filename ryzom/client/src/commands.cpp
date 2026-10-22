@@ -53,6 +53,7 @@
 #include "game_share/mode_and_behaviour.h"
 #include "game_share/brick_types.h"
 #include "game_share/time_weather_season/time_and_season.h"
+#include "game_share/dynworld/material_library.h"
 
 #include "entity_animation_manager.h"
 #include "ingame_database_manager.h"
@@ -106,6 +107,8 @@
 #include "nel/gui/lua_manager.h"
 #include "user_agent.h"
 #include "item_group_manager.h"
+#include "dynworld/dyn_continent.h"
+#include "dynworld/map_client.h"
 
 //
 // Only the define FINAL_VERSION can be defined on the project, not in this file
@@ -5324,6 +5327,331 @@ NLMISC_COMMAND(luaGC, "Force a garbage collector of lua", "")
 		pIM->displaySystemInfo( LuaHelperStuff::formatLuaErrorSysInfo(LUADebugNotEnabledMsg));
 		return false;
 	}
+}
+#endif
+
+#if !FINAL_VERSION
+extern bool g_forceRegenerate;
+NLMISC_COMMAND(dyn_regenvoxels, "Regenerates dyn world voxels", "")
+{
+	g_forceRegenerate = true;
+	return true;
+}
+
+extern bool g_forceRegenerateMesh;
+NLMISC_COMMAND(dyn_regenmesh, "Regenerates dyn world mesh", "")
+{
+	g_forceRegenerateMesh = true;
+	return true;
+}
+
+extern CVector g_prefetchBound;
+NLMISC_COMMAND(dyn_prefetchextents, "Set the voxels prefetch extents", "<X extent> <Y extent> <Z extent>")
+{
+	if (args.empty()) return false;
+	if (args.size() != 3) return false;
+	fromString(args[0], g_prefetchBound.x);
+	fromString(args[1], g_prefetchBound.y);
+	fromString(args[2], g_prefetchBound.z);
+	return true;
+}
+
+extern float g_floorHeight;
+NLMISC_COMMAND(dyn_floorheight, "Set the generation floor height", "<height>")
+{
+	if (args.empty()) return false;
+	if (args.size() > 2) return false;
+	fromString(args[0], g_floorHeight);
+	return true;
+}
+
+extern bool g_useCubicExtractor;
+NLMISC_COMMAND(dyn_cubicgen, "Toggle mesh generation with cubic generator", "")
+{
+	g_useCubicExtractor = !g_useCubicExtractor;
+	return true;
+}
+
+extern bool g_renderLegacyLandscape;
+NLMISC_COMMAND(dyn_renderoldlandscape, "Toggle render of legacy landscape", "")
+{
+	g_renderLegacyLandscape = !g_renderLegacyLandscape;
+	return true;
+}
+
+extern bool g_refresh;
+NLMISC_COMMAND(dyn_refreshpos, "Toggle refresh of generation from player position", "")
+{
+	g_refresh = !g_refresh;
+	return true;
+}
+
+extern bool g_noSnap;
+NLMISC_COMMAND(dyn_snap, "Toggle snap player position to ground", "")
+{
+	g_noSnap = !g_noSnap;
+	//pIM->displaySystemInfo("");
+	return true;
+}
+
+extern uint g_baselod;
+NLMISC_COMMAND(dyn_baselod, "Set the min lod level to extract mesh", "<lod>")
+{
+	if (args.empty()) return false;
+	if (args.size() > 2) return false;
+	fromString(args[0], g_baselod);
+	return true;
+}
+
+extern uint g_maxlod;
+NLMISC_COMMAND(dyn_maxlod, "Set the max lod level to extract mesh", "<lod>")
+{
+	if (args.empty()) return false;
+	if (args.size() > 2) return false;
+	fromString(args[0], g_maxlod);
+	return true;
+}
+
+extern float g_farTransition[];
+NLMISC_COMMAND(dyn_fardist, "Set transition radius between LOD levels", "<index transition> <radius>")
+{
+	if (args.size() != 2) return false;
+	
+	uint arrayIndex;
+	fromString(args[0], arrayIndex);
+
+	if (arrayIndex > 1) return false;
+
+	fromString(args[1], g_farTransition[arrayIndex]);
+
+	return true;
+}
+
+NLMISC_COMMAND(dyn_setvoxel, "Set the voxel under cursor", "<type> <density> [<radius>, <length X> <width Y> <height Z>]")
+{
+	if (args.size() < 1) return false;
+
+	Voxel voxel;
+	uint currArgIndex = 0;
+	if (args[currArgIndex] == "Air")
+	{
+		voxel.setType(Voxel::Air);
+		currArgIndex++;
+	}
+	else
+	{
+		if (args[currArgIndex] == "Raw") // "Raw" is optional
+			currArgIndex++;
+
+		uint envId = 0;
+		const CEnvironmentDefinition* envDef = CMaterialLibrary::instance().getEnvironmentDef(args[currArgIndex].c_str());
+		if (envDef != nullptr)
+		{
+			envId = envDef->getId();
+			++currArgIndex;
+		}
+		
+		// Find material ID
+		uint matId = 0;
+		const CMaterialDefinition* materialDef = CMaterialLibrary::instance().getMaterialDef(args[currArgIndex].c_str());
+		if (materialDef == NULL)
+		{
+			uint type;
+			fromString(args[currArgIndex], type);
+			matId = (Voxel::MaterialType)type;
+		}
+		else
+		{
+			matId = materialDef->getId();
+		}
+		currArgIndex++;
+
+		// The density
+		uint density;
+		fromString(args[currArgIndex++], density);
+
+		voxel.setType(Voxel::Raw);
+		voxel.setMaterial(matId);
+		voxel.setBiome(envId);
+		voxel.setDensity(density);
+	}
+
+	std::vector<TVoxelPos> voxelsToSet;
+	TVoxelPos voxelPos = CDynContinent::MAP->voxelUnderCursor();
+	TVoxelPos selectionDir = voxelPos - CDynContinent::MAP->emptyVoxelUnderCursor();
+	if (selectionDir.x == 0) selectionDir.x = 1;
+	if (selectionDir.y == 0) selectionDir.y = 1;
+	if (selectionDir.z == 0) selectionDir.z = 1;
+
+	// set a box
+	if (args.size() == currArgIndex + 3)
+	{
+		uint x, y, z;
+		fromString(args[currArgIndex++], x);
+		fromString(args[currArgIndex++], y);
+		fromString(args[currArgIndex++], z);
+		voxelsToSet.reserve(x*y*z);
+		for (uint i = 0; i < x; ++i)
+		{
+			for (uint j = 0; j < y; ++j)
+			{
+				for (uint k = 0; k < z; ++k)
+				{
+					TVoxelPos offset(i * selectionDir.x, j * selectionDir.y, k * selectionDir.z);
+					voxelsToSet.push_back(voxelPos + offset);
+				}
+			}
+		}
+	}
+	else if (args.size() == currArgIndex + 1)
+	{
+		// set a sphere
+	}
+	else
+	{
+		voxelsToSet.reserve(1);
+		voxelsToSet.push_back(voxelPos);
+	}
+
+	for (uint i = 0; i < voxelsToSet.size(); ++i)
+	{
+		// TODO: use map deferred command
+		CDynContinent::MAP->setVoxelAt(voxelsToSet[i], voxel);
+
+		CBitMemStream out;
+		if (GenericMsgHeaderMngr.pushNameToStream("DYN_WORLD:SET_VOXEL", out))
+		{
+			out.serial(voxelsToSet[i]);
+			out.serial(voxel);
+
+			NetMngr.push(out);
+		}
+	}
+
+	return true;
+}
+
+NLMISC_COMMAND(dyn_addvoxel, "Set the voxel on the selected one", "<type> <density>")
+{
+	if (args.size() < 1) return false;
+
+	Voxel voxel;
+	if (args[0] == "Air")
+	{
+		voxel.setType(Voxel::Air);
+	}
+	else
+	{
+		if (args.size() < 2) return false;
+
+		uint argIndex = 0;
+		if (args[0] == "Raw")
+		{
+			if (args.size() < 3) return false;
+			argIndex++;
+		}
+
+		uint envId = 0;
+		const CEnvironmentDefinition* envDef = CMaterialLibrary::instance().getEnvironmentDef(args[argIndex].c_str());
+		if (envDef != nullptr)
+		{
+			envId = envDef->getId();
+			++argIndex;
+		}
+
+		uint matId = 0;
+		const CMaterialDefinition* materialDef = CMaterialLibrary::instance().getMaterialDef(args[argIndex].c_str());
+		if (materialDef == NULL)
+		{
+			uint type;
+			fromString(args[argIndex], type);
+			matId = (Voxel::MaterialType)type;
+		}
+		else
+		{
+			matId = materialDef->getId();
+		}
+		argIndex++;
+
+		uint density;
+		fromString(args[argIndex], density);
+
+		voxel.setType(Voxel::Raw);
+		voxel.setMaterial(matId);
+		voxel.setBiome(envId);
+		voxel.setDensity(density);
+	}
+
+	TVoxelPos voxelPos = CDynContinent::MAP->emptyVoxelUnderCursor();
+	// TODO: use map deferred command
+	CDynContinent::MAP->setVoxelAt(voxelPos, voxel);
+
+	CBitMemStream out;
+	if (GenericMsgHeaderMngr.pushNameToStream("DYN_WORLD:SET_VOXEL", out))
+	{
+		out.serial(voxelPos);
+		out.serial(voxel);
+
+		NetMngr.push(out);
+	}
+
+	return true;
+}
+
+NLMISC_COMMAND(dyn_voxelselection, "Activate/deactivate/toggle voxel selection", "[on,off]")
+{
+	if (args.empty())
+	{
+		CDynContinent::MAP->setVoxelSelectionActivation(!CDynContinent::MAP->isVoxelSelectionActive());
+	}
+	else if (args[0] == "on")
+	{
+		CDynContinent::MAP->setVoxelSelectionActivation(true);
+	}
+	else
+	{
+		CDynContinent::MAP->setVoxelSelectionActivation(false);
+	}
+
+	return true;
+}
+
+extern bool g_rebuildShaders;
+NLMISC_COMMAND(dyn_rebuildshaders, "Rebuild the landscape shaders", "")
+{
+	g_rebuildShaders = true;
+	return true;
+}
+
+extern bool g_useVP;
+NLMISC_COMMAND(dyn_useVP, "Toggle use of dyn landscape vertex program", "")
+{
+	g_useVP = !g_useVP;
+	return true;
+}
+
+extern bool g_usePP;
+NLMISC_COMMAND(dyn_usePP, "Toggle use of dyn landscape pixel program", "")
+{
+	g_usePP = !g_usePP;
+	return true;
+}
+
+extern bool g_reloadEnvConfig;
+NLMISC_COMMAND(dyn_reloadenvconfig, "Reload environment .cfg files", "")
+{
+	g_reloadEnvConfig = true;
+	g_forceRegenerateMesh = true;
+	return true;
+}
+
+extern float g_igFar;
+NLMISC_COMMAND(dyn_igdist, "Set IG generation distance", "<radius>")
+{
+	if (args.empty()) return false;
+	if (args.size() > 2) return false;
+	fromString(args[0], g_igFar);
+	return true;
 }
 #endif
 

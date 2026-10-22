@@ -70,7 +70,7 @@ bool	FreezeGraph = false;
 
 //the NEL 3d textcontext
 extern NL3D::UTextContext *TextContext;
-extern uint8 ShowInfos;		// 0=no info 1=text info 2=graph info 3=streaming info 4=fps only
+extern uint8 ShowInfos;		// 0=no info 1=text info 2=graph info 3=streaming info 4=fps only 5=UI under mouse 6=world generation info
 extern UDriver			*Driver;
 
 /// domain server version for patch
