@@ -34,7 +34,6 @@ using testing::SizeIs;
 using testing::StrEq;
 
 using CVar = NLMISC::CConfigFile::CVar;
-using NLMISC::IStream;
 using NLMISC::nlSleep;
 using NLNET::CCallbackClient;
 using NLNET::CCallbackNetBase;
@@ -48,7 +47,7 @@ struct VLPRequest
 	ucstring login;
 	std::string cpassword;
 	std::string application;
-	void serial(IStream &stream)
+	void serial(NLMISC::IStream &stream)
 	{
 		stream.serial(login);
 		stream.serial(cpassword);
@@ -60,7 +59,7 @@ struct VLPResponse
 {
 	std::string reason;
 	std::vector<OnlineShardProjection> shards;
-	void serial(IStream &stream)
+	void serial(NLMISC::IStream &stream)
 	{
 		stream.serial(reason);
 		if (reason.empty())
@@ -80,7 +79,7 @@ struct VLPResponse
 struct CSRequest
 {
 	sint32 shardid;
-	void serial(IStream &stream)
+	void serial(NLMISC::IStream &stream)
 	{
 		stream.serial(shardid);
 	}
@@ -89,7 +88,7 @@ struct CSRequest
 struct SCSResponse
 {
 	std::string reason;
-	void serial(IStream &stream)
+	void serial(NLMISC::IStream &stream)
 	{
 		stream.serial(reason);
 		if (reason.empty())
@@ -131,28 +130,28 @@ protected:
 	std::chrono::seconds defaultTimeout = std::chrono::seconds(10);
 
 	VLPRequest verifyLogin {
-		.login = ucstring::makeFromUtf8("test-login"),
-		.cpassword = "test password",
-		.application = "test-application"
+		ucstring::makeFromUtf8("test-login"),
+		"test password",
+		"test-application"
 	};
 	LoginUserProjection user {
-		.uid = 123,
-		.password = verifyLogin.cpassword,
-		.state = "Offline"
+		123,
+		verifyLogin.cpassword,
+		"Offline"
 	};
 	OnlineShardProjection shard {
-		.sid = 456,
-		.name = ucstring::makeFromUtf8("test shard"),
-		.nbplayers = 111
+		456,
+		ucstring::makeFromUtf8("test shard"),
+		111
 	};
 	CSRequest chooseShard {
-		.shardid = 456
+		456
 	};
 	AuthorizedUserProjection authorizedUser {
-		.uid = "test user id",
-		.cookie = NLNET::CLoginCookie(),
-		.privilege = "test privilege",
-		.extendedPrivilege = "test extended privilege",
+		"test user id",
+		NLNET::CLoginCookie(),
+		"test privilege",
+		"test extended privilege",
 	};
 
 	void SetUp() override

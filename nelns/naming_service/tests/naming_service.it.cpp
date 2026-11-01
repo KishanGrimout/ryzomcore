@@ -145,12 +145,12 @@ protected:
 
 		CVar uniqueOnShardServices;
 		uniqueOnShardServices.Type = NLMISC::CConfigFile::CVar::T_STRING;
-		uniqueOnShardServices.setAsString((vector<string>) {});
+		uniqueOnShardServices.setAsString(vector<string>{});
 		namingService.ConfigFile.insertVar("UniqueOnShardServices", uniqueOnShardServices);
 
 		CVar uniqueByMachineServices;
 		uniqueByMachineServices.Type = NLMISC::CConfigFile::CVar::T_STRING;
-		uniqueByMachineServices.setAsString((vector<string>) {});
+		uniqueByMachineServices.setAsString(vector<string>{});
 		namingService.ConfigFile.insertVar("UniqueByMachineServices", uniqueByMachineServices);
 
 		CVar nsPort;
@@ -176,9 +176,9 @@ protected:
 TEST_F(CNamingServiceIT, shouldAnswerToRegistration)
 {
 	RGRequest request {
-		.serviceId = TServiceId(123),
-		.name = "test register service",
-		.addresses = { "localhost:12345" }
+		TServiceId(123),
+		"test register service",
+		{ "localhost:12345" }
 	};
 	CMessage msgout("RG");
 	msgout.serial(request);
@@ -224,9 +224,9 @@ TEST_F(CNamingServiceIT, shouldAnswerToRegistration)
 TEST_F(CNamingServiceIT, shouldUpdateServiceRegistry)
 {
 	RGRequest request {
-		.serviceId = TServiceId(123),
-		.name = "test re-register service",
-		.addresses = { "localhost:12345" }
+		TServiceId(123),
+		"test re-register service",
+		{ "localhost:12345" }
 	};
 	CMessage msgout("RRG");
 	msgout.serial(request);
