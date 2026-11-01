@@ -558,12 +558,10 @@ void CLuaIHMRyzom::RegisterRyzomFunctions(NLGUI::CLuaState &ls)
 		luabind::def("messageBoxWithHelp", (void(*)(const std::string &)) &messageBoxWithHelp),
 		LUABIND_FUNC(replacePvpEffectParam),
 		LUABIND_FUNC(secondsSince1970ToHour),
-#ifdef RYZOM_BG_DOWNLOADER
 		LUABIND_FUNC(pauseBGDownloader),
 		LUABIND_FUNC(unpauseBGDownloader),
 		LUABIND_FUNC(requestBGDownloaderPriority),
 		LUABIND_FUNC(getBGDownloaderPriority),
-#endif
 		LUABIND_FUNC(loadBackground),
 		LUABIND_FUNC(getPatchLastErrorMessage),
 		LUABIND_FUNC(getPlayerSelectedSlot),
@@ -3168,36 +3166,50 @@ sint32 CLuaIHMRyzom::secondsSince1970ToHour(sint32 seconds)
 	return tstruct->tm_hour;	// 0-23
 }
 
-#ifdef RYZOM_BG_DOWNLOADER
+// ***************************************************************************
+// NB: these stay bound even when RYZOM_BG_DOWNLOADER is compiled out, as no-op
+// stubs, so UI Lua scripts don't hit nil-call errors in the creation flow.
 // ***************************************************************************
 void CLuaIHMRyzom::pauseBGDownloader()
 {
+#ifdef RYZOM_BG_DOWNLOADER
 	::pauseBGDownloader();
+#endif
+	// [stub] background downloader compiled out: no-op
 }
 
 // ***************************************************************************
 void CLuaIHMRyzom::unpauseBGDownloader()
 {
+#ifdef RYZOM_BG_DOWNLOADER
 	::unpauseBGDownloader();
+#endif
+	// [stub] background downloader compiled out: no-op
 }
 
 // ***************************************************************************
 void CLuaIHMRyzom::requestBGDownloaderPriority(uint priority)
 {
+#ifdef RYZOM_BG_DOWNLOADER
 	if (priority >= BGDownloader::ThreadPriority_Count)
 	{
 		throw NLMISC::Exception("requestBGDownloaderPriority() : invalid priority");
 	}
 
 	CBGDownloaderAccess::getInstance().requestDownloadThreadPriority((BGDownloader::TThreadPriority) priority, false);
+#endif
+	// [stub] background downloader compiled out: no-op
 }
 
 // ***************************************************************************
 sint CLuaIHMRyzom::getBGDownloaderPriority()
 {
+#ifdef RYZOM_BG_DOWNLOADER
 	return CBGDownloaderAccess::getInstance().getDownloadThreadPriority();
-}
+#else
+	return -1;	// [stub] -1 = "downloader disabled" for Lua callers
 #endif
+}
 
 // ***************************************************************************
 void CLuaIHMRyzom::loadBackground(const std::string &bg)

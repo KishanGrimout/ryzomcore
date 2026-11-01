@@ -500,5 +500,9 @@
   <branch name="DYN_WORLD">
     <leaf name="SET_VOXEL" sendto="EGS" format="s32 s32 s32 u8 u8 u8 u8" description="client changes value of a voxel" />
     <!-- x y z materialIndex param0 param1 param2 -->
+    <!-- [DYN_WORLD] padding leaf: branches with exactly one child get getPowerOf2(1)=0 bits
+         and pushNameToStream refuses to serialize them (generic_xml_msg_mngr NbBits==0 check).
+         Keep at least 2 children here. -->
+    <leaf name="DUMMY" description="padding leaf, keeps DYN_WORLD branch encodable (>=2 children)" />
   </branch>
 </client_messages_description>

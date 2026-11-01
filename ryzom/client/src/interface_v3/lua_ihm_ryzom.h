@@ -186,12 +186,12 @@ private:
 	static std::string	replacePvpEffectParam(const std::string &str, sint32 parameter); // TODO: UTF-8 Lua
 #endif
 	static sint32 secondsSince1970ToHour(sint32 seconds);
-#ifdef RYZOM_BG_DOWNLOADER
+	// pause/unpause/priority must always be bound: UI Lua calls them (character-creation flow, bg_downloader panel);
+	// when RYZOM_BG_DOWNLOADER is not compiled in, the implementations are no-op stubs
 	static void	pauseBGDownloader();
 	static void	unpauseBGDownloader();
 	static void	requestBGDownloaderPriority(uint priority);
 	static sint	getBGDownloaderPriority();
-#endif
 	static void	loadBackground(const std::string &bg);
 #ifdef RYZOM_LUA_UCSTRING
 	static CLuaUCString	getPatchLastErrorMessage();
