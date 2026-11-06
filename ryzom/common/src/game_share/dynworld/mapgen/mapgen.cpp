@@ -125,6 +125,7 @@ uint g_averageFactor = 26;
 float g_logMinSoil = 100.f;
 float g_logMaxSoil = -100.f;
 float g_invXYdisplacementSpread = 1.f / 25.f;
+float g_invSurfaceAttenuationHeight = 1.f / 10.f;
 
 float CMapGen::cacheTerrainLevel(CBlockMakeData& data, const NLMISC::CVectorI& position, sint& stone_surface_max_z)
 {
@@ -428,9 +429,9 @@ sint CMapGen::generateGround(CBlockMakeData& data)
 	const sint minY = data.m_region.getLowerY(), maxY = data.m_region.getUpperY();
 	const sint minZ = data.m_region.getLowerZ(), maxZ = data.m_region.getUpperZ();
 
-	const sint mapMinX = minX - g_AdditionnalBorder, mapMaxX = maxX + g_AdditionnalBorder;
-	const sint mapMinY = minY - g_AdditionnalBorder, mapMaxY = maxY + g_AdditionnalBorder;
-	const sint mapMinZ = minZ - g_AdditionnalBorder, mapMaxZ = maxZ + g_AdditionnalBorder;
+	const sint extendedMinX = minX - g_AdditionnalBorder, extendedMaxX = maxX + g_AdditionnalBorder;
+	const sint extendedMinY = minY - g_AdditionnalBorder, extendedMaxY = maxY + g_AdditionnalBorder;
+	const sint extendedMinZ = minZ - g_AdditionnalBorder, extendedMaxZ = maxZ + g_AdditionnalBorder;
 
 	bool skipGroundGen = false;
 	sint8 initHeight = std::numeric_limits<sint8>::min();
@@ -447,15 +448,16 @@ sint CMapGen::generateGround(CBlockMakeData& data)
 		skipGroundGen = true;
 	}
 
-	const uint width = data.m_region.getWidthInVoxels();
+	const uint effectiveWidth = data.m_region.getWidthInVoxels();
 	const float invLodScale = 1.f / data.m_lodScale;
-	const uint chunkWidth = width * invLodScale;
-	const uint mapWidth = data.m_region.getWidthInVoxels() + 2 * g_AdditionnalBorder;
+	const uint chunkWidth = effectiveWidth * invLodScale;
+	const uint extendedWidth = data.m_region.getWidthInVoxels() + 2 * g_AdditionnalBorder;
+	const uint extendedChunkWidth = extendedWidth * invLodScale;
 
-	data.m_biomeMap.resize(mapWidth * mapWidth);
-	data.m_hardFloorZMap.resize(mapWidth * mapWidth, initHeight);
-	data.m_softFloorZMap.resize(mapWidth * mapWidth, initHeight);
-	data.m_chunkDensities.resize(mapWidth * mapWidth * mapWidth, 0.f);
+	data.m_biomeMap.resize(extendedWidth * extendedWidth);
+	data.m_hardFloorZMap.resize(extendedWidth * extendedWidth, initHeight);
+	data.m_softFloorZMap.resize(extendedWidth * extendedWidth, initHeight);
+	data.m_chunkDensities.resize(extendedWidth * extendedWidth * extendedWidth, 0.f);
 
 	const uint lodStep = data.m_lodScale;
 	const float invLodStep = 1.f / lodStep;
@@ -464,9 +466,9 @@ sint CMapGen::generateGround(CBlockMakeData& data)
 		//NL_PROF("ComputeNoiseMaps");
 		NLMISC::CVectorI position(0, 0, 0);
 		uint32 index = 0;
-		for (sint y = mapMinY; y <= mapMaxY; y += lodStep)
+		for (sint y = extendedMinY; y <= extendedMaxY; y += lodStep)
 		{
-			for (sint x = mapMinX; x <= mapMaxX; x += lodStep, index++)
+			for (sint x = extendedMinX; x <= extendedMaxX; x += lodStep, index++)
 			{
 				position.x = x; position.y = y;
 
@@ -485,92 +487,96 @@ sint CMapGen::generateGround(CBlockMakeData& data)
 
 	{
 		//NL_PROF("ComputeXYDisplacement");
-		anl::CImplicitBasisFunction displacementX(anl::VALUE, anl::LINEAR);
-		displacementX.setSeed(0);
-		anl::CImplicitBasisFunction displacementY(anl::VALUE, anl::LINEAR);
-		displacementY.setSeed(1);
+		anl::CImplicitBasisFunction displacementNoiseX(anl::VALUE, anl::LINEAR);
+		displacementNoiseX.setSeed(0);
+		anl::CImplicitBasisFunction displacementNoiseY(anl::VALUE, anl::LINEAR);
+		displacementNoiseY.setSeed(1);
 
+		const float invSpread = g_invXYdisplacementSpread;
+		const float invSurfaceAttenuationHeight = g_invSurfaceAttenuationHeight;
 		const float xyMaxDisplacement = std::min(g_AdditionnalBorder, 5U);
-		for (sint y = 0; y < mapWidth; y += lodStep)
-		{
-			const sint inputY = (y + mapMinY);
+		const float surfaceAttenuationOffset = 2.f;
 
-			for (sint x = 0; x < mapWidth; x += lodStep)
+		for (sint y = 0; y < extendedWidth; y += lodStep)
+		{
+			const sint coordY = (y + extendedMinY);
+
+			for (sint x = 0; x < extendedWidth; x += lodStep)
 			{
-				const uint index = x * invLodStep + y * mapWidth * invLodStep;
+				const uint index2D = x * invLodStep + y * extendedWidth * invLodStep;
 
 				// Compute the final x, y position
-				const sint inputX = (x + mapMinX);
+				const sint coordX = (x + extendedMinX);
 
-				// Surface height
-				const sint surface_z_int = data.m_hardFloorZMap[index];
+				const sint surfaceZint = data.m_hardFloorZMap[index2D];
 
 				// Soil height
-				const float soil_surface_z = data.m_softFloorZMap[index];
+				const float soil_surface_z = data.m_softFloorZMap[index2D];
 				const float soil_surface_z_floor = std::floor(soil_surface_z);
 				const float soil_surface_density = (soil_surface_z - soil_surface_z_floor) * g_maxSurfaceDensity;
 				const sint soil_surface_z_int = static_cast<sint>(soil_surface_z_floor);
 
-				for (sint z = 0; z < width; z += lodStep)
+				for (sint z = 0; z < effectiveWidth; z += lodStep)
 				{
-					const sint inputZ = (z + minZ);
-					if (inputZ <= soil_surface_z_int + 1)
+					const sint coordZ = (z + minZ);
+					if (coordZ <= soil_surface_z_int)
 					{
-						const float invSpread = g_invXYdisplacementSpread;
-						const float fX = displacementX.get(inputX * invSpread, inputY * invSpread, inputZ * invSpread) * xyMaxDisplacement;
-						const float fY = displacementY.get(inputX * invSpread, inputY * invSpread, inputZ * invSpread) * xyMaxDisplacement;
+						const float surfaceAttenuation = std::min(1.f, std::max(0.f, (float(soil_surface_z_int - coordZ) - surfaceAttenuationOffset) * invSurfaceAttenuationHeight));
+						const float displacementX = surfaceAttenuation > 0.f ? displacementNoiseX.get(coordX * invSpread, coordY * invSpread, coordZ * invSpread) * xyMaxDisplacement * surfaceAttenuation : 0.f;
+						const float displacementY = surfaceAttenuation > 0.f ? displacementNoiseY.get(coordX * invSpread, coordY * invSpread, coordZ * invSpread) * xyMaxDisplacement * surfaceAttenuation : 0.f;
+
+						const float floorX = std::floor(displacementX);
+						const float floorY = std::floor(displacementY);
+						const float ceilX = std::ceil(displacementX);
+						const float ceilY = std::ceil(displacementY);
 						
-						const float floorX = std::floor(fX);
-						const float floorY = std::floor(fY);
-						const float ceilX = std::ceil(fX);
-						const float ceilY = std::ceil(fY);
+						const float remainingX = displacementX - floorX;
+						const float remainingY = displacementY - floorY;
 						
-						const float remainingX = fX - floorX;
-						const float remainingY = fY - floorY;
-						
-						const sint out1X = sint(floorX) + x;
-						const sint out1Y = sint(floorY) + y;
+						const sint lowOffsetX = static_cast<sint>(floorX) + x;
+						const sint lowOffsetY = static_cast<sint>(floorY) + y;
 						const float dx1 = 1.f - remainingX;
 						const float dy1 = 1.f - remainingY;
 						
-						const sint out2X = sint(ceilX) + x;
-						const sint out2Y = sint(ceilY) + y;
+						const sint highOffsetX = static_cast<sint>(ceilX) + x;
+						const sint highOffsetY = static_cast<sint>(ceilY) + y;
 						const float dx2 = remainingX;
 						const float dy2 = remainingY;
 						
-						const sint offsetX[2] = { out1X, out2X };
-						const sint offsetY[2] = { out1Y, out2Y };
+						const sint offsetXRange[2] = { lowOffsetX, highOffsetX };
+						const sint offsetYRange[2] = { lowOffsetY, highOffsetY };
 						const float coefX[2] = { dx1, dx2 };
 						const float coefY[2] = { dy1, dy2 };
 
-						for (sint i = 0; i <= out2X - out1X; ++i)
+						for (sint i = 0; i <= highOffsetX - lowOffsetX; ++i)
 						{
-							for (sint j = 0; j <= out2Y - out1Y; ++j)
+							for (sint j = 0; j <= highOffsetY - lowOffsetY; ++j)
 							{
-								const sint mx = (offsetX[i] - g_AdditionnalBorder) * invLodScale;
-								const sint my = (offsetY[j] - g_AdditionnalBorder) * invLodScale;
+								const sint mx = (offsetXRange[i]) * invLodScale;
+								const sint my = (offsetYRange[j]) * invLodScale;
 								const sint mz = z * invLodScale;
 
 								if (mx < 0 ||
-									mx >= width ||
+									mx >= extendedWidth ||
 									my < 0 ||
-									my >= width)
+									my >= extendedWidth)
 									continue;
 
-								const float densityCoef = coefX[i] * coefY[j] * data.m_lodScale;
+								const float densityCoef = (coefX[i] + coefY[j]) * 0.5f * data.m_lodScale;
 
-								const uint index3D = PolyVox::morton256_x[mx] | PolyVox::morton256_y[my] | PolyVox::morton256_z[mz];
+								//const uint index3D = PolyVox::morton256_x[mx] | PolyVox::morton256_y[my] | PolyVox::morton256_z[mz];
+								const uint index3D = mx * extendedWidth * extendedWidth + my * extendedWidth + mz;
 								const float initDensity = data.m_chunkDensities[index3D];
 
-								if (inputZ == soil_surface_z_int)
+								if (coordZ == soil_surface_z_int)
 								{
 									data.m_chunkDensities[index3D] = std::min(soil_surface_density * densityCoef + initDensity, float(Voxel::MaxDensity));
 								}
-								else if (inputZ < surface_z_int)
+								else if (coordZ < surfaceZint)
 								{
 									data.m_chunkDensities[index3D] = std::min(float(g_groundDensity) * densityCoef + initDensity, float(Voxel::MaxDensity));
 								}
-								else if (inputZ < soil_surface_z_int)
+								else if (coordZ < soil_surface_z_int)
 								{
 									data.m_chunkDensities[index3D] = std::min(float(g_groundDensity) * densityCoef + initDensity, float(Voxel::MaxDensity));
 								}
@@ -584,13 +590,13 @@ sint CMapGen::generateGround(CBlockMakeData& data)
 
 	{
 		//NL_PROF("CopyDensitiesToChunk");
-		for (sint y = 0; y < mapWidth; y += lodStep)
+		for (sint y = 0; y < effectiveWidth; y += lodStep)
 		{
-			for (sint x = 0; x < mapWidth; x += lodStep)
+			for (sint x = 0; x < effectiveWidth; x += lodStep)
 			{
-				const uint index = x * invLodStep + y * mapWidth * invLodStep;
+				const uint index2D = (x + g_AdditionnalBorder) * invLodStep + (y + g_AdditionnalBorder) * extendedWidth * invLodStep;
 
-				Voxel::BiomeType bt = data.m_biomeMap[index];
+				Voxel::BiomeType bt = data.m_biomeMap[index2D];
 				const CEnvironmentDefinition* envDef = CMaterialLibrary::instance().getEnvironmentDef(bt);
 				groundVoxel.setBiome(bt);
 				soilVoxel.setBiome(bt);
@@ -600,15 +606,15 @@ sint CMapGen::generateGround(CBlockMakeData& data)
 				nlassert(soilVoxel.getType() == Voxel::Raw);
 
 				// Surface height
-				const sint surface_z_int = data.m_hardFloorZMap[index];
+				const sint surface_z_int = data.m_hardFloorZMap[index2D];
 
 				// Soil height
-				const float soil_surface_z = data.m_softFloorZMap[index];
+				const float soil_surface_z = data.m_softFloorZMap[index2D];
 				const float soil_surface_z_floor = std::floor(soil_surface_z);
 				const float soil_surface_density = (soil_surface_z - soil_surface_z_floor) * g_maxSurfaceDensity;
 				const sint soil_surface_z_int = static_cast<sint>(soil_surface_z_floor);
 
-				for (sint z = 0; z < width; z += lodStep)
+				for (sint z = 0; z < effectiveWidth; z += lodStep)
 				{
 					TVoxel* currentVoxel = &airVoxel;
 
@@ -616,33 +622,31 @@ sint CMapGen::generateGround(CBlockMakeData& data)
 					const sint my = y * invLodScale;
 					const sint mz = z * invLodScale;
 
-					if (mx < 0 ||
-						mx >= chunkWidth ||
-						my < 0 ||
-						my >= chunkWidth)
+					if (mx < 0 || mx >= chunkWidth ||
+						my < 0 || my >= chunkWidth)
 						continue;
 
-					const sint absoluteZ = (z + minZ);
-					const uint index3D = PolyVox::morton256_x[mx] | PolyVox::morton256_y[my] | PolyVox::morton256_z[mz];
+					const sint coordZ = (z + minZ);
+					//const uint index3D = PolyVox::morton256_x[mx] | PolyVox::morton256_y[my] | PolyVox::morton256_z[mz];
+					const uint index3D = (mx + g_AdditionnalBorder) * extendedWidth * extendedWidth + (my + g_AdditionnalBorder) * extendedWidth + (mz);
 
-					if (absoluteZ == soil_surface_z_int)
+					const float density = data.m_chunkDensities[index3D];
+					if (density > 0.f)
 					{
-						soilVoxel.setDensity(data.m_chunkDensities[index3D]);
-
-						if (soilVoxel.getDensity() > 0)
+						if (coordZ > surface_z_int && coordZ <= soil_surface_z_int)
+						{
+							soilVoxel.setDensity(data.m_chunkDensities[index3D]);
 							currentVoxel = &soilVoxel;
+						}
 						else
-							currentVoxel = &airVoxel;
+						{
+							groundVoxel.setDensity(data.m_chunkDensities[index3D]);
+							currentVoxel = &groundVoxel;
+						}
 					}
-					else if (absoluteZ < surface_z_int)
+					else
 					{
-						groundVoxel.setDensity(data.m_chunkDensities[index3D]);
-						currentVoxel = &groundVoxel;
-					}
-					else if (absoluteZ < soil_surface_z_int)
-					{
-						soilVoxel.setDensity(data.m_chunkDensities[index3D]);
-						currentVoxel = &soilVoxel;
+						currentVoxel = &airVoxel;
 					}
 
 					if (currentVoxel == &airVoxel)

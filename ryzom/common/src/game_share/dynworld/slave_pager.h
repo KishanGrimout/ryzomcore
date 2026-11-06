@@ -18,7 +18,6 @@
 #define SLAVE_PAGER_H
 
 #include "map.h"
-#include "nel/misc/mutex.h"
 
 class CMapGen;
 

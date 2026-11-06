@@ -40,7 +40,7 @@ extern CClientConfig ClientCfg;
 
 CMapClient::CMapClient()
 	: m_voxelSelected(false)
-	, m_voxelSelectionActive(false)
+	, m_voxelSelectionActive(true)
 {
 	m_pager = new CSlavePager(*this);
 	initMap(m_pager, ClientCfg.ChunksMemoryCache * 1024U * 1024U);

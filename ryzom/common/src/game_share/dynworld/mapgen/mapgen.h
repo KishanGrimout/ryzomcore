@@ -41,6 +41,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "game_share/dynworld/mapgen/noise.h"
 #include "game_share/dynworld/polyvox_defs.h"
 
+#include <vector>
+
 class CMapgenParams;
 
 struct CBlockMakeData
@@ -68,6 +70,7 @@ struct CBlockMakeData
 class CMapGen
 {
 	friend class CCave;
+	friend struct CMapGenTestAccess;
 
 	uint32 flags;
 	NLMISC::CVectorI csize;

@@ -36,10 +36,11 @@ CSlavePager::~CSlavePager()
 }
 
 bool g_saveSectors = true;
+bool g_loadFromCache = true;
 void CSlavePager::pageIn(const TRegion& region, TVolume::Chunk* pChunk)
 {
 	SectorMetadata infos;
-	if (!CMapCacheManager::instance().tryFillRegion(region, pChunk, infos))
+	if (g_loadFromCache && !CMapCacheManager::instance().tryFillRegion(region, pChunk, infos))
 	{
 		nlassert(pChunk != nullptr);
 		CBlockMakeData makeData(region, *pChunk);
