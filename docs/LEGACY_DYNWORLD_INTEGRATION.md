@@ -3,9 +3,17 @@
 ## Source and target
 
 - Target repository: current Git repository, branch `integration/legacy-dynworld`.
-- Integration base: `8ce92f49c` (`dev/dyn` at branch creation).
+- Integration base: `8ce92f49c` (`dev/dyn` at branch creation); rebased onto `dc2bd0b4b` and fast-forward-merged into `dev/dyn` on 2026-11-07 (see "Reintegration" below).
 - Legacy source: `D:\Programmation\ryzomcore_old\ryzomcore_dev`, Mercurial tip `9514:da0dbd6457ca` (`Merge dynworld into develop`).
 - Legacy exports describe 343 changed paths and 135 new files. Their source layout and build system predate the current repository; port features incrementally rather than applying the exports wholesale.
+
+## Reintegration into `dev/dyn` (2026-11-07)
+
+- The branch was rebased onto `dev/dyn` tip `dc2bd0b4b` (was based on `8ce92f49c` before). After the rebase, `origin/integration/legacy-dynworld` still held the stale pre-rebase history (53 commits on the old base, appearing as "behind 53 / ahead 484" divergence).
+- Containment audit (no work lost): every remote commit either patch-matched a local twin (`git log --cherry-mark`) or its content was verified present in the tree byte-identical (`parallel_task_manager.*`, `voxel.h`) or locally newer (`pacs_client.cpp`: extra `forgetShapePrimitives` fix + warning-format fix). The 8 non-matching remote commits were superseded/folded into local commits.
+- Reintegration done as a straight fast-forward: `dev/dyn` moved `dc2bd0b4b..2e8a2d5bd` and was pushed; `integration/legacy-dynworld` force-with-lease pushed to `2e8a2d5bd` (same tree as `dev/dyn` now).
+- Safety refs kept: branches `backup/integration-local-2e8a2d5bd` (current line), `backup/integration-remote-40909f272` (stale pre-rebase remote era); tag `backup-stash-xy-displacement` pins stash@{0} ("3 new xy displacement", WIP `mapgen.cpp` XY-displacement-mode experiment: `MAPGEN_XY_DISPLACEMENT_MODE` LEGACY/NORMALIZED/OVERFLOW/INVERSE_WARP, currently INVERSE_WARP; not yet applied and possibly in conflict with the newer cliff fixes — revisit when resuming mapgen work).
+- The integration branch can be considered merged; future dynworld work starts from `dev/dyn` (or keep the branch as the working line, rebasing again as `dev/dyn` moves).
 
 ## Integration rules
 
