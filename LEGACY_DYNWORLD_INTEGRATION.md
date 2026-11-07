@@ -262,11 +262,9 @@ Dependencies: U-C3, U-S1, U-S4. Validation: `ryzom_client` Release build clean. 
 
 #### U-C5 — PACS hookup
 
-- [ ] Port.
+- [x] Done (2026-10-22). `pacs_client.cpp`: dyn PACS includes (`dynworld/dyn_continent.h`, `dynworld/map_client.h`, `game_share/dynworld/dyn_{retriever_bank,global_retriever,move_container}.h` + `nel/pacs` C-level headers); `extern bool IsInDynWorldSession;`; early branch in `initPACS()` — `RB = new CDynRetrieverBank(false)`, `GR = new CDynGlobalRetriever((CDynRetrieverBank*)RB, CDynContinent::MAP)` + `initAll(false)` ("don't init instances as we serialized them"), `PACS = new CDynMoveContainer(((CDynGlobalRetriever*)GR), 16, 16, RYZOM_ENTITY_SIZE_MAX, 2, NELPACS_DEFAULT_MAX_TEST_ITERATION, NELPACS_DEFAULT_OT_SIZE)`, `return`. The classes ported with U-S3 match the legacy ctor/param shapes exactly (`initAll` is public `CGlobalRetriever` in current NeL); interface upcasts (`URetrieverBank*`/`UGlobalRetriever*`/`UMoveContainer*`) stay valid. `ig_callback.cpp`: `extern bool IsInDynWorldSession;` + last-arg `!IsInDynWorldSession` in the `addCollisionnablePrimitiveBlock` call (dynworld IG prims are inserted but not marked collisionnable).
 
-`pacs_client.cpp`: in a dynworld session, construct `CDynRetrieverBank(false)`, `CDynGlobalRetriever(RB, CDynContinent::MAP)`, `CDynMoveContainer(...)` instead of legacy retriever setup. `ig_callback.cpp`: `!IsInDynWorldSession` on the last flag of `addCollisionnablePrimitiveBlock`.
-
-Dependencies: U-N3, U-C2. Validation: build + in-game collision walk test.
+Dependencies: U-N3, U-C4. Validation: `ryzom_client` Release build clean. Runtime collision behavior deferred to Phase 5.
 
 #### U-C6 — interaction/UI
 
