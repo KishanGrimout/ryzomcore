@@ -22,6 +22,8 @@
 #include "nel/misc/task_manager.h"
 #include "nel/misc/big_file.h"
 
+#include <algorithm>
+
 using namespace std;
 
 #define NLMISC_DONE_TASK_SIZE 20
@@ -39,7 +41,6 @@ CTaskManager::CTaskManager() : _RunningTask (""), _TaskQueue (""), _DoneTaskQueu
 {
 	_IsTaskRunning = false;
 	_ThreadRunning = true;
-	_ChangePriorityCallback = nullptr;
 	CSynchronized<string>::CAccessor currentTask(&_RunningTask);
 	currentTask.value ().clear();
 	_Thread.reset(IThread::create(this));
@@ -232,18 +233,12 @@ uint CTaskManager::getNumWaitingTasks()
 
 void CTaskManager::changeTaskPriority(CSynchronized<std::list<CWaitingTask>>::CAccessor &acces)
 {
-	if (_ChangePriorityCallback)
+   list<CWaitingTask> &taskList = acces.value();
+	for (list<CWaitingTask>::iterator ite = taskList.begin(); ite != taskList.end(); ++ite)
 	{
-		list<CWaitingTask> &taskList = acces.value();
-
-		list<CWaitingTask>::iterator ite = taskList.begin();
-		while(ite != taskList.end())
+       for (IChangeTaskPriority *callback : _ChangePriorityCallbacks)
 		{
-			// Get the new priority
-			ite->Priority = _ChangePriorityCallback->getTaskPriority(*(ite->Task));
-
-			// Next task
-			ite++;
+          ite->Priority = callback->getTaskPriority(*ite->Task, ite->Priority);
 		}
 	}
 }
@@ -252,7 +247,22 @@ void CTaskManager::changeTaskPriority(CSynchronized<std::list<CWaitingTask>>::CA
 
 void CTaskManager::registerTaskPriorityCallback (IChangeTaskPriority *callback)
 {
-	_ChangePriorityCallback = callback;
+ if (!callback)
+		return;
+
+	CSynchronized<list<CWaitingTask>>::CAccessor acces(&_TaskQueue);
+	if (std::find(_ChangePriorityCallbacks.begin(), _ChangePriorityCallbacks.end(), callback) == _ChangePriorityCallbacks.end())
+       _ChangePriorityCallbacks.insert(_ChangePriorityCallbacks.begin(), callback);
+}
+
+// ***************************************************************************
+
+void CTaskManager::unregisterTaskPriorityCallback (IChangeTaskPriority *callback)
+{
+	CSynchronized<list<CWaitingTask>>::CAccessor acces(&_TaskQueue);
+	auto callbackIt = std::find(_ChangePriorityCallbacks.begin(), _ChangePriorityCallbacks.end(), callback);
+	if (callbackIt != _ChangePriorityCallbacks.end())
+		_ChangePriorityCallbacks.erase(callbackIt);
 }
 
 // ***************************************************************************

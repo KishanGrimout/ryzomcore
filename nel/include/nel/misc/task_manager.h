@@ -93,11 +93,14 @@ public:
 	{
 	public:
 		virtual ~IChangeTaskPriority() {}
-		virtual float getTaskPriority(const IRunnable &runable) = 0;
+        virtual float getTaskPriority(const IRunnable &runnable, float currentPriority) = 0;
 	};
 
 	/// Register task priority callback
 	void	registerTaskPriorityCallback (IChangeTaskPriority *callback);
+
+	/// Unregister task priority callback
+	void	unregisterTaskPriorityCallback (IChangeTaskPriority *callback);
 
 protected:
 
@@ -150,8 +153,8 @@ private:
 	/// Register task priority callback
 	void	changeTaskPriority(CSynchronized<std::list<CWaitingTask>>::CAccessor &acces);
 
-	/// The callback
-	IChangeTaskPriority		*_ChangePriorityCallback;
+   /// The callbacks
+	std::vector<IChangeTaskPriority *> _ChangePriorityCallbacks;
 
 private:
 

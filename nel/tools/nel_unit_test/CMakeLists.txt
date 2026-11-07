@@ -18,6 +18,7 @@ add_test_executable(nel_misc_test
         ut_misc_config_file.test.cpp
         ut_misc_pack_file.test.cpp
         ut_misc_path_safety.test.cpp
+        ut_misc_parallel_task_manager.test.cpp
         ut_misc_singleton.test.cpp
         ut_misc_sstring.test.cpp
         ut_misc_stream.test.cpp
