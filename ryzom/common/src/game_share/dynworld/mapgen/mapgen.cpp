@@ -458,6 +458,7 @@ sint CMapGen::generateGround(CBlockMakeData& data)
 	data.m_hardFloorZMap.resize(extendedWidth * extendedWidth, initHeight);
 	data.m_softFloorZMap.resize(extendedWidth * extendedWidth, initHeight);
 	data.m_chunkDensities.resize(extendedWidth * extendedWidth * extendedWidth, 0.f);
+	std::vector<Voxel::BiomeType> biome3D(extendedWidth * extendedWidth * extendedWidth);
 
 	const uint lodStep = data.m_lodScale;
 	const float invLodStep = 1.f / lodStep;
@@ -504,6 +505,7 @@ sint CMapGen::generateGround(CBlockMakeData& data)
 			for (sint x = 0; x < extendedWidth; x += lodStep)
 			{
 				const uint index2D = x * invLodStep + y * extendedWidth * invLodStep;
+				Voxel::BiomeType biomeType = data.m_biomeMap[index2D];
 
 				// Compute the final x, y position
 				const sint coordX = (x + extendedMinX);
@@ -580,6 +582,7 @@ sint CMapGen::generateGround(CBlockMakeData& data)
 								{
 									data.m_chunkDensities[index3D] = std::min(float(g_groundDensity) * densityCoef + initDensity, float(Voxel::MaxDensity));
 								}
+								biome3D[index3D] = biomeType;
 							}
 						}
 					}
@@ -596,12 +599,6 @@ sint CMapGen::generateGround(CBlockMakeData& data)
 			{
 				const uint index2D = (x + g_AdditionnalBorder) * invLodStep + (y + g_AdditionnalBorder) * extendedWidth * invLodStep;
 
-				Voxel::BiomeType bt = data.m_biomeMap[index2D];
-				const CEnvironmentDefinition* envDef = CMaterialLibrary::instance().getEnvironmentDef(bt);
-				groundVoxel.setBiome(bt);
-				soilVoxel.setBiome(bt);
-				uint defaultSoildId = envDef->getDefaultSoilId();
-				soilVoxel.setMaterial(defaultSoildId);
 				nlassert(groundVoxel.getType() == Voxel::Raw);
 				nlassert(soilVoxel.getType() == Voxel::Raw);
 
@@ -630,17 +627,24 @@ sint CMapGen::generateGround(CBlockMakeData& data)
 					//const uint index3D = PolyVox::morton256_x[mx] | PolyVox::morton256_y[my] | PolyVox::morton256_z[mz];
 					const uint index3D = (mx + g_AdditionnalBorder) * extendedWidth * extendedWidth + (my + g_AdditionnalBorder) * extendedWidth + (mz);
 
-					const float density = data.m_chunkDensities[index3D];
-					if (density > 0.f)
+					const Voxel::DensityType density = static_cast<Voxel::DensityType>(data.m_chunkDensities[index3D]);
+					if (density > 0)
 					{
+						Voxel::BiomeType bt = biome3D[index3D];
+						const CEnvironmentDefinition *envDef = CMaterialLibrary::instance().getEnvironmentDef(bt);
+						groundVoxel.setBiome(bt);
+						soilVoxel.setBiome(bt);
+						uint defaultSoildId = envDef->getDefaultSoilId();
+						soilVoxel.setMaterial(defaultSoildId);
+
 						if (coordZ > surface_z_int && coordZ <= soil_surface_z_int)
 						{
-							soilVoxel.setDensity(data.m_chunkDensities[index3D]);
+							soilVoxel.setDensity(density);
 							currentVoxel = &soilVoxel;
 						}
 						else
 						{
-							groundVoxel.setDensity(data.m_chunkDensities[index3D]);
+							groundVoxel.setDensity(density);
 							currentVoxel = &groundVoxel;
 						}
 					}
