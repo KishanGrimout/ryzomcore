@@ -7,40 +7,25 @@ the mirror topology was broken by the night's service restarts (see §3).
 **Framing:** this path has **never been confirmed to work on the legacy repository** — treat
 the forward chain as *suspected-never-worked*, not "regression of ours".
 **Repo:** `KishanGrimout/ryzomcore` (integration/legacy-dynworld)
-**Companion doc:** `docs/LEGACY_DYNWORLD_INTEGRATION.md` (roadmap; § "Runtime findings and
-session log" — 2026-10-23..31 entries).
+**Related docs:** `docs/VoxelMessageChain.md` (system doc: chain anatomy with code
+anchors, msg.xml rules, `sendMessageViaMirror` silent-drop paths — read first),
+`docs/ShardRuntimeOps.md` (mirror/topology and restart laws, ops kit), and
+`docs/LEGACY_DYNWORLD_INTEGRATION.md` (roadmap; Phase 5 history).
 
 ---
 
 ## 1. What the chain is and where it was traced
 
 Client → FE → MS → EGS → GPMS for the generic client impulsion
-`DYN_WORLD:SET_VOXEL` (add one voxel: env, material, density, position):
+`DYN_WORLD:SET_VOXEL` (add one voxel: env, material, density, position).
 
-```
-client  commands.cpp dyn_addvoxel (~:5592)             pushNameToStream + NetMngr.push
-   FE    fe_receive_sub.cpp:~1400                      action decode (ACTION_GENERIC_CODE=1)
-   FE    id_impulsions.cpp:290 routeImpulsionIdFromClient
-         :308  GenericXmlMsgHeaderMngr.getNodeId(bms) -> DYN_WORLD:SET_VOXEL
-         :352  CMessage("CLIENT:" + msgName) re-serialised field by field
-         :461  sendMessageViaMirror("EGS", msgout)     [game_share/mirror.cpp:2394]
-   MS    ms_automaton.cpp:90 cbMessageToForward ("FWDMSG")
-         :367 receiveMessageToForwardFromClient         (local vs remote classification)
-         :542 tellLocalServicesAndSendMessages          (per-tick "UMM" flush to local client services)
-   EGS   client_messages.cpp:3426 cbClientSetVoxel  (registered :3715 "CLIENT:DYN_WORLD:SET_VOXEL")
-         :3450 CMessage("SET_VOXEL") -> sendMessageViaMirror("GPMS")
-   GPMS  gpm2_service messages.cpp:860/:926 cbSetVoxel -> CWorldPositionManager::setVoxel
-```
-
-The FE forward (`sendMessageViaMirror` name-variant, `mirror.cpp:2394`) has **three
-silent drop paths** — this is why the hop was invisible for days:
-
-1. `Ignoring attempt to send a message via the mirror before mirror ready` (`localMSId` invalid);
-2. `Discarding service ... not 'mirror ready'` (per-connection check, `nlinfo`-level);
-3. `No service <name> is online` (`MIRROR_DEBUG`) — **plus** a fourth hard-suspect:
-   if the FE's `CUnifiedNetwork::getConnectionList()` contains no connection named `EGS`,
-   `counter = 0` and the `FWDMSG` is built **carrying zero destinations** — forwarded
-   absolutely nothing, with no warning at all.
+> The full chain anatomy — call graph with code anchors, `SET_VOXEL` wire format, the
+> msg.xml single-child-branch rule, the four `sendMessageViaMirror` silent-drop paths,
+> in-world client commands — lives in the system doc `docs/VoxelMessageChain.md`.
+> For this investigation, the load-bearing fact is: the FE forward
+> (`sendMessageViaMirror` name-variant, `mirror.cpp:2394`) fails silently in several
+> branches, most importantly destination enumeration (a `getConnectionList()` without an
+> `EGS` connection ⇒ `FWDMSG` built with `counter = 0` forwarding nothing, no warning).
 
 ## 2. What is already proven (do not re-test these)
 

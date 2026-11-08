@@ -1,5 +1,10 @@
 # Legacy Dynworld Integration Roadmap
 
+> **Scope:** this file is the integration *roadmap* — audit conclusions, port status,
+> unit checklists, phase validation history. System behavior, invariants, root causes,
+> error codes and instrumentation registries live in the per-system docs; see the
+> documentation index (ToC) in `AGENTS.md`.
+
 ## Source and target
 
 - Target repository: current Git repository, branch `integration/legacy-dynworld`.
@@ -33,13 +38,16 @@ Recipes:
 
 Plan docs:
 
-- `docs/PLAYER_WALL_CLIFF_COLLISION_PLAN.md` — plan for GitHub issue #2 (player blocking on walls/cliffs): current stub move behavior on dyn continents, design direction (`CDynGlobalRetriever::testCylinderMove`/`doMove` with voxel-grid collision), phases B0-B6, acceptance criteria.
-- Other open issues with doc context: ryzomcore#6 → `docs/SET_VOXEL_ROUND_TRIP_VALIDATION.md`.
+- `docs/PLAYER_WALL_CLIFF_COLLISION_PLAN.md` — plan for GitHub issue #2 (player blocking
+  on walls/cliffs): design direction, phases B0-B6, acceptance criteria. Its system content
+  lives in `docs/VoxelTerrainCollision.md`.
+- Other open issues with doc context: ryzomcore#6 → `docs/SET_VOXEL_ROUND_TRIP_VALIDATION.md`
+  (plan; system content in `docs/VoxelMessageChain.md`).
+- The full index of documentation (system/reference + plans) is the ToC in `AGENTS.md`.
 
-Runtime error codes (server → client login errors, not in C++ source):
-
-- **4010 — `joinSession` failure** ("game servers closed"). Defined only in the web-shard layer: `code/web/public_php/.../login_translations.php:196` — `$ErrMsgs[4010]['dbg'] = '(joinSession error %1: %2 for userId %3)'`, `'lnk' = $msgGameServersClosed`. Means the client reached the web login (`r2_login.php`) but the session join to the shard (SU/WS/FE chain) failed — e.g. a service in the chain just restarted/deregistered, or the welcome/session roster has stale FE info. The code is NOT searchable in `code/ryzom/{client,server}/src` (it is produced by the PHP login scripts), so grep the `code/web` tree for these codes. Beware `24010` in `prod.inc.php:293` — that is a different key space (DEFAULT_ERROR_MESSAGE table), not this 4010.
-- Diagnostic order for a 4010 right after restarting a shard service: SU `session_user_service` log (joinSession attempt + reason), then the FE/registration logs, then whether the service that restarted re-registered with the naming/welcome chain.
+Runtime error codes: documented in `docs/ShardRuntimeOps.md` § 6 (4010 joinSession
+failure — defined only in the web-shard PHP layer, `code/web/.../login_translations.php`
+— plus the diagnostic order and the welcome/FE lifecycle lesson).
 
 Audit conclusions already verified (do NOT re-derive):
 
@@ -309,23 +317,35 @@ Dependencies: none strictly (safe after U-C3/U-C4 for validation). Validation: `
 
 - [x] CI-relevant builds + tests (2026-10-22): Release builds clean for `nel3d`, `nelpacs`, `nel_misc_test`, `Ryzom::gameshare`, `Ryzom::servershare`, all 9 dynworld test targets, `ryzom_gpm2_service`, EGS, SU, SBS, `ryzom_client`. Tests: `nel_misc_test` 71/71, `nel_ligo_test` 1/1 (needed `redist\nel_tools_win_x64` on PATH for `libxml2.dll` — pre-existing repo dependency, unrelated), dynworld tests 35/35 (voxel 4, noise 3, mapgen_params 2, environment_definition 1, polyvox_defs 3, map_sector 10, disk_file_db 5, deferred_command 5, map_cache 2).
 - [x] Standalone smoke (2026-10-22, first Phase 5 milestone): `ryzom_gpm2_service` + `ryzom_naming_service` run clean from a scratch cfg dir (legacy `gpm2_service.cfg` chain with `Paths` repointed to the repo's `common/data_{common,leveldesign}`, legacy `used_continents.cfg` with `IsDynamicContinent = 1`). Results: NS registration OK → full gpm2 `init()` → **`CMaterialLibrary::initialize("material_library.cfg")` succeeded** — no `Error when loading MaterialLibrary infos`; all 5 env cfgs + 9 material cfgs parsed (the logged `EUnknownVar` entries are the optional-var `try`/`catch` lookups — `BigFlora` absent in `prime_roots.cfg`, `TexturesTop`/`TexturesSides` absent in the material cfgs → for `prime_roots` the caught exception skips its `SmallFlora` block only; same code+data as legacy, a data quirk not an integration defect); **`CDynContinentContainer::loadContinent` executed** ("Loaded continent, initialized move container to 1x1 cells") via `newbieland=20`; reached **`SERVICE: Service ready`**. Expected noise only: NS-registration-before-`init()` requires NS up (started ours; one extra binary), idle AES-connector retries (no `admin_service`), `sheet_id.bin` missing (absent in legacy `data_leveldesign` too). Shows: U-C8 data discoverable server-side via `Paths`, U-S2/S4 server dyn code live.
-- [x] Local shard web/DB environment restored (2026-10-22): `D:\xampp` (old `C:\xampp`, moved) was dead only because `conf/extra/httpd-vhosts.conf` pointed the shard vhosts (ports `80` + `40916` = client `StartupHost`) at a stale `E:\...` path — Apache aborted at config parse before ever logging. Fixed: vhosts → `D:\Programmation\ryzomcore_old\ryzomcore_dev\code\web\public_php` (valid; the repo has no `web/` — U-S5), remaining `C:/xampp` refs in loaded `extra/httpd-{autoindex,dav,multilang-errordoc}.conf` → `D:/xampp`, stale `E:` refs in `public_php/config.php` (`$PUBLIC_PHP_PATH`/`$PRIVATE_PHP_PATH`, backslash-escaped) → legacy tree, and `ams/templates_c` Smarty caches cleared (read-only + stale; regenerate themselves). Verified: `httpd -t` clean → Apache 2.4.3 up on 80/443/40916; MySQL up on 3306 with the shard DB set intact (`nel`, `nel_ams`(+`_lib`), `nel_tool`, `webauth`, `ring_open` with `sessions`/`session_participant`/`known_users`); `r2_login.php` answers protocol-correct `0:Missing cmd (3002)`; AMS login page renders. Not needed to move back to `C:\xampp`. Services start via `apache_start.bat`/`mysql_start.bat` or the control panel; mysqld needs `--defaults-file=D:\xampp\mysql\bin\my.ini`.
+- [x] Local shard web/DB environment restored (2026-10-22): XAMPP stack (moved to `D:\xampp`) repaired — stale `E:`/`C:` paths in Apache vhosts, `public_php/config.php`, Smarty caches. Full detail: `docs/ShardRuntimeOps.md` § 5.
 - [ ] Full shard runtime: FS on `127.0.0.1`, join a dynamic-continent session via the SU/SBS `joinDynamicWorld` web path. Integration-branch binaries into the pipeline install layout, three U-S5 deltas at patchman-template level, `gpms_mainland` running `ryzom_gpm2_service`.
-  **Progress (2026-10-31):** full 16-service cold start via `start_mainland.bat` verified (see 2026-10-31 session log below for the roster + AES fix); all services `Service ready`, LGS L3 transports ESTABLISHED, mirror system ready, TS tick at 10 Hz once the AES (46997) is up. Remaining: the in-game join + voxel round-trip + persistence below.
-  **Deployment findings (2026-10-22):** the workspace root IS the Core 4 Quick Start package — `pipeline/`, `patchman/`, `leveldesign/`, `external/` all present, and `pipeline/shard_dev/` is **already generated** for this host (`gpms_mainland/gpm_service.cfg` is a generated cfg with this machine's host baked in). Service cfgs are generated by the deployment pipeline from the `patchman` template repo (e.g. `patchman/cfg/02_shard_type_std_mainland.cfg`, which inlines `UsedContinents` — incl. `newbieland=20` — rather than a separate `used_continents.cfg`; both feed the same config variable the services read). Consequences: (a) no hand-assembled cfg run dir needed — the pipeline is the native deployment path here; (b) the patchman templates have **no dynworld integration**: no `IsDynamicContinent`, no `gpm2`, the deployed shard runs stock `gpm_service`, while the legacy dynworld shard ran `ryzom_gpm2_service` (legacy `shard_start_cmake.bat` l.32). The three U-S5 deltas (or pipeline equivalents) need to be added at the template level; the `gpms_mainland` deploy dir should run the `ryzom_gpm2_service` binary with those deltas. Smoke-first approach: standalone `ryzom_gpm2_service` (material-library init only, no shard) before the full bring-up.
-- [x] Client boot smoke (2026-10-22): integration `ryzom_client_dev_r.exe` boots clean against the legacy data set. Sandbox: `C:\Users\mynam\AppData\Local\Temp\opencode\client-smoke\` = repo exe + cfg copies with `PreDataPath`/`Driver3D` overrides, plus third-party DLLs from `redist\ryzom_client_win_x64\`. Passed: full `CPath` bake of `ryzom_core_client\data` (bnp + packed sheets), OpenGL driver init (OpenGL 4.6 NVIDIA), i18n/string-manager init, then the expected login-POST stall (`Post failed` at `StartupHost 127.0.0.1:40916`, no FS running) and a stable main loop. **Gotchas recorded:** (a) the client's import set needs `libxml2/lua/libcurl/zlib/libssl-1_1/libcrypto-1_1/freetype/vorbis/vorbisfile/jpeg62/libpng16` — all shipped in `redist\ryzom_client_win_x64`, but that redist dir ALSO ships **stale 2022 `nel_drv_*` driver DLLs** whose exported `NL3D_interfaceVersion()` predates the current `IDriver::InterfaceVersion` (0x74) → driver version gate treats them as "too old"; our freshly built `nel_drv_opengl_win_r.dll`/`nel_drv_openal_win_r.dll` from `build\bin\Release` must be copied in AFTER the redist bulk copy (or refine the copy).
+  **Progress (2026-10-31):** full 16-service cold start via `start_mainland.bat`
+  verified (roster + AES fix: `docs/ShardRuntimeOps.md` §§2-3); all services
+  `Service ready`, LGS L3 transports ESTABLISHED, mirror system ready, TS tick at 10 Hz
+  once the AES (46997) is up. Remaining: the in-game join + voxel round-trip +
+  persistence below.
+  **Deployment findings (2026-10-22):** moved to `docs/ShardRuntimeOps.md` § 7 (Core 4
+  Quick Start package layout, pipeline-generated shard cfgs, patchman templates without
+  dynworld). Essence: add the three U-S5 deltas at template level and run
+  `ryzom_gpm2_service` in `gpms_mainland`; smoke-first (standalone `ryzom_gpm2_service`,
+  material-library init only) before full bring-up.
+- [x] Client boot smoke (2026-10-22): integration `ryzom_client_dev_r.exe` boots clean
+  against the legacy data set (repo exe + cfg overrides sandbox in
+  `C:\Users\mynam\AppData\Local\Temp\opencode\client-smoke\`; `CPath` bake of
+  `ryzom_core_client\data`, OpenGL 4.6 driver init, i18n init, expected login-POST
+  stall at `StartupHost 127.0.0.1:40916` with no FS running, stable main loop).
+  Environment gotchas — required DLL import set and the stale 2022 `nel_drv_*` redist
+  DLLs vs fresh `nel_drv_opengl_win_r.dll`/`nel_drv_openal_win_r.dll` from
+  `build\bin\Release` (copy order matters) — in `docs/DynClientRuntime.md` § 8 and
+  `pipeline/client_dev/local/README_SANDBOX.md`.
 - [ ] Client round-trip: console `dyn_setvoxel` → EGS (`CLIENT:DYN_WORLD:SET_VOXEL`) → GPMS (`SET_VOXEL`) → `CMapServer::setVoxelAt()`; verify persistence through `map_cache_manager`/`slave_pager`.
 - [ ] Render smoke test: `g_rebuildShaders = 1`, `g_useVP = 1`, `g_usePP = 1` vs `g_renderLegacyLandscape = 1` contrast; ShowInfos 6 for generation stats (U-M2 stats block stripped, so no CTasksStats dump section).
 - [ ] Regression: legacy (non-dyn) landscape sessions unchanged after U-N4's landscape pointer rewrite.
 
-**Legacy asset inventory (2026-10-22, survey of `D:\Programmation\ryzomcore_old`, user-directed):**
-- `ryzom_core_client\` — **the dynworld-era client dev run dir**, now the chosen client runtime bed: full client data set at `data\` (`.bnp` packs incl. `newbieland_*`, `characters_*`, `gamedev.bnp`, `leveldesign.bnp`; packed sheets at data root), `data\shaders\dyn_landscape.{vp1,arbfp1}` (runtime-only shader pair, exactly what `CDynLandscape::readShaderFiles` needs), **empty** `data\dynworld\` placeholder (cfgs were found elsewhere — server reads them from `common/data_leveldesign`; client material cfg service-side only), `client.cfg` = local-dev shard targets (`StartupHost 127.0.0.1:40916`, `PatchWanted = 0`, `AllowDebugCommands = 1`) incl. the dyn-era `ChunksMemoryCache = 3072` knob (only exists in our integration branch), and `error_join.log` = a client join-state-machine dump from a failed dyn-era join (`st_login` → `ev_bad_login`). `client_default.cfg` data plumbing: `PreDataPath = { "user", "patch", "data", "examples" }` — client bakes those recursively, so `data\shaders` lands on `CPath` and dyn shader lookup works with zero extra config.
-- `ryzom_official_client\`, `Ryzom\ryzom_live`, `Ryzom_2.1\` — live/official client installs (no usable game data beyond `custom_data`/`fonts`; `Ryzom_2.1` is 2021-era with ring scenarios). Not needed.
-- `ryzomcore-data\` — full data repo (`common`, `continents`, `leveldesign`, `primitives`, `shard`, `sound`, `translation`, `workspace`); this is the data checkout the legacy server cfg's `Paths` referenced. Candidate for later server rail milestones only; not needed for current smokes.
-- `ryzom_client_data\` — raw unpacked per-continent client data (source material for building packs). Not needed now.
-- `ryzomcore-script` / `ryzomcore-script_old` — old Stella-based CI build-script toolkits (pre-CMake orchestration). Superseded; skip.
-- `ryzomcore_dyn\` — an older full source checkout **without** dynworld (`code/ryzom/client/src/dynworld` absent; `code/code` nesting). Obsoleted by `ryzomcore_dev`; skip. Its `web\` (private_php/public_php) is the old web-app tree, not dynworld.
-- `ryzom_assets\` — leveldesign asset library (tilebanks/templates; `newbieland_tilebank_dump.txt`), not dynworld-specific. `ryzom_tools\`/`nel_tools\` — prebuilt tool exes (geometry/build utilities; our `redist\` builds supersede). `markedforaddfiles\` — files the author marked for adding incl. the shader ARB assembly sources (`dyn_landscape_{vp,fp}.arb`); the authoring sources themselves live in the legacy repo (`common/data_leveldesign/dynworld`). `sourcetrail\`, `screenshots\`, `external_vc141\` — analysis DB, pictures, refreshed SDK: no dynworld deltas.
+**Legacy asset inventory (2026-10-22, user-directed survey of `D:\Programmation\ryzomcore_old`):**
+moved to `docs/LegacyAssetInventory.md` — the chosen client runtime bed
+(`ryzom_core_client` with the dyn-era data + `ChunksMemoryCache = 3072`), the not-needed
+installs/data repos, and the Mercurial working-copy access recipe.
 
 ## Cross-cutting risks and decisions
 
@@ -337,208 +357,47 @@ Dependencies: none strictly (safe after U-C3/U-C4 for validation). Validation: `
 6. **InstanceId widening** — watch narrowing warnings; no serialization format change (serial commented out; `CollisionInstances` is a per-call temp).
 7. **Flora plant sheet availability** — configs hold numeric plant sheet IDs; sheets must exist in data before `CMaterialLibrary::initialize()` (U-C8 + U-S3 init order).
 
-## Runtime findings and session log (2026-11-07, issue #2 collision work starts)
+## Issue #2 collision work (2026-11-07/08) — findings moved
 
-### Issue #2 phase B1: movement collision query helpers on CMapBase (DONE)
+Fully documented in `docs/VoxelTerrainCollision.md` (system doc: architecture, B1 helper
+reference, B2 move semantics, ground-height invariants, `MVNAN`/`MVDBG*` instrumentation
+registry, phantom-block findings catalog, test layout) and
+`docs/PLAYER_WALL_CLIFF_COLLISION_PLAN.md` (phases, decisions, acceptance criteria,
+progress — milestone M1 reached 2026-11-08). Test-runner pitfalls hit during validation
+(`0xC0000135` ctest DLL resolution, direct-exe convention): `docs/TestEnvironmentNotes.md`.
 
-- Plan drafted first: `docs/PLAYER_WALL_CLIFF_COLLISION_PLAN.md` (decisions locked with
-  the user: slide-along-wall, 45° walkable cos 0.7 threshold, 1-voxel auto-step, no
-  falling in v1, blanket solid rule for Object voxels, Liquid non-blocking). Coded
-  `CMapBase::isBlockingVoxel/isBlockingPosition/traceSegment (DDA)/getGroundNormal` in
-  `ryzom/common/src/game_share/dynworld/map.{h,cpp}` + 11-test suite
-  `test_modules/game_share_test/test_dynworld_map_collision.cpp` registered as
-  `ryzom_dynworld_map_collision_test`. No behavior change anywhere yet (B1 only).
-- Validation in Release: the new test 11/11 pass, and the merged dynworld suites all
-  pass when run directly from `build\bin\Release` (map_cache 2, voxel 4, noise 3,
-  mapgen_params 2, environment_definition 1, disk_file_db 5, deferred_command 5,
-  map_sector 10, scenario_text_parser 10 on its first direct run). `ryzom_gameshare_r`
-  rebuilt clean with the new map.cpp code.
-- **Test-runner environment quirk (not a regression)**: `ctest`-launched test exes can
-  die with exit code `0xC0000135` (STATUS_DLL_NOT_FOUND) — `nel_misc_test`,
-  `nelns_naming_service_test`, `nelns_service_instance_manager_test` failed this way in
-  this session's ctest run, and `ryzom_game_share_scenario_text_parser.exe`/`nel_misc_test`
-  also work when launched directly once (`[ PASSED ] 10 tests.`) then can repeat-fail on
-  later invocations *without any rebuild in between*: the DLL resolution depends on the
-  invoking shell's PATH, not on the code. When a dynworld test looks "failed", run the
-  exe directly from `build\bin\Release` before suspecting the change; consider fixing
-  the ctest PATH integration as a separate chore (add the external DLL dirs — ANL
-  `Noise.lib`-adjacent DLLs, OpenAL, etc. — to the test invocation environment).
+## Phase 5 runtime (2026-10-23 → 11-01) — findings moved
 
-### Issue #2 phase B2: CDynGlobalRetriever::testCylinderMove for real (DONE)
+AES restore, service roster, mirror topology, SET_VOXEL chain: documented in
 
-- Implemented in `ryzom/common/src/game_share/dynworld/dyn_global_retriever.cpp`
-  (constants fresh in the file): horizontal-only move; ground walkability =
-  `|endGroundZ − startGroundZ| ≤ moveLen * 1 + one voxel (auto step)` with
-  `getMeanHeight` on both ends (also blocks ledge falls); wall sweep of the 3 body
-  cells above the feet cell via `traceSegment`, hits within one voxel of the
-  destination ground treated as terrain rise (auto-step zone), real walls return the
-  face normal + hit `t`; the ground-blocked case returns the destination ground
-  gradient flattened to the horizontal plane and flipped to oppose the movement
-  (head-on fallback), contact time 0.999; all descs `CSurfaceIdent(-1,-1)` so the PACS
-  reaction path (`CSurfaceIdent(-1,-1)` unresolvable ⇒ wall) slides the primitive.
-  `doMove` untouched so far (B3 next).
-- Tests: `test_modules/game_share_test/test_dynworld_move_collision.cpp`, 8 tests
-  (flat free, wall face contact `t`/normal, 1-voxel auto-step accepted, 1 m face
-  blocked at tick distance, cliff foot blocked, ledge edge no-fall, liquid free
-  wade, liquid pass-through blocking at the solid behind), registered as
-  `ryzom_dynworld_move_collision_test` with an explicit `NeL::pacs` link (NOT
-  propagated by `Ryzom::gameshare`). Validation (Release, exes run directly from
-  `build\bin\Release`): 8/8 pass; whole dynworld set green — 51 tests over 10 exes,
-  every exe exit 0 (map_collision 11, move_collision 8, map_cache 2, voxel 4,
-  noise 3, mapgen_params 2, environment_definition 1, disk_file_db 5,
-  deferred_command 5, map_sector 10).
-- **Runtime fix (client session, B2 follow-up)**: first client walk into blocking
-  terrain hit `NLMISC::CVectorI::checkedComponent` from
-  `getVoxelAt`/`isValidPosition`/`getMeanHeight`/`doMove`
-  (`CPrimitiveWorldImage::doMove`), with `_DeltaPosition` NaN. Root cause: the
-  vanilla slide (`CPrimitiveWorldImage::reaction`,
-  `primitive_world_image.cpp:1360`) divides `NELPACS_DIST_BACK` by
-  `(dt − ContactTime)`; with the ground-blocked desc's contact at 0.999 (≈ the
-  eval window's end, gap ~1e-4 shrinking 0.001 per blocked tick) the push-back kick
-  grows ×1000 per blocked tick, compounding `_Speed` to inf then NaN. The stub
-  `doMove` never used the delta, so the explosion was only reachable once B2 real
-  descs existed. Fix in B2: report the ground-blocked contact at time 0 (an
-  immediate rejection, not a push-back) — `g_GroundBlockedContactTime = 0.f`.
-- **Ground rule simplified (same day, user request)**: the 45°-slope model
-  (`g_WalkableSlopeRatio` + `getGroundNormal` in the move test) felt clumsy in
-  play; the ground walkability is now a pure 1-voxel rise/fall check and the
-  blocked desc opposes the move head-on. `getGroundNormal` stays in `CMapBase`
-  (tested in the B1 suite) as a free API for the B4/B6 ledge/ceiling work.
-- **Did the 0xC0000135 quirk mask a real code death mid-validation**: before the B2
-  code was compiled at all, a visibly healthy-looking exe could not start
-  deterministically (msys exit 127 = `0xC0000135`, zero gtest output) and the
-  affected cases â€” read-only, and only some of that session's fresh links â€”
-  looked like in-run kills: while hunting it, a `fabs`-on-float (wrong-type,
-  compile-clean) and a sed-mangled intermediate test body each entered the suspect
-  list, both innocent. Never root-cause the collision logic from a mid-flight
-  mangled edit: rewrite the test body cleanly, use `fabsf`, and re-validate the
-  suite before trusting a crash signal (older exes in the same env still passed at
-  the same moments). The quirk note above stays the first check.
-- **Phantom ground block on gentle slopes — getMeanHeight climb/descent asymmetry
-  (found in a client session, fixed same day)**: invisible collisions appeared on
-  gentle downslopes. The reported grounds for a 2 m move were `startGroundZ = 19.5`
-  / `endGroundZ = 18.5` with `startPos.z = 19.0` — a reported two-voxel drop for a
-  real one-voxel descent. Root cause in `CDynGlobalRetriever::getMeanHeight()`
-  (`dyn_global_retriever.cpp`): when the input z lies INSIDE a (partial-density)
-  surface voxel the climb-out loop stops on the first Air voxel above the surface
-  and the pre-fix code skipped the density epilogue entirely `hadToGoUp` branch),
-  so the returned ground = first-Air-voxel base = surface-voxel base + 1 voxel;
-  the in-air case descended onto the surface voxel and returned its base (no
-  offset). Two columns whose surfaces differ by one voxel were thus reported two
-  voxels apart whenever one endpoint's z straddled its surface voxel, and the B2
-  ground rule (`|end − start| > 1 voxel`) phantom-blocked. Fix: the descent loop
-  (and the density epilogue) now runs on both paths — climb overshoots onto the
-  first Air voxel, the descent steps back onto the surface voxel — so both paths
-  always return surface-voxel base + density fraction, and the quantized ground
-  differs by whole voxels between neighboring columns. `CMapBase::getGroundNormal`
-  already did the step-back (`--groundCell.z`, `map.cpp`) and needed no change.
-  Behavior note: when the caller's z sits inside a partial surface voxel, the
-  snap now reports the surface-voxel base (up to half a voxel lower than the old
-  climb-path value) instead of floating on the voxel top; resting z from the
-  descent path is unchanged. Regression test
-  `GentleOneVoxelDownslopeIsNotPhantomBlocked` added to
-  `test_dynworld_move_collision.cpp` (9/9 pass); full dynworld exe set green
-  (exes exit 0; `ryzom_dynworld_mapgen_ground_test.exe` in the bin dir is an
-  obsolete leftover, its source was removed — delete the stale binary).
-- **Second twist the same day (user experiment reintroduced the phantom)**: the
-  density epilogue was flipped to SUBTRACT and the floor quantization commented
-  out (plus `g_AutoStep` doubled to 2 voxels) while chasing residual blocks.
-  Subtracting sinks the returned ground one full voxel below the surface
-  (descent lands on the surface voxel base, subtraction digs into it), so the
-  next move's `feetCell` mapped onto the solid surface voxel and the body
-  sweep clipped the START column's own ground: `traceSegment` embedded hit at
-  `t = 0`, `hitTop = start ground voxel top`. The auto-step zone is anchored
-  on the END ground, so any descent (or even a flat move whose end surface
-  voxel is denser than half) put `hitTop` outside the zone → wall desc →
-  head-on rejection of gentle downslopes. Doubling the auto-step cannot fix
-  this (the zone anchor moves down with the end ground). Reverted: density
-  `+=` (full voxel ⇒ voxel top — the tested reference `GroundStandZ = 1.5`),
-  floor quantization restored (exact voxel-multiple grounds, clean 1-voxel
-  rule), `g_AutoStep` back to 1 voxel (plan §4.2; at 2 voxels the 1 m-face
-  test `OneMetreFaceBlocksARealisticTickMove` is un-rule-able). New
-  `GentleFullVoxelDownslopeIsNotPhantomBlocked` pins the full-density runtime
-  shape (10/10; whole set green).
-- **Third twist: the getVoxelAt truncation (the final root cause, RESOLVED)**:
-  the MVDBG log pins it for good — the frozen pair `est=(12.465, 26.559, 19.5)`
-  / sector=(662, −1058, 0) round-trips exactly, the ground is FLAT (19.5 both
-  ends), yet the runtime wall-blocked: `CMapBase::getVoxelAt(id, estimation)`
-  converted meters to voxel indices through the **truncating `CVectorI` float
-  path** (`TVoxelPos(position)`), so in the negative-y half of the world the
-  floor differs from the true coordinate by a full voxel (`trunc(−67658.88) =
-  −67658` vs `floor = −67659`). Every near-origin test passes because trunc ==
-  floor there (the `+WorldY` positive-half world). Consequences: the ground
-  walk sampled a NEIGHBORING column, reported the neighbor's ground (19.5 —
-  one full voxel under the true marched surface at 20.0+), the player snapped
-  half a voxel BURIED under the real surface, and the (correct) body DDA
-  walked into the true column's full-solid voxel 39 at the player's chest →
-  `wallBlocked` at `t = 0` on flat ground everywhere in negative y. Fix:
-  `getVoxelAt` floors per axis like `traceSegment` already does. Instrumented
-  probe `MVDBG4` (the column profile z−2..+5) confirmed on the client that
-  the DDA's truth column (voxel 39 full-solid d255, sheet 40 d39) now stays
-  consistent with the height walk (the walk reads 20.0 for the sheet band,
-  `hitTop = 20.5 ≤ endGround + auto-step` → terrain rise → accepted, `doMove`
-  lifts the snap z by one voxel). Note: the MVDBG4-style *cursor*
-  conversion (`voxelUnderCursor()`) uses its own truncating CVectorI path too
-  — tooling only, harmless for movement; left as-is.
+- `docs/ShardRuntimeOps.md` — ops kit, 16-service roster + launch rules, AES 46997
+  stall root-cause + durable deploy, mirror no-reconnect law, XAMPP web/DB, 4010
+  login lifecycle, shard-side instrumentation registry.
+- `docs/VoxelMessageChain.md` + `docs/SET_VOXEL_ROUND_TRIP_VALIDATION.md` — SET_VOXEL
+  chain, msg.xml rules, and the paused issue #6 investigation.
+- `docs/DynClientRuntime.md` — client routing into the dyn world + client data-path
+  failure modes (material library, shaders).
 
-## Runtime findings and session log (2026-10-31, AES restored, Phase 5 continues)
+## Session log (2026-10-23, Phase 5 starts) — findings moved
 
-### 46997 stall loop: root cause, binary build, durable deploy (RESOLVED)
+`pid`s and service ids churn — re-derive from each service's own `log.log` prefix on
+next start. The blocks from this session live in the system docs:
 
-- **Symptom**: every service (EGS, LGS×2, TS, even RAS itself) hammered `CGatewayL3ClientTransport::update : Connecting to localhost:46997` every ~4s; `LOOP_SNAIL` showed ~4.0–4.2 s per EGS loop iteration in `updateModules`, `MS_SNAIL` tick gaps ~5 s, TS `TS_SNAIL late tock`; netstat showed only SYN_SENT toward 46997, nothing LISTENING. Root cause: no process served the AES port. Every service's auto-generated cfg (`live/service_*` includes) creates a `gw_aes`/`aes_client` module gateway connecting to `localhost:46997`; a dead listener = a SYN_SENT retry storm in every service's `updateModules`, which stalls the whole shard tick.
-- **Why it was ever up yesterday**: shard-dev root `log.log` proves the Oct-23 AES was **`ryzom_admin_service.exe` re-aliased as AES** (launched twice 19:22/19:41 from `pipeline\shard_dev` cwd with an `--shortadminname=AES`-style alias; log prefix `AES-0 … ryzom_admin_service.exe`). That binary is a generic NeL service shell; the `AdminExecutorService` module + `aes_gw` L3Server-on-46997 come from its cfg's `StartCommands` (`pipeline\shard_dev\admin_executor_service.cfg`, `DontLaunchServicesDirectly = 1; UseExplicitAESRegistration = 1`). This temp manual run left no artifact, hence "no binary/config visible anywhere".
-- **Resolution**: built the proper nelns AES: root CMake option was `WITH_NELNS=OFF`; reconfigured (`cmake -DWITH_NELNS=ON .` in `code\build`, VS17 2022) and built target `admin_executor_service` (`code\nelns\admin_executor_service`, deps NeL::misc+net only) → `code\build\bin\Release\admin_executor_service.exe` (~1.9 MB). Deployed durably:
-  - `code\build\bin\Release\admin_executor_service.exe` → `pipeline\shard_dev\aes\`
-  - launched with cwd `pipeline\shard_dev\aes`, args `-C.. -L.. --writepid` (cfg stays at `pipeline\shard_dev\admin_executor_service.cfg`, port 46997 from `AESPort`; `DontUseNS=1`, `DontUseAES=1`, `LogDirectory` itself in `aes\`).
-  - `start_mainland.bat` updated: AES starts **right after ras** (the AES's cfg opens `asc_gw` toward AS `localhost:46998`, so AS must be up; if it isn't the AES retries while services already connect fine). New roster: 16 services.
-- **Validation**: 46997 LISTENING (pid + all `::`/`::1` dual-stack), then all **16 distinct services** ESTABLISHED on it within seconds (netstat 32 established endpoints = 16 × dual-stack pair); `LOOP_SNAIL`/`MS_SNAIL`/`Connecting to localhost:46997` stop instantly at AES-up time; TS `TS_SNAIL` quiets via ~1 min delay (reconnection window). Restart resilience verified live: killed AES at 21:32, relaunched from the new `aes\` layout — all services auto-reconnected without a shard restart.
-- **Leftover benign noise (do not chase)**: per-service `CAliveCheck W: can't connect to MFS-257 (Connection refused KISHAN-PC:43980)` every ~14 s — mail/forum service intentionally not deployed in this dev shard; and the nelns AES may log legacy `can't connect to AS-256` retries (pre-module-gateway direct-connect path); module work happens through `aes_gw`/`asc_gw` regardless. Both are fast refused/refused-fallback attempts that don't block the loop (proof: zero LOOP_SNAIL while they repeat).
+- SET_VOXEL forward tracing (instrumented, paused at the FE→MS hop), the round-trip
+  fix (msg.xml `DUMMY` padding leaf), the "local edit ≠ server receipt" trap:
+  `docs/VoxelMessageChain.md` + `docs/SET_VOXEL_ROUND_TRIP_VALIDATION.md`.
+- Dyn-session routing (`IsDynamicContinent` mirror var, client continent routing, client
+  cfg data-path deltas incl. the material-library recover trap):
+  `docs/DynClientRuntime.md`.
+- 4010 login error + shard "offline" state (welcome/FE lifecycle lesson, console-close
+  kill): `docs/ShardRuntimeOps.md` § 6.
+- Autonomous ops kit (`pipeline\shard_dev\README_SHARD_OPS.md`,
+  `status_mainland.bat`, `stop_mainland.bat`, client launcher in
+  `pipeline\client_dev\local\launch_client.bat`): `docs/ShardRuntimeOps.md` § 1.
 
-### start_mainland.bat: roster finalized
+## Docs consolidation
 
-- 16 services in order: `rns_mainland` → `ras` → `aes` (NEW) → `backup_lgs` → `bms_master` → `lgs_unifier_01` → `lgs_unifier_02` → `ms_mainland` → `ts_mainland` → `egs_mainland` → `ios_mainland` → `gpms_mainland` (`ryzom_gpm2_service.exe`) → `su` → `rws_mainland` → `sbs_mainland_01` → `fes_mainland_01`. All launches `start "svc" /min` + `nircmd wait` (console-close = ordered-shutdown lesson). AIS/*_02 deliberately omitted (dyn dev world, no AI).
-
-## Runtime findings and session log (2026-10-23, Phase 5 starts)
-
-Shard runtime progress + every root cause found tonight; `pid`s and service ids churn, re-derive from each service's own `log.log` prefix on next start.
-
-### SET_VOXEL forward: instrumented, paused at FE→MS hop (2026-10-31 → 2026-11-01)
-
-- Night's mission: localize the silent drop between the client's `NetMngr.push` and EGS's `cbClientSetVoxel`.
-  **Client→FE leg is fully proven** (client push logs at 22:03:39/22:06:48; FE decoded 677 actions, **all code=1 = ACTION_GENERIC**, so the padded msg.xml branch works). EGS receipt is still zero.
-- **The independent handoff doc for this block is `docs/SET_VOXEL_ROUND_TRIP_VALIDATION.md`, filed as Github issue [KishanGrimout/ryzomcore#6](https://github.com/KishanGrimout/ryzomcore/issues/6)** — chain map, proven legs, ranked suspects (§4: leading one = `sendMessageViaMirror("EGS")` enumerating zero destinations from `getConnectionList()` → `FWDMSG` leaves with `counter=0`, possibly a legacy-never-worked path), resume protocol (§5), full instrumentation strip list (§6), benign-noise skip list (§7).
-- Full-chain tracing was built and deployed before the decisive retest could run: FE `RTG: Routed impulsion %s to %s [%s]` as `nlinfo` (`id_impulsions.cpp:462`), FE per-action `FERECV: ... code=%u` (`fe_receive_sub.cpp`, before the generic switch), MS `MSGFWD: forwarded msg to MS service id %hu` + `MSGFWD: sent UMM with %u messages to svc-%hu` (`ms_automaton.cpp` ~:389/~:552). None of these has fired in a real run yet. **(2026-11-01: the whole instrumentation set — including the SNAIL family — was reverted from the branch to keep it clean, without an archived patch; re-implement the traces from the handoff doc §1/§6 anchors when resuming the issue.)**
-- **Last-hour blocker (why the retest is still pending): NeL mirror client services do NOT auto-reconnect to a restarted MS.** The 22:12–22:13 MS+FE restart campaign left the fresh MS ("MS-128") with only FS-130 as client; EGS/GPMS/IOS logged `MIRROR: Local Mirror Service 128 is down!` at 22:12:06 and never rejoined (zero ACKATE/ACKATP forwards after 22:13). *Caveat recorded in the doc: the earlier tests that failed ran while EGS was mirror-ready but before these traces existed — they are NOT evidence about the forward.* Restore the mirror (warm-restart EGS/IOS/GPMS in bat order, or cold-start via `start_mainland.bat`) before the next test run.
-- Operational notes for the log reader: FE restarted as **FS-130** and EGS has always been **EGS-130** — same suffix, disambiguate by context. Restart discipline: `Stop-Process` → copy → `Start-Process` (in-use exe cannot be overwritten).
-- **Autonomous ops kit created (2026-11-01):** `pipeline\shard_dev\README_SHARD_OPS.md` (manual launch: XAMPP apache/mysql → `start_mainland.bat` → `launch_client.bat`; rules incl. never click-close service consoles, MySQL-before-SU, FE/EGS id collision), plus `status_mainland.bat` (ports 40916/3306/46997/46993/47911 + 16-process count) and `stop_mainland.bat` (reverse-roster graceful→force shutdown + optional XAMPP stop). Client launcher lives in `pipeline\client_dev\local\launch_client.bat` (sandbox CWD).
-
-
-### Dyn routing: deployed and verified in-world
-
-- `IsDynamicContinent = 1;` added to `pipeline\shard_dev\egs_mainland\entities_game_service.cfg` (right before `FSListenHost`, commented). EGS sends `isInDynWorldSession=true` in `CUserCharMsg` (`character.cpp:7703`); client reader is `net_manager.cpp:430` → `IsInDynWorldSession` → `CContinentManager::select()` routes `select("dynamic")` (`continent_manager.cpp:407`) → `CDynContinent` + `CDynLandscape`. Verified live: not by a config echo (CVariables don't log), but by behavior — legacy `Looking into %s` continent logs absent, dyn landscape initialized.
-- Client cfg deltas for the dyn path (both commented `[DYN_WORLD]` in `PreDataPath`), each eliminating an in-world init failure mode:
-  - `code/ryzom/client/data/shaders` — `CDynLandscape` init does `CIFile(CPath::lookup("dyn_landscape.vp1"), true)` (`dyn_landscape.cpp:124/129`); strict-CIFile means a missing shader source = unhandled `EPathNotFound` crash class during world entry.
-  - `code/ryzom/common/data_leveldesign/dynworld` — `CMaterialLibrary::initialize("material_library.cfg")` is called at in-game init (`init_main_loop.cpp:549`). Without the dir in the search path the load throws inside a `catch(...)` that only logs `Error when loading MaterialLibrary infos` (warning was filtered out of the log entirely), library stays empty: `getMaxEnvironmentId()=0` → `CBiomeManager::getBiome` computes `biome=0` → `nlassert(CMaterialLibrary::instance().isValidEnvironment(biome))` fires **every frame** at `biome_manager.cpp:98` — client Not Responding, log flood, no usable in-world state. The dir is registered recursively so `environments/*.cfg` (5 biomes) and `materials/*.cfg` (9 materials) resolve. **Result: asserts gone, `3D: dynlandscape vertex program available` + `pixel program available` (`dyn_landscape.cpp:427/457`), terrain rendered.**
-- Server `gpm2` never touches `CMaterialLibrary`/`getBiome` (only the client and the legacy non-deployed `gpm_service.cpp:372` do) — that data path is client-only.
-
-### SET_VOXEL round-trip: local works, server push was structurally blocked + fix deployed
-
-- Client debug commands (`commands.cpp`): `dyn_setvoxel` (voxel under cursor), `dyn_addvoxel` (voxel on empty cell above terrain under cursor), `dyn_voxelselection [on,off]` (arms cursor raycast + cyan wireframe cube — the selection cube is INACTIVE by default; without it `voxelUnderCursor()` yields nothing). Environment names for the command come from `environment*/.cfg` `Name = "..."` (Case-sensitive: `Forest`, `Jungle`, `Desert`, `Lakes`; `Prime roots` is the deep-layer biome, excluded from surface noise). Material names from `materials/*.cfg` (`Wood`, `SawDust`, `Mud`, `Humus`, `Goo`, `Earth`, `Cinder`, `Chipboard`, `Bark` — verify exact strings in file). Example: `/dyn_addvoxel Raw Forest Wood 1`.
-- **The trap that stalls future debugging: local edit ≠ server receipt** — `MAP->setVoxelAt` runs BEFORE the `DYN_WORLD:SET_VOXEL` push, so terrain visually bumps even while the server never hears about it (we saw exactly this: voxels appeared, EGS/FE/GPMS totals silence).
-- Root cause of the silent push failure — `game_share/generic_xml_msg_mngr`: `NbBits = getPowerOf2(childCount)` and `NLMISC::getPowerOf2(1) == 0`, so any branch with exactly ONE child (`<branch name="DYN_WORLD">` with its single `SET_VOXEL` leaf) computes 0 bits-per-child; `CNode::select(name, strm)` refuses at the `NbBits == 0` check (`generic_xml_msg_mngr.h:414-417`, "parent 'DYN_WORLD' has no bit per child" → `pushNameToStream failed: Unknown message name`). Data-only fix, no rebuild: added a `DUMMY` padding leaf into the `DYN_WORLD` branch of **both** `code/ryzom/common/data_common/msg.xml` and `pipeline/client_dev/local/xml_server/msg.xml` (kept byte-identical, MD5-verified `D7216...`, includes an in-file comment explaining the ≥2-children constraint). FE restart needed to reparse its msg.xml (`frontend_service.cpp:1334`, done).
-- Full route to verify next (all statically confirmed): client push (`GenericMsgHeaderMngr.pushNameToStream("DYN_WORLD:SET_VOXEL", out)` + `out.serial(pos, voxel)` + `NetMngr.push`) → FE selects by bits, sees `sendto="EGS"`, and re-emits `CMessage("CLIENT:"+msgName)` (`id_impulsions.cpp:352`) → EGS `cbClientSetVoxel` (`client_messages.cpp:3426`, registered at `:3715`) → `CMessage("SET_VOXEL")` → `sendMessageViaMirror("GPMS")` → GPM2 `cbSetVoxel` (`messages.cpp:860`/`:926`) → `CWorldPositionManager::setVoxel`. Only the first hop (client push) was broken.
-- **Rule for future msg.xml edits: never leave a branch with a single child.**
-- Client-side `.sector` cache warnings (`Failed to open file './cache/map/....sector'`) at first dyn-world entry are benign empty-cache state.
-
-### 4010 login error + shard "offline" state (welcome/FE lifecycle lesson)
-- Symptoms: web login → client error 4010, "game servers closed". Code defined **only in the web layer** (`code/web/public_php/.../login_translations.php:196` — `$ErrMsgs[4010]['dbg'] = '(joinSession error %1: %2 for userId %3)'`; `24010` in `prod.inc.php:293` is an unrelated key space). Recorded in the "Runtime error codes" block under Working context.
-- Chain found in logs: FE console window was closed by a user click (`23:15:22 service.cpp:1366: "The window displayer was closed by user, need to quit"` — the FE let the click kill it with a clean `Service ends`), → welcome service saw `FESDisconnection` → `reportOnlineStatus(false)` → SU `Shard 901 is now offline and closed` → `UPDATE shard SET WSOnline='0'` → the next login's `on_joinMainland` couldn't route through the closed shard → 4010.
-- **LESSONS**: (a) never close any spawned NeL service console window — services treat it as an ordered shutdown and take the shard's open state down with them; (b) after an FE restart, expect 4010s until the welcome→SU open-state report lands again or the whole stack comes up cold; (c) authoritative shard-open state = the SU's `UPDATE shard SET ... WSOnline = ...` query lines; (d) an FE restart is otherwise cascade-safe (EGS/GPMS/IOS re-join it via mirror `cbMirrorUp`).
-- End-of-day: full shutdown of all ryzom processes performed — next start is from cold via `start_mainland.bat` (which still needs the fixes listed in Phase 5: LGS stack entries `lgs_unifier_01`/`_02`/`backup_lgs`, GPMS exe name `ryzom_gpm2_service.exe`).
-
-### Docs consolidation
-
-- Roadmap moved to `docs/LEGACY_DYNWORLD_INTEGRATION.md` (`git mv`, history connected); `AGENTS.md` created at repo root with the working rules (docs live in `docs/`, read the roadmap before starting, append runtime findings & error codes there).
+- Roadmap moved to `docs/LEGACY_DYNWORLD_INTEGRATION.md` (`git mv`, history connected); `AGENTS.md` created at repo root with the working rules and the documentation index (ToC). (Rule evolved 2026-11-08: session/system findings go into the per-system CamelCase docs listed in AGENTS.md's ToC, and this roadmap only carries integration-level state.)
 - Docs layout: upstream `README.md` stays at root; deployment-local `pipeline/client_dev/local/README_SANDBOX.md` stays beside the sandbox it describes (contains no temp-dir references anymore; mentions the XML-signature fix and the VS debugger working dir pinning).
 - Uncommitted tree at shutdown includes code changes with unknown provenance that the next session should inspect before treating as its own: `ryzom/client/src/interface_v3/lua_ihm_ryzom.{cpp,h}`, `ryzom/server/src/frontend_service/client_host.cpp`, `fe_receive_sub.cpp` (plus our known edits: msg.xml + the instrumentation set: `nel/src/net/service.cpp` LOOP_SNAIL, `ms_automaton.cpp`/`tick_proxy.cpp` MS_SNAIL, `tick_event_handler.cpp` cbTick alarm).
 

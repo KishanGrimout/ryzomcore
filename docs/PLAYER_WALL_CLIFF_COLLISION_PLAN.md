@@ -6,15 +6,28 @@ matter the height; steep terrain is climbed instead of blocking.
 
 Status: **Milestone M1 reached 2026-11-08** — B1 + B2 implemented, validated in-engine
 (a client session walks flat ground and downslopes free, walls block head-on with
-slide). Companion doc to `docs/LEGACY_DYNWORLD_INTEGRATION.md`.
+slide). Integration roadmap: `docs/LEGACY_DYNWORLD_INTEGRATION.md`.
+
+## Reference documentation
+
+- `docs/VoxelTerrainCollision.md` — **system doc** for this plan's subject: system
+  architecture, move semantics, ground-height invariants (do-not-regress list),
+  instrumentation registry (`MVNAN`/`MVDBG*`), findings catalog, tests. Read it before
+  touching collision code; this plan only tracks decisions and phases.
+- `docs/TestEnvironmentNotes.md` — validation environment quirks (`0xC0000135` ctest
+  DLL issue, direct-exe convention) referenced by phase validations below.
+- `docs/DynClientRuntime.md` (§Debug command catalog, §4 movement: `g_noSnap`) —
+  referenced by B4's client-UX work.
+- `docs/LegacyAssetInventory.md` — legacy tree survey/background (source working copy,
+  legacy assets, external ANL/PolyVox checkouts).
 
 ## Milestone log
 
 - **M1 — 2026-11-08** (branch `dev/dyn`): GLM "walking is not teleported/clipped anymore".
   In-engine: flat walk + gentle downslopes free; wall/cliff contacts produce descs.
   23 unit tests green (12 move-collision + 11 map-collision + whole dynworld exe set
-  exit 0). Fixes landed on the road there (all found in client sessions, see the
-  roadmap 2026-11-07/11-08 session logs):
+  exit 0). Fixes landed on the road there (all found in client sessions, root causes and
+  invariants documented in `docs/VoxelTerrainCollision.md` §§3/6):
   1. `getMeanHeight` climb/descent paths unify on the surface voxel (the climb path
      used to read one voxel high → two-voxel phantom drops);
   2. density `+=` + floor quantization restored (a subtract experiment re-buried the
@@ -40,6 +53,10 @@ slide). Companion doc to `docs/LEGACY_DYNWORLD_INTEGRATION.md`.
 
 ## 1. Verified current behavior (audit findings, 2026-11-07)
 
+> Audit baseline for the plan (kept as the "before" record). The living documentation of
+> what is implemented NOW is `docs/VoxelTerrainCollision.md` — §1 where the system lives,
+> §2 move semantics.
+
 In dyn sessions both sides use the dyn PACS stack, whose move functions are stubs:
 
 - Client plugs in `CDynRetrieverBank` / `CDynGlobalRetriever` / `CDynMoveContainer`
@@ -64,8 +81,7 @@ In dyn sessions both sides use the dyn PACS stack, whose move functions are stub
   `_CheckPrimitive` and reverts to `_LastPositionValidated` when positions diverge.
 - Vanilla NeL PACS chain-based collision (`nel/src/pacs/global_retriever.cpp`
   `findCollisionChains` / `testMovementWithCollisionChains`) is bypassed on dyn
-  continents; dyn IG prims are deliberately non-collisionable (`ig_callback.cpp:219`,
-  roadmap line 270).
+  continents; dyn IG prims are deliberately non-collisionable (`ig_callback.cpp:219`, system doc §1).
 - Source data available for a collision test: `Voxel::Type` (`Air=0 / Object / Liquid /
   Raw` — solid = not Air, this is what `isValidPosition` checks),
   `Voxel::Density`, and the marching-cubes gradient normal already computed in
@@ -74,6 +90,9 @@ In dyn sessions both sides use the dyn PACS stack, whose move functions are stub
   both client and server (same `SRC_DYNWORLD` lib in `game_share/CMakeLists.txt`).
 
 ## 2. Design direction
+
+> The current implemented semantics (B1/B2) are documented in
+> `docs/VoxelTerrainCollision.md` §2; this section records the design rationale.
 
 Implement a real move test **inside `CDynGlobalRetriever`** (`testCylinderMove` +
 `doMove`), not in gpm2 service code. Rationale: the same classes run on client and
@@ -150,7 +169,7 @@ Keep `getMeanHeight` as the z provider; collision decides the accepted (x,y).
       disk_file_db 5, deferred_command 5, map_sector 10, scenario parser 10 — passed
       on first direct run); `ctest`-launched unrelated exes (`nel_misc_test`,
       scenario parser flaky) fail with `0xC0000135` DLL-not-found — pre-existing
-      PATH/loader environment quirk, see roadmap note. B0 runtime baseline still
+      PATH/loader environment quirk, see `docs/TestEnvironmentNotes.md`. B0 runtime baseline still
       pending (needs a client run).
       Next: B2 (`CDynGlobalRetriever::testCylinderMove` for real) consumes exactly
       these three helpers; constants (walkable cos 0.7, 1-voxel step) live in B2/B3.
@@ -169,7 +188,7 @@ Keep `getMeanHeight` as the z provider; collision decides the accepted (x,y).
       contact time 0 (an immediate
       rejection: a contact at the window end makes the PACS reaction's
       `DIST_BACK/(dt − ContactTime)` push-back explode `_Speed` to inf/NaN —
-      found in the client session, see roadmap B2 log); all descs use
+      found in the client session, see `docs/VoxelTerrainCollision.md` §2); all descs use
       `CSurfaceIdent(-1,-1)` (unresolvable through
       `getSurfaceById` ⇒ PACS treats the contact as a wall and slides).
       Tests: `ryzom/tools/server/test_modules/game_share_test/test_dynworld_move_collision.cpp`
@@ -197,8 +216,7 @@ Keep `getMeanHeight` as the z provider; collision decides the accepted (x,y).
       (descent + density epilogue run unconditionally, see§2.1 semantics);
       `getGroundNormal` already stepped back onto the surface voxel and is
       unchanged. Regression test `GentleOneVoxelDownslopeIsNotPhantomBlocked`
-      added (9/9; full dynworld set green). Details in the roadmap
-      2026-11-07 session log.
+      added (9/9; full dynworld set green). Details in `docs/VoxelTerrainCollision.md` § 6.
       Follow-up 2 (same day): an experiment that subtracted the density term
       and commented out the floor quantization (auto-step doubled to 2
       voxels) reintroduced phantom blocks: the sunk ground read put the
@@ -267,21 +285,14 @@ decision; analysis in `docs/VoxelTerrainCollision.md` §8):
 
 ## 5. Instrumentation policy
 
-Temporary markers (strip after Phase 5/6 validation, same rules as `LOOP_SNAIL` /
-`MS_SNAIL`): log in `testCylinderMove`/`doMove` only when a move is **rejected**
-(event, not per-frame), tagged e.g. `MVBLK:`; one server-side counter/engine dump in
-`movePlayer` when `TP:CORRECT` fires. List kept-and-strip markers here as they are
-added.
+Policy: log in `testCylinderMove`/`doMove` only when a move is **rejected** (event,
+not per-frame), tagged e.g. `MVBLK:`; one server-side counter/engine dump in
+`movePlayer` when `TP:CORRECT` fires.
 
-Added 2026-11-07 (B2): `MVNAN:` guards in `CDynGlobalRetriever::doMove` /
-`testCylinderMove` / `getMeanHeight` — non-finite estimation/delta/ground input is
-logged and refused (the move returns the start position unchanged) instead of
-propagating NaN into the voxel conversions (`CVectorI::checkedComponent` assert, seen
-in a client session with `_DeltaPosition` NaN). Touch points:
-`dyn_global_retriever.cpp` — three `std::isfinite` guards. Keep until the NaN birth
-site is confirmed fixed (suspects: PACS reaction speed projection with our descs, or
-`_Speed*(endTime-beginTime)` with poisoned times), then either fix-and-strip or
-leave as a permanent defensive guard (decide at B6).
+The kept-and-strip marker registry lives in the system doc —
+`docs/VoxelTerrainCollision.md` § 5 (`MVNAN` guards ×3 with their strip conditions, and
+the `MVDBG`/`MVDBG2/3/4` probes). Update that registry, not this plan, when
+instrumentation is added or stripped.
 
 ## 6. Open decisions
 
