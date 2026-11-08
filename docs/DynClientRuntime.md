@@ -68,6 +68,10 @@ together with the dyn session routing, never partially.
 - Terrain/voxel: `dyn_setvoxel`, `dyn_addvoxel`, `dyn_voxelselection` (usage + the
   selection-cube default-off caveat → `docs/VoxelMessageChain.md` §4).
 - Mesh/regen: `dyn_regenvoxels`, `dyn_regenmesh`, `dyn_cubicgen`, `dyn_rebuildshaders`.
+- Shader debug: `dyn_shaderdebug <n>` — writes the fragment-stage debug selector
+  into `landscapeParams.w` (0 = production, 1 flat magenta, 2 unlit textured,
+  3 lighting only, 4 fog only, 5 texcoords as color, 6 production color with
+  alpha forced 1). Applies immediately, no program rebuild.
 - Position/camera: `dyn_refreshpos`, `dyn_igdist`, `dyn_prefetchextents`.
 - Lod/render switches: `dyn_baselod`, `dyn_maxlod`, `dyn_fardist`, `dyn_useVP`,
   `dyn_usePP`, `dyn_reloadenvconfig`, `dyn_renderoldlandscape`.
@@ -89,11 +93,21 @@ thread-stats section.
 - Globals exercised by the upcoming render validation: `g_rebuildShaders`,
   `g_useVP`, `g_usePP`, `g_renderLegacyLandscape` (contrast: new VP/PP path vs legacy
   landscape render).
-- `CDynLandscape` shaders: `dyn_landscape.vp1` (44 lines, NV vertex program 1.0) +
-  `dyn_landscape.arbfp1` (~70 lines, ARB fragment program), loaded via
-  `CPath::lookup("dyn_landscape")` + `CIFile::serialBuffer` (readShaderFiles).
-  The `.cg` pair (`dyn_landscape_vp.cg` / `dyn_landscape_fp.cg`) is authoring source only
-  — never loaded at runtime.
+- `CDynLandscape` shaders (GLSL primary since 2026-11-09): `dyn_landscape_vp.glsl` +
+  `dyn_landscape_fp.glsl` — hand-authored, compiled as `glsl300esv`/`glsl300esf`
+  (linked) or `glsl330v`/`glsl330f` (SSO) by the `NLDRIVERGL3` driver; per-profile
+  `#version` + attribute/varying prefixes live in `dyn_landscape.cpp`
+  (`GLSL*Prefix*`), the UBO headers (`NlModel`/`NlCamera`/`NlLightTable` builtins +
+  user `NlDynLandscape { vec4 landscapeParams; }`) are spliced by the driver.
+  `nelvp`/`arbfp1` assembly (`dyn_landscape.vp1`/`.arbfp1`, frozen) remains the GL1
+  fallback pair. Runtime failure on GL3 without the GLSL pair lands on the builtin
+  programs with texgen (rendered black pre-migration, note in
+  `docs/DYNLANDSCAPE_GLSL_MIGRATION_PLAN.md` §5 Phase 0).
+- `dyn_rebuildshaders` → `reloadPrograms()`: single compile attempt, restores the
+  previous sources on failure, falls back to builtins on double failure (no retry
+  spin). Shaders are re-read from disk each reload.
+- The former `.cg` pair (`dyn_landscape_vp.cg` / `dyn_landscape_fp.cg`) was deleted
+  (2026-11-09) — it had been authoring-only and stale.
 - `CDynLandscape::render()` replaces the **whole** render path including vegetables
   (trailing `bool doVegetables = true` param accepted and unused in the impl).
 

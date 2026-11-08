@@ -23,6 +23,11 @@
 #include "dynworld/map_client.h"
 #include "dynworld/dyn_landscape_user.h"
 
+#include "nel/3d/vertex_program.h"
+#include "nel/3d/pixel_program.h"
+#include "nel/3d/uniform_buffer_format.h"
+#include "nel/3d/uniform_buffer.h"
+
 using namespace std;
 using namespace NLMISC;
 using namespace NL3D;
@@ -30,6 +35,143 @@ using namespace NL3D;
 static const char *DynLandscapeProgramName = "dyn_landscape";
 static const char *DynLandscapeVertexProgramExt = ".vp1";
 static const char *DynLandscapeFragmentProgramExt = ".arbfp1";
+
+namespace
+{
+	// Hand-authored GLSL bodies loaded from data/shaders at runtime
+	// (profile-neutral: see the comments in the .glsl files; the per-profile
+	// #version + attribute/varying declarations below complete the sources,
+	// and the GL3 driver injects the builtin/user uniform blocks).
+	static const char *DynLandscapeVertexGLSLFile = "dyn_landscape_vp.glsl";
+	static const char *DynLandscapeFragmentGLSLFile = "dyn_landscape_fp.glsl";
+
+	// Shared per-draw params block, declared in BOTH GLSL stages
+	// (x = tighten, y = scale, z = displayFactor, w = spare). The VP source
+	// registers it at UBBindingVertexProgram and the PP source at
+	// UBBindingPixelProgram; the same CUniformBuffer is bound to both binding
+	// points around the landscape draws.
+	struct CDynLandscapeUBOOffsets
+	{
+		sint Params;
+	};
+	CDynLandscapeUBOOffsets s_LandscapeUBOOffsets;
+	NLMISC::CSmartPtr<CUniformBufferFormat> s_LandscapeUBFormat;
+	NLMISC::CSmartPtr<CUniformBuffer> s_LandscapeUB;
+
+	void initLandscapeUBO()
+	{
+		if (s_LandscapeUBFormat)
+			return;
+		CUniformBufferFormat *fmt = new CUniformBufferFormat();
+		fmt->Name = "NlDynLandscape";
+		s_LandscapeUBOOffsets.Params = fmt->push("landscapeParams", CUniformBufferFormat::FloatVec4);
+		s_LandscapeUBFormat = fmt;
+		s_LandscapeUB = new CUniformBuffer();
+		s_LandscapeUB->Format = *fmt;
+		s_LandscapeUB->UsageHint = CUniformBuffer::StreamDraw;
+	}
+
+	bool isGLSLProfile(NL3D::IProgram::TProfile profile)
+	{
+		return profile == NL3D::IProgram::glsl330v || profile == NL3D::IProgram::glsl330f
+			|| profile == NL3D::IProgram::glsl300esv || profile == NL3D::IProgram::glsl300esf;
+	}
+
+	const char *programProfileName(NL3D::IProgram::TProfile profile)
+	{
+		switch (profile)
+		{
+		case NL3D::IProgram::nelvp: return "nelvp";
+		case NL3D::IProgram::glsl330v: return "glsl330v";
+		case NL3D::IProgram::glsl330f: return "glsl330f";
+		case NL3D::IProgram::glsl300esv: return "glsl300esv";
+		case NL3D::IProgram::glsl300esf: return "glsl300esf";
+		case NL3D::IProgram::arbfp1: return "arbfp1";
+		case NL3D::IProgram::arbvp1: return "arbvp1";
+		default: return "?";
+		}
+	}
+
+	// Per-profile GLSL prefixes: #version + attribute/varying declarations.
+	// The driver (insertBuiltinHeaders) injects the builtin (NlModel/NlCamera/
+	// NlLightTable) and user (NlDynLandscape) uniform blocks after the leading
+	// #version/#extension/precision lines of these prefixes. The glsl300es
+	// (linked) variant must not use layout() on varyings (GLSL ES 3.00
+	// forbids it — the GL linker matches VP outputs to PP inputs by name);
+	// the SSO glsl330 variant pins locations per the VaryingLocation* contract
+	// (ecPos=0, texCoord0..2=8..10). Attribute locations follow the GL3
+	// vertex buffer binding map (position=0, normal=2, Empty[alias Tangent]=7
+	// — CVertexBuffer::Empty is a deprecated alias of Tangent, enum 15, NOT
+	// the PaletteSkin slot at GL index 6; the legacy vp1 assembly's v[7].x is
+	// exactly the Tangent GL index).
+	const char *GLSLVPPrefixSSO =
+		"#version 330\n"
+		"#extension GL_ARB_separate_shader_objects : enable\n"
+		"\n"
+		"out gl_PerVertex { vec4 gl_Position; };\n"
+		"\n"
+		"layout(location = 0) in vec4 position;\n"
+		"layout(location = 2) in vec4 normal;\n"
+		// CVertexBuffer::Empty is a DEPRECATED ALIAS of Tangent (enum 15) —
+		// the region VB per-vertex alpha therefore travels the Tangent slot,
+		// GLVertexAttribIndex[Tangent] = 7 (= the legacy vp1 assembly's v[7]).
+		"layout(location = 7) in vec4 empty;\n"
+		"\n"
+		"layout(location = 0) smooth out vec4 ecPos;\n"
+		"layout(location = 8) smooth out vec4 texCoord0;\n"
+		"layout(location = 9) smooth out vec4 texCoord1;\n"
+		"layout(location = 10) smooth out vec4 texCoord2;\n"
+		"\n";
+
+	const char *GLSLVPPrefix300es =
+		"#version 300 es\n"
+		"precision highp float;\n"
+		"precision highp int;\n"
+		"\n"
+		"layout(location = 0) in vec4 position;\n"
+		"layout(location = 2) in vec4 normal;\n"
+		// CVertexBuffer::Empty is a DEPRECATED ALIAS of Tangent (enum 15) —
+		// the region VB per-vertex alpha therefore travels the Tangent slot,
+		// GLVertexAttribIndex[Tangent] = 7 (= the legacy vp1 assembly's v[7]).
+		"layout(location = 7) in vec4 empty;\n"
+		"\n"
+		"smooth out vec4 ecPos;\n"
+		"smooth out vec4 texCoord0;\n"
+		"smooth out vec4 texCoord1;\n"
+		"smooth out vec4 texCoord2;\n"
+		"\n";
+
+	const char *GLSLFPPrefixSSO =
+		"#version 330\n"
+		"#extension GL_ARB_separate_shader_objects : enable\n"
+		"\n"
+		"layout(location = 0) smooth in vec4 ecPos;\n"
+		"layout(location = 8) smooth in vec4 texCoord0;\n"
+		"layout(location = 9) smooth in vec4 texCoord1;\n"
+		"layout(location = 10) smooth in vec4 texCoord2;\n"
+		"out vec4 fragColor;\n"
+		// Sampler uniforms named after CProgramIndex::Sampler0/1 so
+		// setupInitialUniforms binds material texture units 0/1 to them.
+		"uniform sampler2D sampler0;\n"
+		"uniform sampler2D sampler1;\n"
+		"\n";
+
+	const char *GLSLFPPrefix300es =
+		"#version 300 es\n"
+		"precision highp float;\n"
+		"precision highp int;\n"
+		"\n"
+		"smooth in vec4 ecPos;\n"
+		"smooth in vec4 texCoord0;\n"
+		"smooth in vec4 texCoord1;\n"
+		"smooth in vec4 texCoord2;\n"
+		"out vec4 fragColor;\n"
+		// Sampler uniforms named after CProgramIndex::Sampler0/1 so
+		// setupInitialUniforms binds material texture units 0/1 to them.
+		"uniform sampler2D sampler0;\n"
+		"uniform sampler2D sampler1;\n"
+		"\n";
+}
 
 /*class CVertexProgramDynLandscape : public CVertexProgram
 {
@@ -119,17 +261,36 @@ CDynLandscape::~CDynLandscape()
 	
 }
 
+namespace
+{
+	// Reads a shader source file from the search paths. Non-throwing: returns
+	// false (and leaves dest empty) when the file is missing so optional files
+	// (the GLSL bodies) may be absent — the assembly fallbacks still load.
+	bool readProgramFile(const std::string &name, std::string &dest)
+	{
+		dest.clear();
+		std::string path = CPath::lookup(name, false, false, true);
+		if (path.empty())
+		{
+			nlwarning("3D: dynlandscape: shader file '%s' not found on search paths", name.c_str());
+			return false;
+		}
+		CIFile file(path, true);
+		uint fileSize = file.getFileSize();
+		dest.resize(fileSize);
+		file.serialBuffer((uint8*)dest.data(), fileSize);
+		return true;
+	}
+}
+
 void CDynLandscape::readShaderFiles()
 {
-	CIFile VPFile(CPath::lookup(std::string(DynLandscapeProgramName) + std::string(DynLandscapeVertexProgramExt)), true);
-	uint fileSize = VPFile.getFileSize();
-	m_VPSource.resize(fileSize);
-	VPFile.serialBuffer((uint8*)m_VPSource.data(), fileSize);
-
-	CIFile PPFile(CPath::lookup(std::string(DynLandscapeProgramName) + std::string(DynLandscapeFragmentProgramExt)), true);
-	fileSize = PPFile.getFileSize();
-	m_PPSource.resize(fileSize);
-	PPFile.serialBuffer((uint8*)m_PPSource.data(), fileSize);
+	// Any of these may fail to load if the search paths miss the file;
+	// setupPrograms() compiles only the sources that are actually present.
+	readProgramFile(std::string(DynLandscapeProgramName) + DynLandscapeVertexProgramExt, m_VPSource);
+	readProgramFile(std::string(DynLandscapeProgramName) + DynLandscapeFragmentProgramExt, m_PPSource);
+	readProgramFile(DynLandscapeVertexGLSLFile, m_VPGLSLBody);
+	readProgramFile(DynLandscapeFragmentGLSLFile, m_PPGLSLBody);
 }
 
 void CDynLandscape::clear()
@@ -168,6 +329,11 @@ bool g_useVP = true;
 bool g_usePP = true;
 bool g_rebuildShaders = false;
 float g_tighten = 0.4679f;
+// Fragment-stage debug mode selector, staged through the unused x channel of
+// the NlDynLandscape. w component (dyn_shaderdebug handler in commands.cpp).
+// 0 = production path; 1..6 keep the production VP untouched and bisect the
+// fragment stage (see dyn_landscape_fp.glsl header).
+float g_shaderDebugMode = 0.f;
 Voxel::MaterialType g_discardMaterial = 0xFF;
 bool g_clipBV = true;
 void CDynLandscape::render(const CVector &refineCenter, const CVector &frontVector, const CPlane pyramid[NL3D_TESSBLOCK_NUM_CLIP_PLANE], bool doTileAddPass /*= false*/, bool doVegetables /*= true*/)
@@ -175,37 +341,49 @@ void CDynLandscape::render(const CVector &refineCenter, const CVector &frontVect
 	(void)doVegetables;
 	if (g_rebuildShaders)
 	{
-		bool succeed = false;
-		while (!succeed)
-		{
-			deletePrograms();
-			readShaderFiles();
-			succeed = setupPrograms();
-		}
 		g_rebuildShaders = false;
+		reloadPrograms();
 	}
 
 	_Driver->setupFog(_Driver->getFogStart(), _Driver->getFogEnd(), _Driver->getFogColor());
 
-	if (g_useVP)
+	if (g_useVP && m_VP != NULL)
 	{
 		bool vpok = _Driver->activeVertexProgram(m_VP);
 		nlassert(vpok);
 	}
-	if (g_usePP)
+	if (g_usePP && m_PP != NULL)
 	{
 		bool ppok = _Driver->activePixelProgram(m_PP);
 		nlassert(ppok);
 	}
 
-	if (!g_usePP)
+	// No user pixel program available (compile failed or disabled): leave the
+	// material in the builtin texgen path so the terrain still renders
+	// through the driver's builtin programs.
+	if (!g_usePP || m_PP == NULL)
 	{
 		m_Mat.setTexCoordGen(0, true);
 		m_Mat.setTexCoordGenMode(0, g_texCoordGenMode);
 	}
 
+	bool glslVP = (g_useVP && m_VP != NULL && isGLSLProfile(m_VP->profile()));
+	bool glslPP = (g_usePP && m_PP != NULL && isGLSLProfile(m_PP->profile()));
+	// Shared params UBO: the same buffer feeds both stages (block
+	// NlDynLandscape declared in both GLSL sources).
+	if (glslVP)
+		_Driver->bindUniformBuffer(NL3D::UBBindingVertexProgram, s_LandscapeUB);
+	if (glslPP)
+		_Driver->bindUniformBuffer(NL3D::UBBindingPixelProgram, s_LandscapeUB);
+
 	renderRegions(pyramid, NL3D_TESSBLOCK_NUM_CLIP_PLANE);
 	renderTransitions(pyramid, NL3D_TESSBLOCK_NUM_CLIP_PLANE);
+
+	// unbind user UBOs
+	if (glslVP)
+		_Driver->bindUniformBuffer(NL3D::UBBindingVertexProgram, nullptr);
+	if (glslPP)
+		_Driver->bindUniformBuffer(NL3D::UBBindingPixelProgram, nullptr);
 
 	// reset texture
 	m_Mat.setTexture(0, NULL);
@@ -232,15 +410,30 @@ void CDynLandscape::renderRegion(const CRegionMesh* mesh, const CMatrix& matrix)
 
 	if (g_useVP && m_VP != NULL)
 	{
-		_Driver->setUniformMatrix(IDriver::VertexProgram, m_VP->getUniformIndex(CProgramIndex::ModelViewProjection), IDriver::ModelViewProjection, IDriver::Identity);
-		_Driver->setUniform1f(IDriver::VertexProgram, 4, g_tighten);
-		_Driver->setUniform1f(IDriver::VertexProgram, 5, scale);
-		_Driver->setUniformFog(IDriver::VertexProgram, 10);
+		if (isGLSLProfile(m_VP->profile()))
+		{
+			// params into the shared user UBO (NlDynLandscape): x = tighten,
+			// y = scale, z = displayFactor. MVP/camera state comes from the
+			// driver-uploaded builtin UBOs (NlModel/NlCamera); per-vertex
+			// register writes are not used in the GLSL path.
+			s_LandscapeUB->lock();
+			s_LandscapeUB->set(s_LandscapeUBOOffsets.Params, g_tighten, scale, mesh->m_displayFactor, g_shaderDebugMode);
+			s_LandscapeUB->unlock();
+		}
+		else // nelvp fallback (GL1 driver and converted GL3 path): fixed register ids
+		{
+			_Driver->setUniformMatrix(IDriver::VertexProgram, m_VP->getUniformIndex(CProgramIndex::ModelViewProjection), IDriver::ModelViewProjection, IDriver::Identity);
+			_Driver->setUniform1f(IDriver::VertexProgram, 4, g_tighten);
+			_Driver->setUniform1f(IDriver::VertexProgram, 5, scale);
+			_Driver->setUniformFog(IDriver::VertexProgram, 10);
+		}
 	}
 
-	if (g_usePP && m_PP != NULL)
+	if (g_usePP && m_PP != NULL && !isGLSLProfile(m_PP->profile()))
 	{
-		// xy: fog factor, z:blend factor
+		// xy: fog factor, z:blend factor (arbfp1 fallback only — the GLSL
+		// fragment stage takes displayFactor from the UBO and fog state from
+		// the NlCamera builtin UBO)
 		_Driver->setUniform4f(IDriver::PixelProgram, 2, -1.f / (_Driver->getFogEnd() - _Driver->getFogStart()), _Driver->getFogEnd() / (_Driver->getFogEnd() - _Driver->getFogStart()), mesh->m_displayFactor, 0.f);
 	}
 
@@ -395,10 +588,124 @@ void CDynLandscape::deletePrograms()
 	m_PP = NULL;
 }
 
+void CDynLandscape::reloadPrograms()
+{
+	// Snapshot the currently-loaded sources; restored below if the freshly
+	// read files fail to compile. Single attempt per set (no infinite retry
+	// loop in render()): on double failure the terrain falls back to the
+	// builtin programs until a later dyn_rebuildshaders succeeds.
+	std::string lastVPSource, lastPPSource, lastVPGLSL, lastPPGLSL;
+	lastVPSource.swap(m_VPSource);
+	lastPPSource.swap(m_PPSource);
+	lastVPGLSL.swap(m_VPGLSLBody);
+	lastPPGLSL.swap(m_PPGLSLBody);
+
+	readShaderFiles();
+	deletePrograms();
+	if (setupPrograms())
+	{
+		nlinfo("3D: dynlandscape shaders reloaded (profile delta: VP %s, PP %s)",
+			programProfileName(m_VP ? m_VP->profile() : NL3D::IProgram::nelvp),
+			programProfileName(m_PP ? m_PP->profile() : NL3D::IProgram::arbfp1));
+		return;
+	}
+	if (!lastVPSource.empty() || !lastPPSource.empty() || !lastVPGLSL.empty() || !lastPPGLSL.empty())
+	{
+		// new sources unusable: restore the previous snapshot and rebuild once
+		m_VPSource.swap(lastVPSource);
+		m_PPSource.swap(lastPPSource);
+		m_VPGLSLBody.swap(lastVPGLSL);
+		m_PPGLSLBody.swap(lastPPGLSL);
+		if (setupPrograms())
+		{
+			nlwarning("3D: dynlandscape new shaders failed to compile; previous programs restored");
+			return;
+		}
+	}
+	m_VP = NULL;
+	m_PP = NULL;
+	nlwarning("3D: dynlandscape shaders unavailable after reload attempt; using builtin programs until the next rebuild");
+}
+
+void CDynLandscape::addVPGLSLSources()
+{
+	if (m_VPGLSLBody.empty())
+		return;
+
+	// glsl300esv — linked single-stage source (primary with the GL3 driver,
+	// which forces m_LinkedMegaShaders=true on desktop; also the GLES3 path).
+	// OnlyUBOs: the linked path rejects default-block uniforms —
+	// all params go through the "NlDynLandscape" user UBO block. The NlModel
+	// object UBO provides modelViewProjection and implies the camera UBO
+	// (inverseProjectionBasis used by the synthesized ecPos) and the light
+	// table.
+	{
+		IProgram::CSource *source = new IProgram::CSource();
+		source->Features.MaterialFlags = CProgramFeatures::TextureStages;
+		source->Features.OnlyUBOs = true;
+		source->Features.UsesObjectUBO = true;
+		source->UniformBufferFormats[NL3D::UBBindingVertexProgram] = s_LandscapeUBFormat;
+		source->Profile = IProgram::glsl300esv;
+		source->DisplayName = "glsl300esv/dyn_landscape";
+		source->setSource(std::string(GLSLVPPrefix300es) + m_VPGLSLBody);
+		m_VP->addSource(source);
+	}
+	// glsl330v — SSO fallback (desktop separable programs)
+	{
+		IProgram::CSource *source = new IProgram::CSource();
+		source->Features.MaterialFlags = CProgramFeatures::TextureStages;
+		source->Features.OnlyUBOs = true;
+		source->Features.UsesObjectUBO = true;
+		source->UniformBufferFormats[NL3D::UBBindingVertexProgram] = s_LandscapeUBFormat;
+		source->Profile = IProgram::glsl330v;
+		source->DisplayName = "glsl330v/dyn_landscape";
+		source->setSource(std::string(GLSLVPPrefixSSO) + m_VPGLSLBody);
+		m_VP->addSource(source);
+	}
+}
+
+void CDynLandscape::addPPGLSLSources()
+{
+	if (m_PPGLSLBody.empty())
+		return;
+
+	// glsl300esf — linked single-stage source (primary, same as VP). Fog
+	// state comes from the camera UBO, the sun from light table entry 0
+	// (nlLights[0]); no PPL uniforms are used (SupportPPL stays off).
+	{
+		IProgram::CSource *source = new IProgram::CSource();
+		source->Features.MaterialFlags = CProgramFeatures::TextureStages;
+		source->Features.OnlyUBOs = true;
+		source->Features.UsesLightTableUBO = true;
+		source->Features.UsesCameraUBO = true;
+		source->UniformBufferFormats[NL3D::UBBindingPixelProgram] = s_LandscapeUBFormat;
+		source->Profile = IProgram::glsl300esf;
+		source->DisplayName = "glsl300esf/dyn_landscape";
+		source->setSource(std::string(GLSLFPPrefix300es) + m_PPGLSLBody);
+		m_PP->addSource(source);
+	}
+	// glsl330f — SSO fallback (desktop separable programs)
+	{
+		IProgram::CSource *source = new IProgram::CSource();
+		source->Features.MaterialFlags = CProgramFeatures::TextureStages;
+		source->Features.OnlyUBOs = true;
+		source->Features.UsesLightTableUBO = true;
+		source->Features.UsesCameraUBO = true;
+		source->UniformBufferFormats[NL3D::UBBindingPixelProgram] = s_LandscapeUBFormat;
+		source->Profile = IProgram::glsl330f;
+		source->DisplayName = "glsl330f/dyn_landscape";
+		source->setSource(std::string(GLSLFPPrefixSSO) + m_PPGLSLBody);
+		m_PP->addSource(source);
+	}
+}
+
 bool CDynLandscape::setupPrograms()
 {
+	initLandscapeUBO();
+
 	m_VP = new CVertexProgram();
-	// nelvp
+	// nelvp — GL1 fallback (all drivers; note: m_VP != NULL even if the
+	// GLSL sources below are absent so the legacy path always works)
 	{
 		IProgram::CSource *source = new IProgram::CSource();
 		//source->Features.MaterialFlags = CProgramFeatures::TextureStages;
@@ -412,6 +719,8 @@ bool CDynLandscape::setupPrograms()
 
 		m_VP->addSource(source);
 	}
+	// hand-authored GLSL (data/shaders/dyn_landscape_vp.glsl) — GL3 primary
+	addVPGLSLSources();
 	if (!_Driver->compileVertexProgram(m_VP))
 	{
 		nlwarning("3D: No supported vertex program for dynlandscape");
@@ -424,11 +733,11 @@ bool CDynLandscape::setupPrograms()
 	}
 	else
 	{
-		nldebug("3D: dynlandscape vertex program available");
+		nldebug("3D: dynlandscape vertex program available (%s)", programProfileName(m_VP->profile()));
 	}
 
 	m_PP = new CPixelProgram();
-	// arbfp1
+	// arbfp1 — GL1 fallback
 	{
 		IProgram::CSource *source = new IProgram::CSource();
 		source->Features.MaterialFlags = CProgramFeatures::TextureStages;
@@ -436,14 +745,8 @@ bool CDynLandscape::setupPrograms()
 		source->setSourcePtr(m_PPSource.c_str());
 		m_PP->addSource(source);
 	}
-	// ps_2_0
-		//{
-		//	IProgram::CSource *source = new IProgram::CSource();
-		//	source->Features.MaterialFlags = CProgramFeatures::TextureStages;
-		//	source->Profile = IProgram::ps_2_0;
-		//	source->setSourcePtr(a_ps_2_0);
-		//	m_PP->addSource(source);
-		//}
+	// hand-authored GLSL (data/shaders/dyn_landscape_fp.glsl) — GL3 primary
+	addPPGLSLSources();
 	if (!_Driver->compilePixelProgram(m_PP))
 	{
 		nlwarning("3D: No supported pixel program for dynlandscape");
@@ -454,7 +757,7 @@ bool CDynLandscape::setupPrograms()
 	}
 	else
 	{
-		nldebug("3D: dynlandscape pixel program available");
+		nldebug("3D: dynlandscape pixel program available (%s)", programProfileName(m_PP->profile()));
 	}
 	return true;
 }

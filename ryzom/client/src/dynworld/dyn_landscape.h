@@ -67,11 +67,16 @@ private:
 	void renderTransitions(const NLMISC::CPlane* pyramid, sint nbPlanes);
 	void renderSelectedVoxel();
 	bool setupPrograms();
+	void addVPGLSLSources();
+	void addPPGLSLSources();
+	void reloadPrograms();
 	void deletePrograms();
 	void readShaderFiles();
 
 	std::string m_VPSource;
 	std::string m_PPSource;
+	std::string m_VPGLSLBody;
+	std::string m_PPGLSLBody;
 	NL3D::CVertexProgram* m_VP;
 	NL3D::CPixelProgram* m_PP;
 	NL3D::CMaterial m_Mat;

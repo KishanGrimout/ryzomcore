@@ -5640,6 +5640,25 @@ NLMISC_COMMAND(dyn_usePP, "Toggle use of dyn landscape pixel program", "")
 	return true;
 }
 
+extern float g_shaderDebugMode;
+NLMISC_COMMAND(dyn_shaderdebug, "Select dynlandscape fragment debug mode", "<mode: 0=normal, 1=flat magenta, 2=unlit textured, 3=lighting only, 4=fog only, 5=texcoords as color, 6=normal color, 7=triplanar weights as color, 8=object normal as color>")
+{
+	if (args.size() != 1)
+	{
+		nlinfo("dyn_shaderdebug: current mode = %g (0=normal, 1=magenta, 2=unlit texture, 3=lighting, 4=fog, 5=texcoords, 6=color+alpha1, 7=weights, 8=normal)", g_shaderDebugMode);
+		return true;
+	}
+	float mode = (float)atoi(args[0].c_str());
+	if (mode < 0.f || mode > 8.f)
+	{
+		nlwarning("dyn_shaderdebug: invalid mode '%s' (0..8)", args[0].c_str());
+		return false;
+	}
+	g_shaderDebugMode = mode;
+	nlinfo("dyn_shaderdebug: mode %g active (applies immediately, no rebuild)", mode);
+	return true;
+}
+
 extern bool g_reloadEnvConfig;
 NLMISC_COMMAND(dyn_reloadenvconfig, "Reload environment .cfg files", "")
 {

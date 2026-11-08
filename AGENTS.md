@@ -59,6 +59,7 @@ Plan/handoff docs:
 | `docs/LEGACY_DYNWORLD_INTEGRATION.md` | the legacy-dynworld integration roadmap (audit conclusions, port status, unit checklists, phase validation) |
 | `docs/PLAYER_WALL_CLIFF_COLLISION_PLAN.md` | GitHub issue #2 — player blocking on walls/cliffs (phases B0–B6, acceptance criteria) |
 | `docs/SET_VOXEL_ROUND_TRIP_VALIDATION.md` | GitHub issue #6 — paused SET_VOXEL round-trip investigation (suspects, resume protocol, instrumentation inventory) |
+| `docs/DYNLANDSCAPE_GLSL_MIGRATION_PLAN.md` | dyn landscape shaders vp1/arbfp1 assembly → hand-authored GLSL via the GL3 driver (assessment, phases 0–5) |
 
 Deployment-local (stay where they are, linked from here):
 
