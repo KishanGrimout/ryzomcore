@@ -593,7 +593,8 @@ void checkUnderCursor()
 					{
 						SlotUnderCursor = CLFECOMMON::INVALID_SLOT; // invalidate previous entity selection
 						// TODO: use map deferred command
-						Voxel selectedVoxel = CDynContinent::MAP->getVoxelAt(CDynContinent::MAP->voxelUnderCursor());
+						const TVoxelPos& selectedVoxelPos = CDynContinent::MAP->voxelUnderCursor();
+						Voxel selectedVoxel = CDynContinent::MAP->getVoxelAt(selectedVoxelPos);
 						std::string matNameStr("");
 						if (selectedVoxel.getType() == Voxel::Raw)
 						{
@@ -606,6 +607,7 @@ void checkUnderCursor()
 								matNameStr += " ";
 								matNameStr += matName;
 								matNameStr += " (" + toString((uint)selectedVoxel.getDensity()) + ")";
+								matNameStr += " (" + selectedVoxelPos.asString() + ")";
 							}
 						}
 						else if (selectedVoxel.getType() == Voxel::Object)

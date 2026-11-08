@@ -23,48 +23,66 @@
 #include "nel/misc/types_nl.h"
 #include "nel/misc/vectori.h"
 
+/**
+ * A voxel is stored in a 32-bit value. Its type determines how the remaining
+ * bits are interpreted:
+ *
+ * - Air: stores RGB color in three 8-bit values (256 values per channel;
+ *   alpha is always returned as 0).
+ * - Object: stores a 24-bit sheet ID (16,777,216 possible IDs) and a
+ *   2-bit object subtype.
+ * - Liquid: stores a 2-bit liquid subtype and an 8-bit density
+ *   (256 possible density values).
+ * - Raw: stores an 8-bit material, a 3-bit biome, and an 8-bit density.
+ *
+ * The type field is 3 bits wide, allowing 8 encodings; four types are
+ * currently named below. The biome field is 3 bits wide (8 encodings).
+ * Subtype fields are 2 bits wide (4 encodings).
+ */
 class Voxel
 {
 public:
-    typedef uint8 BiomeType;
-    typedef uint8 MaterialType;
-    typedef uint8 DensityType;
+	typedef uint8 BiomeType;
+	typedef uint8 MaterialType;
+	typedef uint8 DensityType;
 
-    enum Biome : BiomeType
-    {
-        // Defined on 3 bits
-        // All first values are defined in data
-        GenericBiome = 7,
-        MaxBiome = GenericBiome,
-    };
+	enum Biome : BiomeType
+	{
+		// Stored in 3 bits: 8 possible encodings. Biome values are defined
+		// by data; GenericBiome is the fallback/max value currently declared.
+		GenericBiome = 7,
+		MaxBiome = GenericBiome,
+	};
 
-    enum Type : MaterialType
-    {
-        // Defined on 3 bits
-        Air = 0,
-        Object = 1,
-        LastNoDensity = Object,
-        Liquid = 2,
-        Raw = 3,
-    };
+	enum Type : MaterialType
+	{
+		// Stored in 3 bits: 8 possible encodings; these four are currently named.
+		Air = 0, // Stores RGB color in the three parameter bytes.
+		Object = 1, // Stores a 24-bit sheet ID and an object subtype.
+		LastNoDensity = Object,
+		Liquid = 2, // Stores a liquid subtype and an 8-bit density.
+		Raw = 3, // Stores an 8-bit material and an 8-bit density.
+	};
 
-    enum LiquidType : MaterialType
-    {
-        // Defined on 2 bits for m_subtype
-        Water = 0,
-        Sap = 1,
-    };
+	enum LiquidType : MaterialType
+	{
+		// Stored in 2 bits: 4 possible encodings; Water and Sap are named.
+		Water = 0,
+		Sap = 1,
+	};
 
-    enum ObjectType : MaterialType
-    {
-        Static = 0,
-        Dynamic = 1
-    };
+	enum ObjectType : MaterialType
+	{
+		// Stored in 2 bits: 4 possible encodings; Static and Dynamic are named.
+		Static = 0,
+		Dynamic = 1
+	};
 
-    enum Constants
-    {
-        MaxDensity = 0xFF,
-    };
+	enum Constants
+	{
+		// Density is an unsigned 8-bit value, so its range is 0–255 (256 values).
+		MaxDensity = 0xFF,
+	};
 
     explicit Voxel(uint32 value = 0) : m_Value(value) {}
 

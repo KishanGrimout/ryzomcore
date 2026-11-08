@@ -23,7 +23,7 @@
 #include "nel/misc/hierarchical_timer.h"
 
 #include <limits>
-
+#include <cmath>
 using namespace std;
 using namespace NLMISC;
 using namespace NLPACS;
@@ -358,52 +358,61 @@ float CDynGlobalRetriever::getMeanHeight(const UGlobalPosition &pos) const
 {
 	// TODOKG: check whether a real 'mean' is needed
 	CVector testPos = pos.LocalPosition.Estimation;
-	bool hadToGoUp = false;
 
-	// Check if we are not in the ground. If so, get up
-	// TODO: use map deferred command
+	// a non-finite input would climb/descend forever on garbage; proceed from
+	// the chunk-bottom ground level instead so the caller keeps a usable z
+	if (!std::isfinite(testPos.x) || !std::isfinite(testPos.y) || !std::isfinite(testPos.z))
+	{
+		nlwarning("MVNAN: getMeanHeight refuses non-finite input (%f,%f,%f)",
+			testPos.x, testPos.y, testPos.z);
+		testPos = CVector::Null;
+	}
+
+	// Check if we are not in the ground. If so, get up, bounded like the
+	// descent below: a fully-solid column (volume top without air above)
+	// must not run the z to +infinity
+	const sint climbStartCellZ = (sint)floor(testPos.z * TLoadingSector::InvVoxelSize);
 	while (!m_map->isValidPosition(pos.InstanceId, testPos))
 	{
-		hadToGoUp = true;
 		testPos.z += TLoadingSector::VoxelSize;
+		if ((sint)floor(testPos.z * TLoadingSector::InvVoxelSize) - climbStartCellZ > 4 * TLoadingSector::SideSizeInVoxels)
+			break;
 	}
 
-	if (!hadToGoUp)
+	// Get down to the ground, bounded like CMapBase::getGroundNormal: an
+	// all-Air column (unpaged/empty sector) must stop the descent, not run
+	// the z to -infinity (client-session hang of testCylinderMove's ground
+	// read when the far-sector id conversions sample an empty column)
+	const sint startCellZ = (sint)floor(testPos.z * TLoadingSector::InvVoxelSize);
+	while (m_map->isValidPosition(pos.InstanceId, testPos))
 	{
-		// Check if we are in air. If so, get down to the ground.
-		// TODO: use map deferred command
-		while (m_map->isValidPosition(pos.InstanceId, testPos))
-		{
-			testPos.z -= TLoadingSector::VoxelSize;
-		}
-
-		// And go back in the air by the amount of density of the voxel.
-		// TODO: use map deferred command
-		Voxel voxel = m_map->getVoxelAt(pos.InstanceId, testPos);
-		testPos.z += (TLoadingSector::VoxelSize * voxel.getDensity() / Voxel::MaxDensity);
+		testPos.z -= TLoadingSector::VoxelSize;
+		if (startCellZ - (sint)floor(testPos.z * TLoadingSector::InvVoxelSize) > 4 * TLoadingSector::SideSizeInVoxels)
+			break;
 	}
 
+	// And go back in the air by the amount of density of the voxel: for a
+	// fully solid voxel this lands exactly on the voxel top (the tested
+	// reference: flat full ground = base + VoxelSize). Subtracting instead
+	// sinks the ground inside/below the solid voxel, which puts the next
+	// move's feet cell onto the surface voxel itself: the body sweep then
+	// clips the start column's own ground (embedded hit at t=0) and any
+	// descent puts the start ground top outside the auto-step zone anchored
+	// on the (lower) end ground -> phantom wall on gentle downslopes.
+	// TODO: use map deferred command
+	Voxel voxel = m_map->getVoxelAt(pos.InstanceId, testPos);
+	testPos.z += (TLoadingSector::VoxelSize * voxel.getDensity() / Voxel::MaxDensity);
+
+	// quantize to the voxel base (the density fraction of a partial voxel is
+	// below one voxel and the floor drops it; full voxels keep their top) so
+	// the ground measure is exact voxel multiples and the 1-voxel rule
+	// compares cleanly
 	if (testPos.z > 0.f)
 		testPos.z = floor(testPos.z * TLoadingSector::InvVoxelSize) * TLoadingSector::VoxelSize;
 	else
 		testPos.z = ceil(testPos.z * TLoadingSector::InvVoxelSize) * TLoadingSector::VoxelSize;
 
 	return testPos.z;
-#if 0 // temp, for reference
-	// for wrong positions, leave it unchanged
-	if ((pos.InstanceId==-1)||(pos.LocalPosition.Surface==-1))
-		return pos.LocalPosition.Estimation.z;
-
-	// get instance/localretriever.
-	const CRetrieverInstance	&instance = getInstance(pos.InstanceId);
-	const CLocalRetriever		&retriever= _RetrieverBank->getRetriever(instance.getRetrieverId());
-
-	if (!retriever.isLoaded())
-		return pos.LocalPosition.Estimation.z;
-
-	// return height from local retriever
-	return retriever.getHeight(pos.LocalPosition);
-#endif
 }
 
 CVector CDynGlobalRetriever::getGlobalPosition(const NLPACS::UGlobalPosition &global) const
@@ -428,12 +437,30 @@ UGlobalPosition CDynGlobalRetriever::doMove(const UGlobalPosition &startPos, con
 
 	CVector		start = startPos.LocalPosition.Estimation;
 
+	// guard against non-finite input (margins: a NaN/inf delta or a poisoned
+	// primitive position would propagate into the voxel conversions and hit
+	// the CVectorI checkedComponent assert; log and refuse the move instead)
+	if (!std::isfinite(start.x) || !std::isfinite(start.y) || !std::isfinite(start.z)
+		|| !std::isfinite(delta.x) || !std::isfinite(delta.y) || !std::isfinite(delta.z))
+	{
+		nlwarning("MVNAN: doMove refuses non-finite input, start=(%f,%f,%f) delta=(%f,%f,%f)",
+			start.x, start.y, start.z, delta.x, delta.y, delta.z);
+		return startPos;
+	}
+
 	// compute end with real delta position.
 	UGlobalPosition endPos(startPos);
 	endPos.LocalPosition.Estimation = start + delta * t;
 
 	float startHeight = getMeanHeight(startPos);
 	float endHeight = getMeanHeight(endPos);
+
+	if (!std::isfinite(startHeight) || !std::isfinite(endHeight))
+	{
+		nlwarning("MVNAN: doMove refuses non-finite ground, start=(%f,%f,%f) delta=(%f,%f,%f) ground=%f..%f",
+			start.x, start.y, start.z, delta.x, delta.y, delta.z, startHeight, endHeight);
+		return startPos;
+	}
 
 	result.LocalPosition.Estimation = endPos.LocalPosition.Estimation;
 	result.LocalPosition.Estimation.z = endHeight;
@@ -648,9 +675,175 @@ UGlobalPosition CDynGlobalRetriever::doMove(const UGlobalPosition &startPos, con
 #endif
 }
 
-const TCollisionSurfaceDescVector* CDynGlobalRetriever::testCylinderMove(const UGlobalPosition &startPos, const CVector &delta, float radius, CCollisionSurfaceTemp &cst) const
+// --- movement collision parameters (issue #2, phase B2 of
+// docs/PLAYER_WALL_CLIFF_COLLISION_PLAN.md; decided with the user: slide-along
+// wall, climb up/down at most ONE voxel regardless of slope/density, no
+// falling) ---
+
+// acceptance rule (plan §4.2): climb up/down ONE voxel per move at most;
+// anything taller is a wall. Keep this at 1 voxel: raising it auto-climbs
+// metre-high faces and breaks the block tests
+static const float g_AutoStep = TLoadingSector::VoxelSize;
+// blocked-by-ground-shape contacts fire at once (a contact near the end of the
+// move makes the PACS reaction's push-back term DIST_BACK/(dt-ContactTime)
+// explode: the remaining gap shrinks by 0.001 each blocked tick so the kick
+// grows x1000 per tick, compounding _Speed to inf then NaN)
+static const float g_GroundBlockedContactTime = 0.f;
+// body wall spans: the three voxel cells above the feet cell
+static const sint g_BodySpanCount = 3;
+
+const TCollisionSurfaceDescVector* CDynGlobalRetriever::testCylinderMove(const UGlobalPosition &startPos, const CVector &delta, float /*radius*/, CCollisionSurfaceTemp &cst) const
 {
-	// result.
+	// real movement test on the voxel terrain. v1 note: the radius is ignored
+	// (the body is swept as a few sample points above the feet, not a true
+	// cylinder; a span-based approximation was the plan's step 2)
+	cst.CollisionDescs.clear();
+
+	const CVector &start = startPos.LocalPosition.Estimation;
+
+	// non-finite input would poison the descs (normals, contact times) — refuse
+	if (!std::isfinite(start.x) || !std::isfinite(start.y) || !std::isfinite(start.z)
+		|| !std::isfinite(delta.x) || !std::isfinite(delta.y) || !std::isfinite(delta.z))
+	{
+		nlwarning("MVNAN: testCylinderMove refuses non-finite input, start=(%f,%f,%f) delta=(%f,%f,%f)",
+			start.x, start.y, start.z, delta.x, delta.y, delta.z);
+		return &cst.CollisionDescs;
+	}
+
+	// MVDBG (temporary, strip with the MVNAN set at B6/B5): identifies the
+	// sector-id <-> estimation frame mismatch that lands the body sweep on a
+	// mirrored/doubled column for nonzero sector ids (embedded t=0 hits on
+	// gentle slopes, confirmed in a client session with the debugger: id
+	// sector decodes negated against the true sector, and the converter
+	// scales the origin by SideSizeInVoxels instead of SideSize)
+	{
+		sint dbgSx, dbgSy, dbgSz;
+		TLoadingSector::s_idToPos(startPos.InstanceId, dbgSx, dbgSy, dbgSz);
+		const CVectorD dbgGlobal = m_map->getDoubleGlobalPosition(startPos.InstanceId, start);
+		nlwarning("MVDBG: id=%" NL_I64 "u sector=(%d,%d,%d) est=(%.3f,%.3f,%.3f) global=(%.3f,%.3f,%.3f)",
+			(sint64)startPos.InstanceId, dbgSx, dbgSy, dbgSz,
+			start.x, start.y, start.z, dbgGlobal.x, dbgGlobal.y, dbgGlobal.z);
+	}
+
+	// horizontal movement only: the vertical is owned by the ground search
+	// (no falling in v1), and a zero-length move has nothing to test
+	CVector move(delta.x, delta.y, 0.f);
+	const float moveLen = move.norm();
+	if (moveLen < 0.001f)
+		return &cst.CollisionDescs;
+
+	// destination ground, evaluated with the same walk getMeanHeight uses for
+	// the doMove z snap (so the test and the accept agree about the ground)
+	UGlobalPosition endPos(startPos);
+	endPos.LocalPosition.Estimation.x += move.x;
+	endPos.LocalPosition.Estimation.y += move.y;
+
+	const float startGroundZ = getMeanHeight(startPos);
+	const float endGroundZ = getMeanHeight(endPos);
+
+	// MVDBG (temporary, strip with the MVNAN set): the walkability inputs
+	// next to the frame trace — the stand z against the two grounds tells
+	// whether the snap itself is one voxel low (surface inside the next
+	// voxel up)
+	nlwarning("MVDBG2: startGround=%.3f endGround=%.3f est.z=%.3f",
+		startGroundZ, endGroundZ, startPos.LocalPosition.Estimation.z);
+
+	// ground walkability: the destination ground may rise or fall by at most ONE
+	// voxel (climb up/down 1 voxel only, whatever the local slope or voxel
+	// density; this also blocks walking off any higher ledge: no falling)
+	const bool groundBlocked = fabsf(endGroundZ - startGroundZ) > g_AutoStep + 0.001f;
+
+	// wall detection: sweep the three body cells above the feet cell; a hit
+	// whose voxel top face is more than a voxel above the destination ground
+	// is a wall, closer hits are just the terrain surface rising (the auto
+	// step zone). Skipped while the ground itself is blocked: the slope
+	// contact below covers that case (walking into a mass not reachable on
+	// foot is a contour slide, not a wall face slide)
+	bool wallBlocked = false;
+	float wallTime = 1.f;
+	CVector wallNormal;
+	if (!groundBlocked)
+	{
+		const sint feetCell = (sint)floor(start.z * TLoadingSector::InvVoxelSize);
+		for (sint span = 1; span <= g_BodySpanCount && !wallBlocked; ++span)
+		{
+			const float sweepZ = (float(feetCell + span) + 0.5f) * TLoadingSector::VoxelSize;
+			CMapBase::TSegmentHit hit;
+			const CVector sweepEnd(start.x + move.x, start.y + move.y, sweepZ);
+			if (m_map->traceSegment(startPos.InstanceId, CVector(start.x, start.y, sweepZ), sweepEnd, hit))
+			{
+				const float hitTop = (float(hit.m_voxelPos.z) + 1.f) * TLoadingSector::VoxelSize;
+
+				// MVDBG3 (temporary): is the hit voxel a real terrain lip at
+				// our own column, or a mirrored-volume sample? prints the
+				// hit cell's content and its point-mirrored counterpart's
+				{
+					const Voxel hitVoxel = m_map->getVoxelAt(hit.m_voxelPos);
+					TVoxelPos mirrorPos(-hit.m_voxelPos.x, -hit.m_voxelPos.y, hit.m_voxelPos.z);
+					const Voxel mirrorVoxel = m_map->getVoxelAt(mirrorPos);
+					nlwarning("MVDBG3: hit=(%d,%d,%d) type=%d density=%u | mirror type=%d density=%u | feetCell=%d hitTop=%.3f endGround=%.3f",
+					    hit.m_voxelPos.x, hit.m_voxelPos.y, hit.m_voxelPos.z,
+					    (int)hitVoxel.getType(), (uint)hitVoxel.getDensity(),
+					    (int)mirrorVoxel.getType(), (uint)mirrorVoxel.getDensity(),
+					    feetCell, hitTop, endGroundZ);
+
+					// MVDBG4 (temporary): the vertical profile of the hit
+					// column around the sweep's z — voxel hitZ-2..+5 —
+					// resolves where the marched surface band caps
+					// relative to the reported ground
+					std::string profile;
+					for (sint32 vz = hit.m_voxelPos.z - 2; vz <= hit.m_voxelPos.z + 5; ++vz)
+					{
+						const Voxel v = m_map->getVoxelAt(TVoxelPos(hit.m_voxelPos.x, hit.m_voxelPos.y, vz));
+						profile += toString("[%d:t%d,d%u] ", vz, (int)v.getType(), (uint)v.getDensity());
+					}
+					nlwarning("MVDBG4: profile z=%d..%d  %s",
+						hit.m_voxelPos.z - 2, hit.m_voxelPos.z + 5, profile.c_str());
+				}
+
+				if (hitTop <= endGroundZ + g_AutoStep + 0.001f)
+					continue; // terrain surface rising: destination voxel
+
+				wallBlocked = true;
+				wallTime = hit.m_t;
+				wallNormal = hit.m_faceNormal;
+				if (wallNormal.norm() < 1e-6f)
+				{
+					// embedded start has no face normal: oppose the move head-on
+					wallNormal = move * (-1.f / moveLen);
+				}
+			}
+		}
+	}
+
+	if (wallBlocked)
+	{
+		// wall face contact: the face normal already opposes the traversal
+		// (horizontal by construction: the sweep keeps z constant)
+		CCollisionSurfaceDesc desc;
+		desc.ContactNormal = CVectorD(wallNormal.x, wallNormal.y, 0.0);
+		desc.ContactTime = wallTime;
+		// (-1,-1) is unresolvable through CGlobalRetriever::getSurfaceById:
+		// the move container treats the contact as a wall
+		desc.ContactSurface = CSurfaceIdent(-1, -1);
+		cst.CollisionDescs.push_back(desc);
+	}
+
+	if (groundBlocked)
+	{
+		// ground shape contact: the move is refused head-on (no gradient work;
+		// the slide that remains is the move projected on the obstacle plane)
+		CVector contactNormal = move * (-1.f / moveLen);
+		contactNormal.z = 0.f;
+		contactNormal.normalize();
+
+		CCollisionSurfaceDesc desc;
+		desc.ContactNormal = CVectorD(contactNormal.x, contactNormal.y, 0.0);
+		desc.ContactTime = g_GroundBlockedContactTime;
+		desc.ContactSurface = CSurfaceIdent(-1, -1);
+		cst.CollisionDescs.push_back(desc);
+	}
+
 	return &cst.CollisionDescs;
 }
 

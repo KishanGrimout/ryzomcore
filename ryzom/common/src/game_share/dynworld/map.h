@@ -82,6 +82,41 @@ public:
 	Voxel getVoxelAt(const TVoxelPos& voxelPos);
 	void setVoxelAt(const TVoxelPos& voxelPos, Voxel voxel);
 
+	// --- movement collision queries (GitHub issue #2, phase B1 of
+	// docs/PLAYER_WALL_CLIFF_COLLISION_PLAN.md) -------------------------------
+
+	// Voxels block movement when they are neither Air (empty) nor Liquid
+	// (wading); Object voxels block like Raw (blanket rule, see the plan §6).
+	static bool isBlockingVoxel(Voxel voxel)
+	{
+		Voxel::Type type = voxel.getType();
+		return type != Voxel::Air && type != Voxel::Liquid;
+	}
+
+	// result of a segment sweep: the first blocking voxel, if any
+	struct TSegmentHit
+	{
+		bool m_hit;
+		float m_t;                    // param along the swept segment (0..1); 1.f when no hit
+		TVoxelPos m_voxelPos;         // voxel position of the blocking voxel
+		NLMISC::CVector m_faceNormal; // outward normal of the blocking face
+
+		TSegmentHit() : m_hit(false), m_t(1.f), m_voxelPos(0, 0, 0), m_faceNormal(0.f, 0.f, 0.f) {}
+	};
+
+	// true when the position holds a blocking voxel
+	bool isBlockingPosition(TLoadingSector::TId localSector, const NLMISC::CVector &estimated);
+
+	// sweeps the segment (local-sector coordinates) from start to end and fills
+	// outHit with the first blocking voxel; returns outHit.m_hit
+	bool traceSegment(TLoadingSector::TId localSector, const NLMISC::CVector &start, const NLMISC::CVector &end, TSegmentHit& outHit);
+
+	// locates the ground voxel at/below the estimated position (climbs out of
+	// a non-Air voxel like CDynGlobalRetriever::getMeanHeight, else descends to
+	// the first non-Air voxel) and returns its outward surface normal in
+	// outNormal; returns false when no ground is found within searchMaxVoxels
+	bool getGroundNormal(TLoadingSector::TId localSector, const NLMISC::CVector &estimated, NLMISC::CVector& outNormal, Voxel* voxelOut = nullptr, sint searchMaxVoxels = 4 * TLoadingSector::SideSizeInVoxels);
+
 	void getLoadedSectors(TSectorsList& outList) const;
 
 	float castRay(const NLMISC::CVector& start, const NLMISC::CVector& end, ICastCollector* hitCollector = nullptr, ICastCollector* emptyVoxelsCollector = nullptr);

@@ -22,8 +22,8 @@
 #include "game_share/dynworld/cast_collector.h"
 #include "game_share/dynworld/marching_controller.h"
 
+#include <limits>
 #include <PolyVox/Raycast.h>
-
 
 using namespace NLMISC;
 
@@ -121,7 +121,8 @@ CVector CMapBase::getLocalPosition(TLoadingSector::TId localSector, const CVecto
 	sint32 sectorX, sectorY, sectorZ;
 	TLoadingSector::s_idToPos(localSector, sectorX, sectorY, sectorZ);
 
-	CVector sectorOrig(float(sectorX * TLoadingSector::SideSizeInVoxels), float(sectorY * TLoadingSector::SideSizeInVoxels), float(sectorZ * TLoadingSector::SideSizeInVoxels));
+	CVector sectorOrig(float(sectorX * TLoadingSector::SideSize), float(sectorY * TLoadingSector::SideSize), float(sectorZ * TLoadingSector::SideSize));
+	nlassert(std::isfinite((float)(+estimated.x - sectorOrig.x)) && std::isfinite((float)(+estimated.y - sectorOrig.y)) && std::isfinite((float)(+estimated.z - sectorOrig.z)));
 	return CVector((float)(+estimated.x-sectorOrig.x), (float)(+estimated.y-sectorOrig.y), (float)(estimated.z-sectorOrig.z));
 }
 
@@ -133,7 +134,7 @@ CVector CMapBase::getGlobalPosition(TLoadingSector::TId localSector, const CVect
 	sint32 sectorX, sectorY, sectorZ;
 	TLoadingSector::s_idToPos(localSector, sectorX, sectorY, sectorZ);
 
-	CVector sectorOrig(float(sectorX * TLoadingSector::SideSizeInVoxels), float(sectorY * TLoadingSector::SideSizeInVoxels), float(sectorZ * TLoadingSector::SideSizeInVoxels));
+	CVector sectorOrig(float(sectorX * TLoadingSector::SideSize), float(sectorY * TLoadingSector::SideSize), float(sectorZ * TLoadingSector::SideSize));
 	return CVector(+estimated.x+sectorOrig.x, +estimated.y+sectorOrig.y, estimated.z+sectorOrig.z );
 }
 
@@ -145,7 +146,7 @@ CVectorD CMapBase::getDoubleGlobalPosition(TLoadingSector::TId localSector, cons
 	sint32 sectorX, sectorY, sectorZ;
 	TLoadingSector::s_idToPos(localSector, sectorX, sectorY, sectorZ);
 
-	CVectorD sectorOrig(double(sectorX * TLoadingSector::SideSizeInVoxels), double(sectorY * TLoadingSector::SideSizeInVoxels), double(sectorZ * TLoadingSector::SideSizeInVoxels));
+	CVectorD sectorOrig(double(sectorX * TLoadingSector::SideSize), double(sectorY * TLoadingSector::SideSize), double(sectorZ * TLoadingSector::SideSize));
 	return CVectorD(+(double)estimated.x+sectorOrig.x, +(double)estimated.y+sectorOrig.y, (double)estimated.z+sectorOrig.z );
 }
 
@@ -159,7 +160,14 @@ Voxel CMapBase::getVoxelAt(TLoadingSector::TId localSector, const NLMISC::CVecto
 {
 	CVectorD position = getDoubleGlobalPosition(localSector, estimated);
 	position *= TLoadingSector::InvVoxelSize;
-	return getVoxelAt(TVoxelPos(position));
+	// floor per axis, NOT the truncating CVectorI float path: in the
+	// negative-coordinate quadrants trunc toward zero samples the
+	// NEIGHBORING column (e.g. voxel y -67658.88 read as -67658 instead of
+	// the true -67659), one full voxel off in x/y; the ground walk then
+	// reads a neighbor's ground, the player snaps half a voxel under the
+	// true surface and the body sweep hits the real column's sheet band
+	// (phantom blocks on flat ground, found in a client session)
+	return getVoxelAt(TVoxelPos(floor(position.x), floor(position.y), floor(position.z)));
 }
 
 Voxel CMapBase::getVoxelAt(const TVoxelPos& voxelPos)
@@ -173,6 +181,183 @@ void CMapBase::setVoxelAt(const TVoxelPos& voxelPos, Voxel voxel)
 
 	m_volume->setVoxel(voxelPos.x, voxelPos.y, voxelPos.z, voxel);
 	voxelTouched(voxelPos, oldVoxel, voxel);
+}
+
+bool CMapBase::isBlockingPosition(TLoadingSector::TId localSector, const NLMISC::CVector &estimated)
+{
+	return isBlockingVoxel(getVoxelAt(localSector, estimated));
+}
+
+bool CMapBase::traceSegment(TLoadingSector::TId localSector, const NLMISC::CVector &start, const NLMISC::CVector &end, TSegmentHit& outHit)
+{
+	outHit = TSegmentHit();
+
+	// to global coordinates, then to voxel space (double precision, floor
+	// per axis so the sweep behaves the same on negative coordinates)
+	CVectorD globalStart = getDoubleGlobalPosition(localSector, start);
+	CVectorD globalEnd = getDoubleGlobalPosition(localSector, end);
+	globalStart *= TLoadingSector::InvVoxelSize;
+	globalEnd *= TLoadingSector::InvVoxelSize;
+
+	const double origin[3] = { globalStart.x, globalStart.y, globalStart.z };
+	const double dir[3] = { globalEnd.x - globalStart.x, globalEnd.y - globalStart.y, globalEnd.z - globalStart.z };
+
+	// DDA over the voxel cells the segment crosses (Amanatides & Woo): at
+	// every step advance to the nearest next cell boundary, then test that
+	// cell; tMax values are the crossing parameters along the whole segment
+	sint32 cell[3];
+	sint32 step[3];
+	double tMax[3], tDelta[3];
+	const double inf = std::numeric_limits<double>::infinity();
+	for (uint axis = 0; axis < 3; ++axis)
+	{
+		cell[axis] = (sint32)floor(origin[axis]);
+		if (dir[axis] == 0.0)
+		{
+			step[axis] = 0;
+			tMax[axis] = inf;
+			tDelta[axis] = inf;
+		}
+		else
+		{
+			step[axis] = dir[axis] > 0.0 ? 1 : -1;
+			const double nextBoundary = dir[axis] > 0.0 ? double(cell[axis] + 1) : double(cell[axis]);
+			tMax[axis] = (nextBoundary - origin[axis]) / dir[axis];
+			tDelta[axis] = fabs(1.0 / dir[axis]);
+		}
+	}
+
+	{
+		const sint32 lowerX = (sint32)floor(std::min(globalStart.x, globalEnd.x));
+		const sint32 lowerY = (sint32)floor(std::min(globalStart.y, globalEnd.y));
+		const sint32 lowerZ = (sint32)floor(std::min(globalStart.z, globalEnd.z));
+		const sint32 upperX = (sint32)floor(std::max(globalStart.x, globalEnd.x));
+		const sint32 upperY = (sint32)floor(std::max(globalStart.y, globalEnd.y));
+		const sint32 upperZ = (sint32)floor(std::max(globalStart.z, globalEnd.z));
+		const TRegion sweepRegion(lowerX, lowerY, lowerZ, upperX, upperY, upperZ);
+		TVolume::AutoReadLockRegion lock(m_volume, sweepRegion);
+
+		// starting inside a blocking voxel is a hit at once (no face to
+		// project on: leave the normal empty, callers treat this specially)
+		if (isBlockingVoxel(m_volume->getVoxel(cell[0], cell[1], cell[2])))
+		{
+			outHit.m_hit = true;
+			outHit.m_t = 0.f;
+			outHit.m_voxelPos = TVoxelPos(cell[0], cell[1], cell[2]);
+			return true;
+		}
+
+		while (true)
+		{
+			// nearest next cell boundary over the three axes
+			const uint axis = (tMax[0] < tMax[1])
+				? (tMax[0] < tMax[2] ? 0 : 2)
+				: (tMax[1] < tMax[2] ? 1 : 2);
+			const double crossing = tMax[axis];
+			if (crossing > 1.0)
+				break; // past the segment end, no hit
+
+			tMax[axis] += tDelta[axis];
+			cell[axis] += step[axis];
+
+			const Voxel voxel = m_volume->getVoxel(cell[0], cell[1], cell[2]);
+			if (isBlockingVoxel(voxel))
+			{
+				outHit.m_hit = true;
+				outHit.m_t = (float)crossing;
+				outHit.m_voxelPos = TVoxelPos(cell[0], cell[1], cell[2]);
+				// outward face normal: opposite to the traversal direction
+				const float sign = (float)-step[axis];
+				switch (axis)
+				{
+				case 0: outHit.m_faceNormal = CVector(sign, 0.f, 0.f); break;
+				case 1: outHit.m_faceNormal = CVector(0.f, sign, 0.f); break;
+				default: outHit.m_faceNormal = CVector(0.f, 0.f, sign); break;
+				}
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+bool CMapBase::getGroundNormal(TLoadingSector::TId localSector, const NLMISC::CVector &estimated, NLMISC::CVector& outNormal, Voxel* voxelOut, sint searchMaxVoxels)
+{
+	CVectorD globalPos = getDoubleGlobalPosition(localSector, estimated);
+	CVectorD voxelPos(globalPos);
+	voxelPos *= TLoadingSector::InvVoxelSize;
+
+	const sint32 cellX = (sint32)floor(voxelPos.x);
+	const sint32 cellY = (sint32)floor(voxelPos.y);
+	const sint32 cellZ = (sint32)floor(voxelPos.z);
+	const TVoxelPos startCell(cellX, cellY, cellZ);
+
+	// find the ground like CDynGlobalRetriever::getMeanHeight treats the
+	// data: a non-Air entry climbs to the first Air above (the ground being
+	// the last non-Air voxel below it), an Air entry descends to the first
+	// non-Air voxel below, and liquids stop the descent exactly as 'air'
+	// stops the climb (standing on the liquid top)
+	TVoxelPos groundCell = startCell;
+	Voxel groundVoxel = getVoxelAt(groundCell);
+
+	if (groundVoxel.getType() != Voxel::Air)
+	{
+		while (true)
+		{
+			if (groundVoxel.getType() == Voxel::Air)
+				break;
+			++groundCell.z;
+			groundVoxel = getVoxelAt(groundCell);
+			if (groundCell.z - cellZ > searchMaxVoxels)
+				return false; // no air above within the search bound
+		}
+		--groundCell.z;
+		groundVoxel = getVoxelAt(groundCell);
+	}
+	else
+	{
+		while (true)
+		{
+			if (groundVoxel.getType() != Voxel::Air)
+				break;
+			--groundCell.z;
+			groundVoxel = getVoxelAt(groundCell);
+			if (cellZ - groundCell.z > searchMaxVoxels)
+				return false; // no ground within the search bound
+		}
+		groundVoxel = getVoxelAt(groundCell);
+	}
+
+	// density-field gradient at the ground voxel (same density semantics as
+	// MarchingCubesController: 'no density' types count as 0 through
+	// Voxel::getDensity): central differences over the 6-neighborhood, then
+	// flipped so the normal points away from the solid into the air
+	// (a flat floor yields (0, 0, +1))
+	const TRegion gradientRegion(groundCell.x - 1, groundCell.y - 1, groundCell.z - 1,
+		groundCell.x + 1, groundCell.y + 1, groundCell.z + 1);
+	TVolume::AutoReadLockRegion lock(m_volume, gradientRegion);
+
+	auto densityAt = [&](sint32 x, sint32 y, sint32 z)
+	{
+		return static_cast<float>(m_volume->getVoxel(x, y, z).getDensity());
+	};
+
+	NLMISC::CVector outward(
+		densityAt(groundCell.x - 1, groundCell.y, groundCell.z) - densityAt(groundCell.x + 1, groundCell.y, groundCell.z),
+		densityAt(groundCell.x, groundCell.y - 1, groundCell.z) - densityAt(groundCell.x, groundCell.y + 1, groundCell.z),
+		densityAt(groundCell.x, groundCell.y, groundCell.z - 1) - densityAt(groundCell.x, groundCell.y, groundCell.z + 1));
+
+	if (outward.norm() > 1e-6f)
+		outward.normalize();
+	else
+		outward = CVector(0.f, 0.f, 1.f); // no density contrast: fall back to flat
+	outNormal = outward;
+
+	if (voxelOut != nullptr)
+		*voxelOut = groundVoxel;
+
+	return true;
 }
 
 void CMapBase::getLoadedSectors(TSectorsList& outList) const

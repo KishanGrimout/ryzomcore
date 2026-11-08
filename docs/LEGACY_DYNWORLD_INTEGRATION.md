@@ -31,6 +31,11 @@ Recipes:
 - Build & test: configured VS solution at `build\RyzomCore.sln` (or `cmake --build build --config Release --target <target>`). **Validation config is Release, on user instruction (2026-10-21)**: `nelmisc_r.lib`, `ryzom_gameshare_r.lib`, test binary `build\bin\Release\nel_misc_test.exe` (Release-only test note: `ut_misc_vectori.test.cpp::invalidFloatingPointConversionsAreClamped` is `#if !defined(NL_DEBUG)`, so Release runs 71 tests vs 70 in Debug after the reader-writer additions — expected; Release run passes 71/71). Tests via `ctest --test-dir build` or run the `unit_test` binaries under `build\bin`; `build_test\` holds a second configure used previously. CMake source-list changes require re-running configure before building (`cmake --build build --config Release --target ZERO_CHECK`). All Phase-2 validations recorded in Debug were re-verified in Release (2026-10-21): `nelmisc_r`, `nelpacs_r`, `nel3d_r`, `ryzom_gameshare_r`, `nel_misc_test`, plus consumer canaries `zone_lighter.exe`/`ig_lighter.exe`/`unbuild_land.exe` (build via per-project MSBuild, since `cmake --build --target <tool>` hits MSB1009 for tool targets).
 - Test targets that include `polyvox_defs.h` (via `map_sector.h`, `map_cache_manager.h`, etc.) need `${POLYVOX_INCLUDE_DIR}` in their own `target_include_directories`: gameshare gets PolyVox through the old-style directory `INCLUDE_DIRECTORIES(${POLYVOX_INCLUDE_DIR})` in `game_share/CMakeLists.txt`, which does NOT propagate to test targets. Similarly `map_cache_manager.h` expects `nel/misc/singleton.h` to be pre-included by its consumer (inside gameshare it comes from the `stdmisc.h` precompiled header), and `NLMISC::CFile` statics live in `nel/misc/path.h` (include path.h, not file.h, for `createDirectoryTree`/`deleteFile`).
 
+Plan docs:
+
+- `docs/PLAYER_WALL_CLIFF_COLLISION_PLAN.md` — plan for GitHub issue #2 (player blocking on walls/cliffs): current stub move behavior on dyn continents, design direction (`CDynGlobalRetriever::testCylinderMove`/`doMove` with voxel-grid collision), phases B0-B6, acceptance criteria.
+- Other open issues with doc context: ryzomcore#6 → `docs/SET_VOXEL_ROUND_TRIP_VALIDATION.md`.
+
 Runtime error codes (server → client login errors, not in C++ source):
 
 - **4010 — `joinSession` failure** ("game servers closed"). Defined only in the web-shard layer: `code/web/public_php/.../login_translations.php:196` — `$ErrMsgs[4010]['dbg'] = '(joinSession error %1: %2 for userId %3)'`, `'lnk' = $msgGameServersClosed`. Means the client reached the web login (`r2_login.php`) but the session join to the shard (SU/WS/FE chain) failed — e.g. a service in the chain just restarted/deregistered, or the welcome/session roster has stale FE info. The code is NOT searchable in `code/ryzom/{client,server}/src` (it is produced by the PHP login scripts), so grep the `code/web` tree for these codes. Beware `24010` in `prod.inc.php:293` — that is a different key space (DEFAULT_ERROR_MESSAGE table), not this 4010.
@@ -331,6 +336,150 @@ Dependencies: none strictly (safe after U-C3/U-C4 for validation). Validation: `
 5. **Master pager cache path commented out** — decide whether master-side regeneration is intentional when U-S2/S3 connect `CMapServer` cluster-wide.
 6. **InstanceId widening** — watch narrowing warnings; no serialization format change (serial commented out; `CollisionInstances` is a per-call temp).
 7. **Flora plant sheet availability** — configs hold numeric plant sheet IDs; sheets must exist in data before `CMaterialLibrary::initialize()` (U-C8 + U-S3 init order).
+
+## Runtime findings and session log (2026-11-07, issue #2 collision work starts)
+
+### Issue #2 phase B1: movement collision query helpers on CMapBase (DONE)
+
+- Plan drafted first: `docs/PLAYER_WALL_CLIFF_COLLISION_PLAN.md` (decisions locked with
+  the user: slide-along-wall, 45° walkable cos 0.7 threshold, 1-voxel auto-step, no
+  falling in v1, blanket solid rule for Object voxels, Liquid non-blocking). Coded
+  `CMapBase::isBlockingVoxel/isBlockingPosition/traceSegment (DDA)/getGroundNormal` in
+  `ryzom/common/src/game_share/dynworld/map.{h,cpp}` + 11-test suite
+  `test_modules/game_share_test/test_dynworld_map_collision.cpp` registered as
+  `ryzom_dynworld_map_collision_test`. No behavior change anywhere yet (B1 only).
+- Validation in Release: the new test 11/11 pass, and the merged dynworld suites all
+  pass when run directly from `build\bin\Release` (map_cache 2, voxel 4, noise 3,
+  mapgen_params 2, environment_definition 1, disk_file_db 5, deferred_command 5,
+  map_sector 10, scenario_text_parser 10 on its first direct run). `ryzom_gameshare_r`
+  rebuilt clean with the new map.cpp code.
+- **Test-runner environment quirk (not a regression)**: `ctest`-launched test exes can
+  die with exit code `0xC0000135` (STATUS_DLL_NOT_FOUND) — `nel_misc_test`,
+  `nelns_naming_service_test`, `nelns_service_instance_manager_test` failed this way in
+  this session's ctest run, and `ryzom_game_share_scenario_text_parser.exe`/`nel_misc_test`
+  also work when launched directly once (`[ PASSED ] 10 tests.`) then can repeat-fail on
+  later invocations *without any rebuild in between*: the DLL resolution depends on the
+  invoking shell's PATH, not on the code. When a dynworld test looks "failed", run the
+  exe directly from `build\bin\Release` before suspecting the change; consider fixing
+  the ctest PATH integration as a separate chore (add the external DLL dirs — ANL
+  `Noise.lib`-adjacent DLLs, OpenAL, etc. — to the test invocation environment).
+
+### Issue #2 phase B2: CDynGlobalRetriever::testCylinderMove for real (DONE)
+
+- Implemented in `ryzom/common/src/game_share/dynworld/dyn_global_retriever.cpp`
+  (constants fresh in the file): horizontal-only move; ground walkability =
+  `|endGroundZ − startGroundZ| ≤ moveLen * 1 + one voxel (auto step)` with
+  `getMeanHeight` on both ends (also blocks ledge falls); wall sweep of the 3 body
+  cells above the feet cell via `traceSegment`, hits within one voxel of the
+  destination ground treated as terrain rise (auto-step zone), real walls return the
+  face normal + hit `t`; the ground-blocked case returns the destination ground
+  gradient flattened to the horizontal plane and flipped to oppose the movement
+  (head-on fallback), contact time 0.999; all descs `CSurfaceIdent(-1,-1)` so the PACS
+  reaction path (`CSurfaceIdent(-1,-1)` unresolvable ⇒ wall) slides the primitive.
+  `doMove` untouched so far (B3 next).
+- Tests: `test_modules/game_share_test/test_dynworld_move_collision.cpp`, 8 tests
+  (flat free, wall face contact `t`/normal, 1-voxel auto-step accepted, 1 m face
+  blocked at tick distance, cliff foot blocked, ledge edge no-fall, liquid free
+  wade, liquid pass-through blocking at the solid behind), registered as
+  `ryzom_dynworld_move_collision_test` with an explicit `NeL::pacs` link (NOT
+  propagated by `Ryzom::gameshare`). Validation (Release, exes run directly from
+  `build\bin\Release`): 8/8 pass; whole dynworld set green — 51 tests over 10 exes,
+  every exe exit 0 (map_collision 11, move_collision 8, map_cache 2, voxel 4,
+  noise 3, mapgen_params 2, environment_definition 1, disk_file_db 5,
+  deferred_command 5, map_sector 10).
+- **Runtime fix (client session, B2 follow-up)**: first client walk into blocking
+  terrain hit `NLMISC::CVectorI::checkedComponent` from
+  `getVoxelAt`/`isValidPosition`/`getMeanHeight`/`doMove`
+  (`CPrimitiveWorldImage::doMove`), with `_DeltaPosition` NaN. Root cause: the
+  vanilla slide (`CPrimitiveWorldImage::reaction`,
+  `primitive_world_image.cpp:1360`) divides `NELPACS_DIST_BACK` by
+  `(dt − ContactTime)`; with the ground-blocked desc's contact at 0.999 (≈ the
+  eval window's end, gap ~1e-4 shrinking 0.001 per blocked tick) the push-back kick
+  grows ×1000 per blocked tick, compounding `_Speed` to inf then NaN. The stub
+  `doMove` never used the delta, so the explosion was only reachable once B2 real
+  descs existed. Fix in B2: report the ground-blocked contact at time 0 (an
+  immediate rejection, not a push-back) — `g_GroundBlockedContactTime = 0.f`.
+- **Ground rule simplified (same day, user request)**: the 45°-slope model
+  (`g_WalkableSlopeRatio` + `getGroundNormal` in the move test) felt clumsy in
+  play; the ground walkability is now a pure 1-voxel rise/fall check and the
+  blocked desc opposes the move head-on. `getGroundNormal` stays in `CMapBase`
+  (tested in the B1 suite) as a free API for the B4/B6 ledge/ceiling work.
+- **Did the 0xC0000135 quirk mask a real code death mid-validation**: before the B2
+  code was compiled at all, a visibly healthy-looking exe could not start
+  deterministically (msys exit 127 = `0xC0000135`, zero gtest output) and the
+  affected cases â€” read-only, and only some of that session's fresh links â€”
+  looked like in-run kills: while hunting it, a `fabs`-on-float (wrong-type,
+  compile-clean) and a sed-mangled intermediate test body each entered the suspect
+  list, both innocent. Never root-cause the collision logic from a mid-flight
+  mangled edit: rewrite the test body cleanly, use `fabsf`, and re-validate the
+  suite before trusting a crash signal (older exes in the same env still passed at
+  the same moments). The quirk note above stays the first check.
+- **Phantom ground block on gentle slopes — getMeanHeight climb/descent asymmetry
+  (found in a client session, fixed same day)**: invisible collisions appeared on
+  gentle downslopes. The reported grounds for a 2 m move were `startGroundZ = 19.5`
+  / `endGroundZ = 18.5` with `startPos.z = 19.0` — a reported two-voxel drop for a
+  real one-voxel descent. Root cause in `CDynGlobalRetriever::getMeanHeight()`
+  (`dyn_global_retriever.cpp`): when the input z lies INSIDE a (partial-density)
+  surface voxel the climb-out loop stops on the first Air voxel above the surface
+  and the pre-fix code skipped the density epilogue entirely `hadToGoUp` branch),
+  so the returned ground = first-Air-voxel base = surface-voxel base + 1 voxel;
+  the in-air case descended onto the surface voxel and returned its base (no
+  offset). Two columns whose surfaces differ by one voxel were thus reported two
+  voxels apart whenever one endpoint's z straddled its surface voxel, and the B2
+  ground rule (`|end − start| > 1 voxel`) phantom-blocked. Fix: the descent loop
+  (and the density epilogue) now runs on both paths — climb overshoots onto the
+  first Air voxel, the descent steps back onto the surface voxel — so both paths
+  always return surface-voxel base + density fraction, and the quantized ground
+  differs by whole voxels between neighboring columns. `CMapBase::getGroundNormal`
+  already did the step-back (`--groundCell.z`, `map.cpp`) and needed no change.
+  Behavior note: when the caller's z sits inside a partial surface voxel, the
+  snap now reports the surface-voxel base (up to half a voxel lower than the old
+  climb-path value) instead of floating on the voxel top; resting z from the
+  descent path is unchanged. Regression test
+  `GentleOneVoxelDownslopeIsNotPhantomBlocked` added to
+  `test_dynworld_move_collision.cpp` (9/9 pass); full dynworld exe set green
+  (exes exit 0; `ryzom_dynworld_mapgen_ground_test.exe` in the bin dir is an
+  obsolete leftover, its source was removed — delete the stale binary).
+- **Second twist the same day (user experiment reintroduced the phantom)**: the
+  density epilogue was flipped to SUBTRACT and the floor quantization commented
+  out (plus `g_AutoStep` doubled to 2 voxels) while chasing residual blocks.
+  Subtracting sinks the returned ground one full voxel below the surface
+  (descent lands on the surface voxel base, subtraction digs into it), so the
+  next move's `feetCell` mapped onto the solid surface voxel and the body
+  sweep clipped the START column's own ground: `traceSegment` embedded hit at
+  `t = 0`, `hitTop = start ground voxel top`. The auto-step zone is anchored
+  on the END ground, so any descent (or even a flat move whose end surface
+  voxel is denser than half) put `hitTop` outside the zone → wall desc →
+  head-on rejection of gentle downslopes. Doubling the auto-step cannot fix
+  this (the zone anchor moves down with the end ground). Reverted: density
+  `+=` (full voxel ⇒ voxel top — the tested reference `GroundStandZ = 1.5`),
+  floor quantization restored (exact voxel-multiple grounds, clean 1-voxel
+  rule), `g_AutoStep` back to 1 voxel (plan §4.2; at 2 voxels the 1 m-face
+  test `OneMetreFaceBlocksARealisticTickMove` is un-rule-able). New
+  `GentleFullVoxelDownslopeIsNotPhantomBlocked` pins the full-density runtime
+  shape (10/10; whole set green).
+- **Third twist: the getVoxelAt truncation (the final root cause, RESOLVED)**:
+  the MVDBG log pins it for good — the frozen pair `est=(12.465, 26.559, 19.5)`
+  / sector=(662, −1058, 0) round-trips exactly, the ground is FLAT (19.5 both
+  ends), yet the runtime wall-blocked: `CMapBase::getVoxelAt(id, estimation)`
+  converted meters to voxel indices through the **truncating `CVectorI` float
+  path** (`TVoxelPos(position)`), so in the negative-y half of the world the
+  floor differs from the true coordinate by a full voxel (`trunc(−67658.88) =
+  −67658` vs `floor = −67659`). Every near-origin test passes because trunc ==
+  floor there (the `+WorldY` positive-half world). Consequences: the ground
+  walk sampled a NEIGHBORING column, reported the neighbor's ground (19.5 —
+  one full voxel under the true marched surface at 20.0+), the player snapped
+  half a voxel BURIED under the real surface, and the (correct) body DDA
+  walked into the true column's full-solid voxel 39 at the player's chest →
+  `wallBlocked` at `t = 0` on flat ground everywhere in negative y. Fix:
+  `getVoxelAt` floors per axis like `traceSegment` already does. Instrumented
+  probe `MVDBG4` (the column profile z−2..+5) confirmed on the client that
+  the DDA's truth column (voxel 39 full-solid d255, sheet 40 d39) now stays
+  consistent with the height walk (the walk reads 20.0 for the sheet band,
+  `hitTop = 20.5 ≤ endGround + auto-step` → terrain rise → accepted, `doMove`
+  lifts the snap z by one voxel). Note: the MVDBG4-style *cursor*
+  conversion (`voxelUnderCursor()`) uses its own truncating CVectorI path too
+  — tooling only, harmless for movement; left as-is.
 
 ## Runtime findings and session log (2026-10-31, AES restored, Phase 5 continues)
 
