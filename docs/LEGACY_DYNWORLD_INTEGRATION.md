@@ -12,6 +12,29 @@
 - Legacy source: `D:\Programmation\ryzomcore_old\ryzomcore_dev`, Mercurial tip `9514:da0dbd6457ca` (`Merge dynworld into develop`).
 - Legacy exports describe 343 changed paths and 135 new files. Their source layout and build system predate the current repository; port features incrementally rather than applying the exports wholesale.
 
+## Branch lineage (`dev/dyn`) — post-integration history rewrite (2026-11-10)
+
+The two features implemented directly on `dev/dyn` after the legacy integration ended
+(`2e8a2d5bd`, 2026-11-07) — proper ground collisions (issue #2) and the dyn landscape
+GLSL shader migration — were rewritten as squashed feature commits (12 commits → 2
+squashed feature commits + 2 kept small non-feature commits):
+
+| Rewritten commit | Content |
+|---|---|
+| `246b8c73a` | M1 ground collisions: `testCylinderMove`/B1 helpers, getMeanHeight fixes, unit tests, collision docs (VoxelTerrainCollision.md incl. mesh-consistency section, plan B7/B8 notes) |
+| `b6f86febd` | docs: per-system doc split + ToC + UnitTesting how-to (kept as-is; its collision-doc part lives in `246b8c73a`) |
+| `6c2853583` | jungle cliffs material fix (kept as-is) |
+| `4c43fd715` | GLSL migration: hand-authored vp/fp.glsl pair on GL3, .cg retired, plan doc phases 0-5 sign-off, triplanar floor fix, dyn_shaderdebug 0..8 |
+
+- `VoxelTerrainCollision.md` content is introduced by the collision commit
+  (`246b8c73a`), not by the doc-split commit, because the mesh-consistency additions
+  (`0bf8191b9` in the old lineage) extend a file the doc split created.
+- Old lineage tip was `f1ee22d56`; preserved on origin as backup branch
+  `dev/dyn-pre-squash` (delete once comfortable). Final tree verified byte-identical
+  to the old tip (`git diff f1ee22d56 dev/dyn` empty) before the `--force-with-lease`
+  push; nobody had pulled the old pushes. The roadmap's commit-hash references elsewhere
+  are unaffected (integration base and external checkouts only).
+
 ## Integration rules
 
 - Preserve the current C++17 and target-based CMake conventions.
