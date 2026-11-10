@@ -243,9 +243,21 @@ drives texture binding.
       early-returned without planting (23:05:19).
 - [ ] Verify stock vegetable rendering works under the GL3 driver in this
       tree (the vegetable VPs go through the standard NL3D VP path, not the
-      dyn GLSL): a static continent (non-dyn) session with MicroVeget on
-      should render grass. If GL3 fails here, the feature needs a vegetable
-      GLSL migration of its own — escalate before P1.
+      dyn GLSL): repaint `dyn_renderveget` + `dyn_vegettest` in a dyn session
+      and check for grass. IN-ENGINE RESULT (2026-11-10 23:21): the render
+      path crashed **inside the probe** with
+      `CVegetableVBAllocator::updateDriver : "driver && !_VBHard.isLocked()"`
+      — root cause found in the probe hook itself: `CDynLandscape::render`
+      called `_VegetableManager->render()` **before** the frame's
+      `unlockBuffers()`; the stock `CLandscape::render` releases the VBs at
+      the end of the far/tile passes (landscape.cpp:1231) and only then
+      renders vegetables, so the manager's `updateDriver` always sees
+      unlocked VBs in stock. Observed state at the assert:
+      `_VBHardOk=true`, `_NumVerticesAllocated=0`, `_UnsynchronizedMode=true`
+      (nothing planted; the empty-manager render tripped it the moment the
+      render toggle went on). Fix: reorder — unlock first, then manager
+      render (`dyn_landscape.cpp`, P0-fix commit). Renderer result pending
+      re-test with the rebuilt exe.
 - [ ] Write down the decisions D1–D3 (status quo defaults if data is absent).
 
 Validation: notes appended to the new system doc (§6).

@@ -560,6 +560,16 @@ void CDynLandscape::render(const CVector &refineCenter, const CVector &frontVect
 	// P0 probe (issue #7): stock microvegetation render through the embedded
 	// CVegetableManager. No dynamic lightmap in dyn sessions (NULL), sun
 	// ambient/diffuse already fed by CDynLandscapeModel::setupVegetableLighting.
+	// NB: placed AFTER the buffer unlock below — the stock CLandscape::render
+	// releases the VBs at the end of the far/tile passes and only then renders
+	// vegetables (landscape.cpp:1231 vs the vegetable section); the manager's
+	// updateDriver asserts !isLocked, so the manager render must run outside
+	// the frame's VB lock window.
+	if (g_renderLegacyLandscape)
+		CLandscape::render(refineCenter, frontVector, pyramid, doTileAddPass);
+	else
+		unlockBuffers();
+
 	if (doVegetables && g_renderVegetables && isVegetableActive() && _VegetableManager != nullptr)
 	{
 		// The manager's render takes a vector pyramid (stock CLandscape::render
@@ -567,11 +577,6 @@ void CDynLandscape::render(const CVector &refineCenter, const CVector &frontVect
 		std::vector<CPlane> vegetPyramid(pyramid, pyramid + NL3D_TESSBLOCK_NUM_CLIP_PLANE);
 		_VegetableManager->render(refineCenter, frontVector, vegetPyramid, NULL, _Driver);
 	}
-
-	if (g_renderLegacyLandscape)
-		CLandscape::render(refineCenter, frontVector, pyramid, doTileAddPass);
-	else
-		unlockBuffers();
 
 	renderSelectedVoxel();
 }
