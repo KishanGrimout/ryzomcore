@@ -457,6 +457,13 @@ void CDynLandscapeUser::dumpVegetableData() const
 	dynLandscape->dumpVegetableData();
 }
 
+// ****************************************************************************
+void CDynLandscapeUser::logVegetStats() const
+{
+	CDynLandscape* dynLandscape = static_cast<CDynLandscape*>(&_Landscape->getLandscape());
+	dynLandscape->logVegetStats();
+}
+
 // P0 probe commands (issue #7 plan) — registered from here to avoid pulling
 // the dynworld headers into commands.cpp (they drag nel/3d/animation.h, which
 // collides with the client's own CAnimation there).
@@ -515,6 +522,19 @@ NLMISC_COMMAND(dyn_renderveget, "Toggle render of stock microvegetation in dyn l
 {
 	g_renderVegetables = !g_renderVegetables;
 	nlinfo("DYNVEGET: dyn_renderveget = %d", g_renderVegetables);
+	return true;
+}
+
+NLMISC_COMMAND(dyn_vegetstats, "Log microvegetation render state + last-frame face count (P0 probe, issue #7)", "")
+{
+	extern ULandscape *Landscape;
+	CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
+	if (dynLandscape == nullptr)
+	{
+		nlinfo("DYNVEGET: no dyn landscape (not in a dyn world session)");
+		return true;
+	}
+	dynLandscape->logVegetStats();
 	return true;
 }
 

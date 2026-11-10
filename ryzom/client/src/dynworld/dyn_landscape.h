@@ -70,6 +70,11 @@ public:
 	/// Instances accumulate until the landscape is cleared (probe only).
 	void vegetTest(const NLMISC::CVector& pos, const NLMISC::CVector& normal, const std::string& shapeName, uint count);
 
+	/// Debug probe (P0, issue #7 plan): log the microvegetation render state
+	/// (toggle, active flag, face counter of the last manager render).
+	/// Run via the "dyn_vegetstats" command.
+	void logVegetStats() const;
+
 	TRegionModelContainer m_regionsList[LOD_COUNT];
 	TTransitionContainer m_transitionsList;
 

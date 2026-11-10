@@ -288,6 +288,11 @@ public:
 	/// get the number of faces rendered by the vegetable manager
 	uint		getNumVegetableFaceRendered() const;
 
+	// TEMPORARY P0 probe (dynworld microvegetation, issue #7): dump the
+	// clip/IG bookkeeping (block counts, IG count, summed pass triangles and
+	// vertices). Strip at P0 validation end.
+	void		getVegetProbeState(uint &numClipBlocks, uint &numEmptyClipBlocks, uint &numIgs, uint &numTris, uint &numVerts);
+
 	// @}
 
 // *********************

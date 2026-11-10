@@ -2445,6 +2445,42 @@ uint		CVegetableManager::getNumVegetableFaceRendered() const
 	return _NumVegetableFaceRendered;
 }
 
+// ***************************************************************************
+// TEMPORARY P0 probe (dynworld microvegetation, issue #7). Strip at P0
+// validation end.
+void		CVegetableManager::getVegetProbeState(uint &numClipBlocks, uint &numEmptyClipBlocks, uint &numIgs, uint &numTris, uint &numVerts)
+{
+	numClipBlocks= 0;
+	numEmptyClipBlocks= 0;
+	numIgs= 0;
+	numTris= 0;
+	numVerts= 0;
+	CVegetableClipBlock	*cb;
+	for(cb= _ClipBlockList.begin(); cb; cb= (CVegetableClipBlock*)cb->Next)
+	{
+		numClipBlocks++;
+		numIgs+= cb->_NumIgs;
+		CVegetableSortBlock	*sb;
+		for(sb= cb->_SortBlockList.begin(); sb; sb= (CVegetableSortBlock*)sb->Next)
+		{
+			CVegetableInstanceGroup	*ig;
+			for(ig= sb->_InstanceGroupList.begin(); ig; ig= (CVegetableInstanceGroup*)ig->Next)
+			{
+				for(uint r=0; r<NL3D_VEGETABLE_NRDRPASS; r++)
+				{
+					numTris+= ig->_RdrPass[r].NTriangles;
+					numVerts+= ig->_RdrPass[r].NVertices;
+				}
+			}
+		}
+	}
+	for(cb= _EmptyClipBlockList.begin(); cb; cb= (CVegetableClipBlock*)cb->Next)
+	{
+		numEmptyClipBlocks++;
+		numIgs+= cb->_NumIgs;
+	}
+}
+
 
 // ***************************************************************************
 void		CVegetableManager::exitRenderStateForBlendLayerModel(IDriver *driver)

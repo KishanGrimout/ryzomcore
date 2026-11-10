@@ -500,6 +500,20 @@ bool g_clipBV = true;
 // gated behind the dyn_renderveget debug toggle until the planting pipeline
 // lands (P3 honors doVegetables for real).
 bool g_renderVegetables = false;
+void CDynLandscape::logVegetStats() const
+{
+	if (_VegetableManager == nullptr)
+	{
+		nlinfo("DYNVEGET: stats: no vegetable manager (vegetables not enabled?)");
+		return;
+	}
+	uint numClipBlocks, numEmptyClipBlocks, numIgs, numTris, numVerts;
+	_VegetableManager->getVegetProbeState(numClipBlocks, numEmptyClipBlocks, numIgs, numTris, numVerts);
+	nlinfo("DYNVEGET: stats: renderVegetables=%d active=%d facesRendered=%u clipBlocks=%u emptyClipBlocks=%u igs=%u tris=%u verts=%u",
+		(int)g_renderVegetables, (int)isVegetableActive(),
+		(uint)_VegetableManager->getNumVegetableFaceRendered(),
+		numClipBlocks, numEmptyClipBlocks, numIgs, numTris, numVerts);
+}
 void CDynLandscape::render(const CVector &refineCenter, const CVector &frontVector, const CPlane pyramid[NL3D_TESSBLOCK_NUM_CLIP_PLANE], bool doTileAddPass /*= false*/, bool doVegetables /*= true*/)
 {
 	if (g_rebuildShaders)
@@ -576,6 +590,15 @@ void CDynLandscape::render(const CVector &refineCenter, const CVector &frontVect
 		// builds the same from the tessblock array).
 		std::vector<CPlane> vegetPyramid(pyramid, pyramid + NL3D_TESSBLOCK_NUM_CLIP_PLANE);
 		_VegetableManager->render(refineCenter, frontVector, vegetPyramid, NULL, _Driver);
+		// P0 probe: log only on change so the log stays readable. The counter
+		// covers this frame (the manager resets it when it renders).
+		uint32 faces = _VegetableManager->getNumVegetableFaceRendered();
+		static sint32 lastFaces = -1;
+		if ((sint32)faces != lastFaces)
+		{
+			nlinfo("DYNVEGET: render: facesRendered=%u", (uint)faces);
+			lastFaces = (sint32)faces;
+		}
 	}
 
 	renderSelectedVoxel();
