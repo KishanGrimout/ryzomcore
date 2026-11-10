@@ -60,6 +60,7 @@ Plan/handoff docs:
 | `docs/PLAYER_WALL_CLIFF_COLLISION_PLAN.md` | GitHub issue #2 — player blocking on walls/cliffs (phases B0–B6, acceptance criteria) |
 | `docs/SET_VOXEL_ROUND_TRIP_VALIDATION.md` | GitHub issue #6 — paused SET_VOXEL round-trip investigation (suspects, resume protocol, instrumentation inventory) |
 | `docs/DYNLANDSCAPE_GLSL_MIGRATION_PLAN.md` | dyn landscape shaders vp1/arbfp1 assembly → hand-authored GLSL via the GL3 driver (assessment, phases 0–5) |
+| `docs/DYNWORLD_MICROVEGETATION_PLAN.md` | GitHub issue #7 — reuse the stock NeL microvegetation system, planted client-side from extracted meshes on soft soil (audit, decisions D1–D4, phases P0–P5) |
 
 Deployment-local (stay where they are, linked from here):
 
@@ -79,3 +80,7 @@ Deployment-local (stay where they are, linked from here):
   - collision side (`MVNAN`, `MVDBG2/3/4`): `docs/VoxelTerrainCollision.md` § 5.
 - msg.xml: never leave a message branch with a single child (see
   `docs/VoxelMessageChain.md` § 2).
+
+## Work methodology
+
+New tasks and features should be done into a branch of dev/dyn, which is the "main" branch for dynworld development.

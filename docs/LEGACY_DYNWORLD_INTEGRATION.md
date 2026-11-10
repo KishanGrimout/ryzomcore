@@ -65,7 +65,10 @@ Plan docs:
   on walls/cliffs): design direction, phases B0-B6, acceptance criteria. Its system content
   lives in `docs/VoxelTerrainCollision.md`.
 - Other open issues with doc context: ryzomcore#6 → `docs/SET_VOXEL_ROUND_TRIP_VALIDATION.md`
-  (plan; system content in `docs/VoxelMessageChain.md`).
+  (plan; system content in `docs/VoxelMessageChain.md`); ryzomcore#7 →
+  `docs/DYNWORLD_MICROVEGETATION_PLAN.md` (plan; stock NeL microvegetation reused,
+  planted client-side on soft soil — no system doc yet, to be created as
+  `docs/DynMicroVegetation.md` during implementation).
 - The full index of documentation (system/reference + plans) is the ToC in `AGENTS.md`.
 
 Runtime error codes: documented in `docs/ShardRuntimeOps.md` § 6 (4010 joinSession
