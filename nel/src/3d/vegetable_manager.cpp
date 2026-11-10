@@ -1965,6 +1965,10 @@ void			CVegetableManager::render(const CVector &viewCenter, const CVector &front
 	//--------------------
 	// For all current not empty clipBlocks, clip against pyramid, and insert visibles in list.
 	CVegetableClipBlock		*ptrClipBlock= _ClipBlockList.begin();
+	// TEMPORARY P0 probe (issue #7)
+	_ProbeNumVisibleClipBlocks= 0;
+	_ProbeNumZSortRegistered= 0;
+	_ProbeZSortFacesLast= 0;
 	while(ptrClipBlock)
 	{
 		// if the clipBlock is visible and not empty
@@ -1973,6 +1977,8 @@ void			CVegetableManager::render(const CVector &viewCenter, const CVector &front
 			// insert into visible list.
 			ptrClipBlock->_RenderNext= rootToRender;
 			rootToRender= ptrClipBlock;
+			// TEMPORARY P0 probe (issue #7)
+			_ProbeNumVisibleClipBlocks++;
 		}
 
 		// next
@@ -2323,6 +2329,9 @@ void			CVegetableManager::render(const CVector &viewCenter, const CVector &front
 		// QSort. (I tried, better than radix sort, guckk!!)
 		sort(sortVegetSbs.begin(), sortVegetSbs.end());
 
+		// TEMPORARY P0 probe (issue #7)
+		_ProbeNumZSortRegistered= (uint)sortVegetSbs.size();
+
 
 		// setup material for this rdrPass. NB: rendered after (in LayerModels).
 		//-------------
@@ -2448,7 +2457,8 @@ uint		CVegetableManager::getNumVegetableFaceRendered() const
 // ***************************************************************************
 // TEMPORARY P0 probe (dynworld microvegetation, issue #7). Strip at P0
 // validation end.
-void		CVegetableManager::getVegetProbeState(uint &numClipBlocks, uint &numEmptyClipBlocks, uint &numIgs, uint &numTris, uint &numVerts)
+void		CVegetableManager::getVegetProbeState(uint &numClipBlocks, uint &numEmptyClipBlocks, uint &numIgs, uint &numTris, uint &numVerts,
+				uint &numVisibleClipBlocks, uint &numZSortRegistered, uint &zSortFacesLast)
 {
 	numClipBlocks= 0;
 	numEmptyClipBlocks= 0;
@@ -2479,6 +2489,9 @@ void		CVegetableManager::getVegetProbeState(uint &numClipBlocks, uint &numEmptyC
 		numEmptyClipBlocks++;
 		numIgs+= cb->_NumIgs;
 	}
+	numVisibleClipBlocks= _ProbeNumVisibleClipBlocks;
+	numZSortRegistered= _ProbeNumZSortRegistered;
+	zSortFacesLast= _ProbeZSortFacesLast;
 }
 
 

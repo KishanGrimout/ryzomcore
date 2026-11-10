@@ -508,11 +508,14 @@ void CDynLandscape::logVegetStats() const
 		return;
 	}
 	uint numClipBlocks, numEmptyClipBlocks, numIgs, numTris, numVerts;
-	_VegetableManager->getVegetProbeState(numClipBlocks, numEmptyClipBlocks, numIgs, numTris, numVerts);
-	nlinfo("DYNVEGET: stats: renderVegetables=%d active=%d facesRendered=%u clipBlocks=%u emptyClipBlocks=%u igs=%u tris=%u verts=%u",
+	uint numVisibleClipBlocks, numZSortRegistered, zSortFacesLast;
+	_VegetableManager->getVegetProbeState(numClipBlocks, numEmptyClipBlocks, numIgs, numTris, numVerts,
+		numVisibleClipBlocks, numZSortRegistered, zSortFacesLast);
+	nlinfo("DYNVEGET: stats: renderVegetables=%d active=%d facesRendered=%u clipBlocks=%u emptyClipBlocks=%u igs=%u tris=%u verts=%u visibleClipBlocks=%u zsortRegistered=%u zsortFacesLast=%u",
 		(int)g_renderVegetables, (int)isVegetableActive(),
 		(uint)_VegetableManager->getNumVegetableFaceRendered(),
-		numClipBlocks, numEmptyClipBlocks, numIgs, numTris, numVerts);
+		numClipBlocks, numEmptyClipBlocks, numIgs, numTris, numVerts,
+		numVisibleClipBlocks, numZSortRegistered, zSortFacesLast);
 }
 void CDynLandscape::render(const CVector &refineCenter, const CVector &frontVector, const CPlane pyramid[NL3D_TESSBLOCK_NUM_CLIP_PLANE], bool doTileAddPass /*= false*/, bool doVegetables /*= true*/)
 {

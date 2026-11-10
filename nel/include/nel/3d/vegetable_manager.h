@@ -290,8 +290,10 @@ public:
 
 	// TEMPORARY P0 probe (dynworld microvegetation, issue #7): dump the
 	// clip/IG bookkeeping (block counts, IG count, summed pass triangles and
-	// vertices). Strip at P0 validation end.
-	void		getVegetProbeState(uint &numClipBlocks, uint &numEmptyClipBlocks, uint &numIgs, uint &numTris, uint &numVerts);
+	// vertices, plus the last frame's clip/ZSort/blend-layer state). Strip at
+	// P0 validation end.
+	void		getVegetProbeState(uint &numClipBlocks, uint &numEmptyClipBlocks, uint &numIgs, uint &numTris, uint &numVerts,
+					uint &numVisibleClipBlocks, uint &numZSortRegistered, uint &zSortFacesLast);
 
 	// @}
 
@@ -336,6 +338,11 @@ private:
 
 	/// profile
 	uint											_NumVegetableFaceRendered;
+	// TEMPORARY P0 probe (dynworld microvegetation, issue #7). Strip at P0
+	// validation end.
+	uint											_ProbeNumVisibleClipBlocks;
+	uint											_ProbeNumZSortRegistered;
+	uint											_ProbeZSortFacesLast;
 
 
 	// return true if the ith rdrPass is 2Sided.

@@ -135,6 +135,8 @@ void	CVegetableBlendLayerModel::render(IDriver *driver)
 	// add number of triangles rendered with vegetable manager.
 	driver->profileRenderedPrimitives(ppIn, ppOut);
 	VegetableManager->_NumVegetableFaceRendered+= ppOut.NTriangles-precNTriRdr;
+	// TEMPORARY P0 probe (issue #7)
+	VegetableManager->_ProbeZSortFacesLast= (uint)(ppOut.NTriangles-precNTriRdr);
 
 
 	// refresh list now!
