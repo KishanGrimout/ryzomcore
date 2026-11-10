@@ -228,9 +228,19 @@ drives texture binding.
       (`landscape.cpp:2889`) — so vegetable shapes ARE registered after the
       bank loads, provided `ClientCfg.MicroVeget` was on at `load()` time.
       Probe `dyn_vegetdump` added (commands.cpp) to verify in-engine.
-- [ ] In a dyn client session, verify the stock desc load actually succeeds
-      for the dyn-bound materials: run `dyn_vegetdump` and check the
-      `Ju_*` shapes resolve from the BNP and the material→tileset mapping.
+- [x] In a dyn client session, verify the stock desc load actually succeeds
+      for the dyn-bound materials (2026-11-10 23:01:07, client.log one-shot
+      DYNVEGET dump at `flushTiles`): 14 tilesets loaded; the dumped
+      desc shape lists all resolve through the manager cache — every
+      `Ju_*` shape appears as `...veget[ok]` — and the material→tileset
+      bindings are OK for the ones the dyn map actually binds (e.g.
+      `Humus env=0/1 -> tile 1573, vegetDesc OK`). Some materials
+      (env=2/env=3 Wood/Bark/SawDust/...) bind tiles outside the loaded
+      jungle bank → `EMPTY/MISSING`; benign until those biomes are used.
+      Command caveat: **`dyn_vegettest` needs the full shape name with the
+      `.veget` extension** — a `Ju_FleurA` (bare) run logged
+      `getVegetableShape could not load shape file 'Ju_FleurA'` and
+      early-returned without planting (23:05:19).
 - [ ] Verify stock vegetable rendering works under the GL3 driver in this
       tree (the vegetable VPs go through the standard NL3D VP path, not the
       dyn GLSL): a static continent (non-dyn) session with MicroVeget on
