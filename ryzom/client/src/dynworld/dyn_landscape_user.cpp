@@ -496,13 +496,18 @@ NLMISC_COMMAND(dyn_vegettest, "Plant test vegetable instances at the player posi
 	if (args.size() > 1)
 		fromString(args[1], count);
 
+	// Shape names are registered with their extension (e.g. "Ju_FleurA.veget");
+	// accept a bare name.
+	const std::string &arg = args[0];
+	std::string shapeName = (arg.find('.') == std::string::npos) ? arg + ".veget" : arg;
+
 	if (UserEntity == nullptr)
 	{
 		nlinfo("DYNVEGET: no user entity");
 		return true;
 	}
 
-	dynLandscape->vegetTest(UserEntity->pos(), CVector(0.f, 0.f, 1.f), args[0], count);
+	dynLandscape->vegetTest(UserEntity->pos(), CVector(0.f, 0.f, 1.f), shapeName, count);
 	return true;
 }
 
