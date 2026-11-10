@@ -47,6 +47,7 @@ H_AUTO_DECL( NL3D_Load_Landscape )
 #define	NL3D_HAUTO_LOAD_LANDSCAPE					H_AUTO_USE( NL3D_Load_Landscape )
 
 extern UCamera MainCam;
+extern bool g_renderVegetables; // dyn_landscape.cpp — P0 probe render toggle
 
 uint g_baselod = 0;
 uint g_maxlod = CDynLandscapeUser::LODCOUNT - 1;
@@ -268,6 +269,11 @@ void	CDynLandscapeUser::flushTiles (NLMISC::IProgressCallback &progress)
 	}
 
 	CMaterialLibrary::getInstance().bindMaterials(_Landscape->getLandscape().TileBank);
+
+	// P0 probe (issue #7): one-shot vegetable data dump after the bank + desc
+	// load. TEMPORARY instrumentation — strip at P0 validation end.
+	// (Repeatable version: the "dyn_vegetdump" command.)
+	dumpVegetableData();
 }
 
 // ****************************************************************************
@@ -440,6 +446,71 @@ void CDynLandscapeUser::bindRegionMeshTexture(CRegionMesh* mesh)
 			}
 		}
 	}
+}
+
+// ****************************************************************************
+void CDynLandscapeUser::dumpVegetableData() const
+{
+	// The model's landscape is a CDynLandscape in dyn sessions, which owns the
+	// vegetable-manager access needed by the dump.
+	CDynLandscape* dynLandscape = static_cast<CDynLandscape*>(&_Landscape->getLandscape());
+	dynLandscape->dumpVegetableData();
+}
+
+// P0 probe commands (issue #7 plan) — registered from here to avoid pulling
+// the dynworld headers into commands.cpp (they drag nel/3d/animation.h, which
+// collides with the client's own CAnimation there).
+NLMISC_COMMAND(dyn_vegetdump, "Dump dyn landscape vegetable data (P0 probe, issue #7)", "")
+{
+	extern ULandscape *Landscape;
+	CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
+	if (dynLandscape == nullptr)
+	{
+		nlinfo("DYNVEGET: no dyn landscape (not in a dyn world session)");
+		return true;
+	}
+	dynLandscape->dumpVegetableData();
+	return true;
+}
+
+// ****************************************************************************
+void CDynLandscapeUser::vegetTest(const NLMISC::CVector& pos, const NLMISC::CVector& normal, const std::string& shapeName, uint count)
+{
+	CDynLandscape* dynLandscape = static_cast<CDynLandscape*>(&_Landscape->getLandscape());
+	dynLandscape->vegetTest(pos, normal, shapeName, count);
+}
+
+NLMISC_COMMAND(dyn_vegettest, "Plant test vegetable instances at the player position (P0 probe, issue #7)", "<shapeName> [count=20]")
+{
+	extern ULandscape *Landscape;
+	CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
+	if (dynLandscape == nullptr)
+	{
+		nlinfo("DYNVEGET: no dyn landscape (not in a dyn world session)");
+		return true;
+	}
+	if (args.empty())
+		return false;
+
+	uint count = 20;
+	if (args.size() > 1)
+		fromString(args[1], count);
+
+	if (UserEntity == nullptr)
+	{
+		nlinfo("DYNVEGET: no user entity");
+		return true;
+	}
+
+	dynLandscape->vegetTest(UserEntity->pos(), CVector(0.f, 0.f, 1.f), args[0], count);
+	return true;
+}
+
+NLMISC_COMMAND(dyn_renderveget, "Toggle render of stock microvegetation in dyn landscape (P0 probe, issue #7)", "")
+{
+	g_renderVegetables = !g_renderVegetables;
+	nlinfo("DYNVEGET: dyn_renderveget = %d", g_renderVegetables);
+	return true;
 }
 
 // ****************************************************************************

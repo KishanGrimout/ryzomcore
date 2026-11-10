@@ -216,11 +216,21 @@ drives texture binding.
       `jungle_vegetables.bnp` / `jungle_vegetable_sets.bnp` in the sandbox
       client data dir already listed in `PreDataPath` — `.veget`/`.vegetset`
       resolve via CPath's BNP auto-mounting without cfg changes. Recorded in
-      D1 above.
+      D1 above. Other ecosystems: `desert_*`/`lacustre_*` BNPs exist in the
+      same dir; `primes_racines_*` does NOT (unpacked copies under
+      `pipeline/install/primes_racines_*` would need adding if/when the
+      Roots biome needs its own bank).
+- [x] Registration-order audit (2026-11-10): `CContinentManager::load()`
+      enables vegetables on the (still empty) bank; the later
+      `CDynContinent::select` → `flushTiles` loads the bank AND calls
+      `initTileBanks()`, which itself calls
+      `TileBank.initTileVegetableDescs(_VegetableManager)`
+      (`landscape.cpp:2889`) — so vegetable shapes ARE registered after the
+      bank loads, provided `ClientCfg.MicroVeget` was on at `load()` time.
+      Probe `dyn_vegetdump` added (commands.cpp) to verify in-engine.
 - [ ] In a dyn client session, verify the stock desc load actually succeeds
-      for the dyn-bound materials: probe `getTileVegetableDesc(tile)` contents
-      for the tiles resolved by `bindRegionMeshTexture` (temp probe or `dyn_*`
-      debug dump), and confirm the referenced `Ju_*` shapes load from the BNP.
+      for the dyn-bound materials: run `dyn_vegetdump` and check the
+      `Ju_*` shapes resolve from the BNP and the material→tileset mapping.
 - [ ] Verify stock vegetable rendering works under the GL3 driver in this
       tree (the vegetable VPs go through the standard NL3D VP path, not the
       dyn GLSL): a static continent (non-dyn) session with MicroVeget on

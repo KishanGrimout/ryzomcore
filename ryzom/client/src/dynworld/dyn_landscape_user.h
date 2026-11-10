@@ -269,6 +269,11 @@ public:
 	}
 	// @}
 
+	/// Debug probe (P0, issue #7 plan): forwards to CDynLandscape::dumpVegetableData.
+	void dumpVegetableData() const;
+	/// Debug probe (P0, issue #7 plan): forwards to CDynLandscape::vegetTest.
+	void vegetTest(const NLMISC::CVector& pos, const NLMISC::CVector& normal, const std::string& shapeName, uint count);
+
 	static const int LODCOUNT = 3;
 
 private:

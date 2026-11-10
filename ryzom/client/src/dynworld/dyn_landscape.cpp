@@ -27,6 +27,11 @@
 #include "nel/3d/pixel_program.h"
 #include "nel/3d/uniform_buffer_format.h"
 #include "nel/3d/uniform_buffer.h"
+#include "nel/3d/vegetable_manager.h"
+#include "nel/3d/vegetable_shape.h"
+#include "nel/misc/fast_floor.h"
+
+#include "game_share/dynworld/material_library.h"
 
 using namespace std;
 using namespace NLMISC;
@@ -307,6 +312,161 @@ void CDynLandscape::clearGeneratedMeshes()
 	}
 }
 
+// ****************************************************************************
+// P0 probe for the microvegetation plan (docs/DYNWORLD_MICROVEGETATION_PLAN.md):
+// dump everything the stock planting pipeline needs, so a client session can
+// validate the data pipeline end to end (issue #7).
+void CDynLandscape::dumpVegetableData() const
+{
+	nlinfo("DYNVEGET: dump begin (vegetableActive=%d, density=%.3f)", isVegetableActive(), getVegetableDensity());
+
+	const CTileBank& tileBank = TileBank;
+	const uint numTileSets = tileBank.getTileSetCount();
+	nlinfo("DYNVEGET: %u tilesets in the bank", numTileSets);
+
+	for (uint ts = 0; ts < numTileSets; ++ts)
+	{
+		const CTileSet* tileSet = tileBank.getTileSet(sint(ts));
+		if (tileSet == nullptr)
+			continue;
+
+		const std::string& tileSetName = tileSet->getName();
+		const std::string& descFileName = tileSet->getTileVegetableDescFileName();
+		const CTileVegetableDesc& vegDesc = tileSet->getTileVegetableDesc();
+
+		if (vegDesc.empty())
+		{
+			nlinfo("DYNVEGET: tileset '%s' vegetDesc='%s' EMPTY", tileSetName.c_str(), descFileName.c_str());
+			continue;
+		}
+
+		for (uint distType = 0; distType < NL3D_VEGETABLE_BLOCK_NUMDIST; ++distType)
+		{
+			const std::vector<CVegetable>& vegetableList = vegDesc.getVegetableList(distType);
+			if (vegetableList.empty())
+				continue;
+
+			std::string shapes;
+			for (const CVegetable& veget : vegetableList)
+			{
+				// Shape availability through the manager cache. NB: shapes are
+				// normally registered by initTileVegetableDescs (called from
+				// initTileBanks at flushTiles time); getVegetableShape only
+				// lazily loads what is missing.
+				CVegetableShape* shape = _VegetableManager->getVegetableShape(veget.ShapeName);
+				shapes += veget.ShapeName + (shape != nullptr ? "[ok]" : "[FAIL]") + " ";
+			}
+			nlinfo("DYNVEGET: tileset '%s' vegetDesc='%s' distType=%u seed=%u count=%u: %s",
+				tileSetName.c_str(), descFileName.c_str(), distType,
+				vegDesc.getVegetableSeed(distType), (uint)vegetableList.size(), shapes.c_str());
+		}
+	}
+
+	// Material -> tile bindings (same lookup bindRegionMeshTexture uses), to
+	// see which tileset (hence which vegetable desc) each bound material ends
+	// up with.
+	CMaterialLibrary& materialLibrary = CMaterialLibrary::instance();
+	nlinfo("DYNVEGET: %u environments, %u materials", materialLibrary.getMaxEnvironmentId() + 1, materialLibrary.getMaxMaterialId() + 1);
+	for (uint matId = 0; matId <= materialLibrary.getMaxMaterialId(); ++matId)
+	{
+		const CMaterialDefinition* matDef = materialLibrary.getMaterialDef(matId);
+		if (matDef == nullptr)
+			continue;
+
+		for (uint envId = 0; envId <= materialLibrary.getMaxEnvironmentId(); ++envId)
+		{
+			const CMaterialTextureSet* textureSet = matDef->getTextureSet(envId);
+			if (textureSet == nullptr || textureSet->m_textures.empty() || textureSet->m_textures[0].m_variations.empty())
+				continue;
+
+			uint16 tileId = textureSet->m_textures[0].m_variations[0];
+			const CTileVegetableDesc& vegDesc = tileBank.getTileVegetableDesc(tileId);
+			const CTileVegetableDesc* ownerTileSetDesc = nullptr;
+			std::string ownerTileSetName = "<no tileset>";
+			for (uint ts = 0; ts < numTileSets; ++ts)
+			{
+				const CTileSet* tileSet = tileBank.getTileSet(sint(ts));
+				if (tileSet != nullptr && &tileSet->getTileVegetableDesc() == &vegDesc)
+				{
+					ownerTileSetDesc = &vegDesc;
+					ownerTileSetName = tileSet->getName();
+					break;
+				}
+			}
+			nlinfo("DYNVEGET: material '%s' env=%u -> tile %u tileset '%s' vegetDesc %s",
+				matDef->getName(), envId, (uint)tileId, ownerTileSetName.c_str(),
+				(ownerTileSetDesc != nullptr && !ownerTileSetDesc->empty()) ? "OK" : "EMPTY/MISSING");
+		}
+	}
+
+	nlinfo("DYNVEGET: dump end");
+}
+
+// ****************************************************************************
+// P0 probe (issue #7): exercise the full stock reserve/add commit path and the
+// dyn_renderveget render hook with hand-planted instances.
+void CDynLandscape::vegetTest(const CVector& pos, const CVector& normal, const std::string& shapeName, uint count)
+{
+	if (_VegetableManager == nullptr)
+	{
+		nlwarning("DYNVEGET: no vegetable manager (vegetables not enabled?)");
+		return;
+	}
+
+	CVegetableShape* shape = _VegetableManager->getVegetableShape(shapeName);
+	if (shape == nullptr)
+	{
+		nlwarning("DYNVEGET: shape '%s' not found (CPath lookup/BNP problem)", shapeName.c_str());
+		return;
+	}
+
+	CVegetable veget;
+	veget.ShapeName = shapeName;
+	veget.registerToManager(_VegetableManager);
+
+	_VegetableManager->updateDriver(_Driver);
+
+	OptFastFloorBegin();
+	_VegetableManager->lockBuffers();
+
+	CVegetableClipBlock* clipBlock = _VegetableManager->createClipBlock();
+	CVegetableSortBlock* sortBlock = _VegetableManager->createSortBlock(clipBlock, pos, 50.f);
+	CVegetableInstanceGroup* ig = _VegetableManager->createIg(sortBlock);
+
+	CVegetableInstanceGroupReserve reserve;
+	veget.reserveIgAddInstances(reserve, CVegetable::AboveWater, count);
+	_VegetableManager->reserveIgCompile(ig, reserve);
+
+	// Surface-aligned basis (stock patch style: I/J in the surface plane, K up)
+	CVector K = normal.normed();
+	CVector I = K ^ CVector(0.f, 0.f, 1.f);
+	if (I.norm() < 0.01f)
+		I = CVector(1.f, 0.f, 0.f);
+	I.normalize();
+	CVector J = K ^ I;
+	J.normalize();
+
+	CMatrix instanceMatrix;
+	instanceMatrix.setRot(I, J, K);
+
+	const CRGBAF white(1.f, 1.f, 1.f, 1.f);
+	for (uint i = 0; i < count; ++i)
+	{
+		// spread the instances in a small grid around pos so a bunch is visible
+		CMatrix mat = instanceMatrix;
+		float dx = (float)(i % 5 - 2) * 0.5f;
+		float dy = (float)(i / 5 - 2) * 0.5f;
+		mat.setPos(pos + I * dx + J * dy + K * 0.05f);
+		veget.generateInstance(ig, mat, white, white, 50.f, CVegetable::AboveWater, CVegetableUV8());
+	}
+
+	_VegetableManager->unlockBuffers();
+	OptFastFloorEnd();
+
+	nlinfo("DYNVEGET: vegetTest planted %u x '%s' at (%.2f,%.2f,%.2f)",
+		count, shapeName.c_str(), pos.x, pos.y, pos.z);
+}
+
 bool clipBV(const CAABBox& bv, const CMatrix& transform, const CPlane* planes, sint nbPlanes)
 {
 	bool clipped = false;
@@ -336,9 +496,12 @@ float g_tighten = 0.4679f;
 float g_shaderDebugMode = 0.f;
 Voxel::MaterialType g_discardMaterial = 0xFF;
 bool g_clipBV = true;
+// P0 probe (issue #7): render planted vegetable IGs with the stock manager,
+// gated behind the dyn_renderveget debug toggle until the planting pipeline
+// lands (P3 honors doVegetables for real).
+bool g_renderVegetables = false;
 void CDynLandscape::render(const CVector &refineCenter, const CVector &frontVector, const CPlane pyramid[NL3D_TESSBLOCK_NUM_CLIP_PLANE], bool doTileAddPass /*= false*/, bool doVegetables /*= true*/)
 {
-	(void)doVegetables;
 	if (g_rebuildShaders)
 	{
 		g_rebuildShaders = false;
@@ -393,6 +556,17 @@ void CDynLandscape::render(const CVector &refineCenter, const CVector &frontVect
 	_Driver->activeVertexProgram(NULL);
 	_Driver->activePixelProgram(NULL);
 	_Driver->setupModelMatrix(CMatrix::Identity);
+
+	// P0 probe (issue #7): stock microvegetation render through the embedded
+	// CVegetableManager. No dynamic lightmap in dyn sessions (NULL), sun
+	// ambient/diffuse already fed by CDynLandscapeModel::setupVegetableLighting.
+	if (doVegetables && g_renderVegetables && isVegetableActive() && _VegetableManager != nullptr)
+	{
+		// The manager's render takes a vector pyramid (stock CLandscape::render
+		// builds the same from the tessblock array).
+		std::vector<CPlane> vegetPyramid(pyramid, pyramid + NL3D_TESSBLOCK_NUM_CLIP_PLANE);
+		_VegetableManager->render(refineCenter, frontVector, vegetPyramid, NULL, _Driver);
+	}
 
 	if (g_renderLegacyLandscape)
 		CLandscape::render(refineCenter, frontVector, pyramid, doTileAddPass);

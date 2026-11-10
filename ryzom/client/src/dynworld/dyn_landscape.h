@@ -58,6 +58,18 @@ public:
 
 	void clearGeneratedMeshes();
 
+	/// Debug probe (P0, issue #7 plan): dump the tile-bank vegetable
+	/// descriptors (tileset name, desc file, per-DistType vegetable shapes)
+	/// and the material->tile bindings, to check the microvegetation data
+	/// pipeline end to end. Run via the "dyn_vegetdump" command.
+	void dumpVegetableData() const;
+
+	/// Debug probe (P0, issue #7 plan): plant `count` instances of a .veget
+	/// shape at a world position (surface-aligned on `normal`), in a
+	/// dedicated probe IG. Pairs with the "dyn_renderveget" render toggle.
+	/// Instances accumulate until the landscape is cleared (probe only).
+	void vegetTest(const NLMISC::CVector& pos, const NLMISC::CVector& normal, const std::string& shapeName, uint count);
+
 	TRegionModelContainer m_regionsList[LOD_COUNT];
 	TTransitionContainer m_transitionsList;
 
