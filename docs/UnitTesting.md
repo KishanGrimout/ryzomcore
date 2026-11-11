@@ -20,7 +20,10 @@ and `WITH_TESTING` are ON.
 `add_test_executable` subtarget — do NOT create a separate dynworld test tree**
 (established convention). Current ryzom dynworld targets:
 `ryzom_dynworld_{voxel,noise,mapgen_params,environment_definition,map_sector,
-deferred_command,disk_file_db,map_collision,move_collision,map_cache}_test`.
+deferred_command,disk_file_db,map_collision,move_collision,map_cache,
+vegetation}_test`. (`vegetation` also links `NeL::3d` for the
+CVegetable/CVegetableManager API and needs `freetype.dll` on PATH — e.g. from
+`redist\nel_tools_win_x64` — see `docs/TestEnvironmentNotes.md` §1.)
 
 ## 2. What `add_test_executable(<name> <sources...>)` does
 
