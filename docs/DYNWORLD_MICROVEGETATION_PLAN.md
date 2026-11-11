@@ -241,23 +241,23 @@ drives texture binding.
       `.veget` extension** — a `Ju_FleurA` (bare) run logged
       `getVegetableShape could not load shape file 'Ju_FleurA'` and
       early-returned without planting (23:05:19).
-- [ ] Verify stock vegetable rendering works under the GL3 driver in this
+- [x] Verify stock vegetable rendering works under the GL3 driver in this
       tree (the vegetable VPs go through the standard NL3D VP path, not the
       dyn GLSL): repaint `dyn_renderveget` + `dyn_vegettest` in a dyn session
-      and check for grass. IN-ENGINE RESULT (2026-11-10 23:21): the render
-      path crashed **inside the probe** with
-      `CVegetableVBAllocator::updateDriver : "driver && !_VBHard.isLocked()"`
-      — root cause found in the probe hook itself: `CDynLandscape::render`
-      called `_VegetableManager->render()` **before** the frame's
-      `unlockBuffers()`; the stock `CLandscape::render` releases the VBs at
-      the end of the far/tile passes (landscape.cpp:1231) and only then
-      renders vegetables, so the manager's `updateDriver` always sees
-      unlocked VBs in stock. Observed state at the assert:
-      `_VBHardOk=true`, `_NumVerticesAllocated=0`, `_UnsynchronizedMode=true`
-      (nothing planted; the empty-manager render tripped it the moment the
-      render toggle went on). Fix: reorder — unlock first, then manager
-      render (`dyn_landscape.cpp`, P0-fix commit). Renderer result pending
-      re-test with the rebuilt exe.
+      and check for grass. **VALIDATED 2026-11-11 (two fixes + final run
+      10:27:34):** (1) crash fix — `CDynLandscape::render` must release the
+      VBs before the manager render (stock does it inside
+      `CLandscape::render`, landscape.cpp:1231; the manager's `updateDriver`
+      asserts `!isLocked`); (2) zero-draw fix — the probe (and any external
+      block owner) must call `CVegetableSortBlock::updateSortBlock()` after
+      planting (stock does it from `CLandscapeVegetableBlock::update()`
+      after IG add/delete batches; `generateInstance` only marks
+      `_Dirty`). Final stats: `facesRendered=240 ... visibleClipBlocks=1
+      zsortRegistered=1 zsortFacesLast=240 zsortVBVerts=390` with a visible
+      ~30-instance patch of `Ju_FleurA` at the player feet. The vegetable
+      VP path (standard NL3D vertex programs, alpha-blend ZSort pass through
+      the blend-layer models) works under the GL3 driver in dyn sessions;
+      no GLSL migration prerequisite. P0 gate passed.
 - [x] Zero-draw investigation (2026-11-11): with the reorder landed, faces
       stayed 0. First instrumented run (10:13:52):
       `visibleClipBlocks=1 zsortRegistered=0 zsortFacesLast=0` — the clip
@@ -274,10 +274,9 @@ drives texture binding.
       P2 `CDynVegetableBlock` commit path must do the same after every IG
       create/delete batch. Probe extended with `zsortVBVerts` (summed ZSort
       VB-allocator vertices, the outer ZSort gate) so a future zero stays
-      attributable. NEXT TEST: expect `zsortRegistered=1, zsortVBVerts=390`;
-      then `zsortFacesLast` decides between "blend-layer models don't draw
-      in the transparent pass" (scene/traversal bug) and "state-side
-      invisibility" (blend/alpha/depth).
+      attributable. **Confirmed fixed 2026-11-11 10:27:34:**
+      `zsortRegistered=1 zsortFacesLast=240 zsortVBVerts=390` and the patch
+      is visible in-engine.
 - [ ] Write down the decisions D1–D3 (status quo defaults if data is absent).
 
 Validation: notes appended to the new system doc (§6).
