@@ -29,9 +29,11 @@
 #include "nel/3d/uniform_buffer.h"
 #include "nel/3d/vegetable_manager.h"
 #include "nel/3d/vegetable_shape.h"
+#include "nel/3d/tile_vegetable_desc.h"
 #include "nel/misc/fast_floor.h"
 
 #include "game_share/dynworld/material_library.h"
+#include "game_share/dynworld/vegetation_placement.h"
 
 using namespace std;
 using namespace NLMISC;
@@ -263,7 +265,8 @@ CDynLandscape::CDynLandscape()
 
 CDynLandscape::~CDynLandscape()
 {
-	
+	// Must run before the base destructor destroys _VegetableManager.
+	clearVegetableBlocks();
 }
 
 namespace
@@ -300,16 +303,385 @@ void CDynLandscape::readShaderFiles()
 
 void CDynLandscape::clear()
 {
+	clearVegetableBlocks();
 	clearGeneratedMeshes();
 	CLandscape::clear();
 }
 
 void CDynLandscape::clearGeneratedMeshes()
 {
+	// Blocks reference mesh-owned placement data: drop them with the meshes.
+	clearVegetableBlocks();
 	for (uint i = 0; i < LOD_COUNT; ++i)
 	{
 		m_regionsList[i].clear();
 	}
+}
+
+// ****************************************************************************
+// P2 microvegetation blocks (issue #7). See CDynVegetableBlock in
+// dyn_landscape.h; the ring-band logic mirrors stock
+// CLandscapeVegetableBlock::update (landscape_vegetable_block.cpp).
+
+// Per-frame budget of vegetable IG commits (initial plantings and ring band
+// changes; each IG creation counts 1). Tuned via "dyn_vegetbudget".
+uint g_maxVegetCommit = 256;
+
+namespace
+{
+	// Distances type squared (stock CLVBSqrDistLUT: (i*ELTDIST)^2).
+	struct CDynVBSqrDistLUT
+	{
+		float Array[NL3D_VEGETABLE_BLOCK_NUMDIST + 1];
+		CDynVBSqrDistLUT()
+		{
+			for (uint i = 0; i < NL3D_VEGETABLE_BLOCK_NUMDIST + 1; ++i)
+			{
+				const float d = i * NL3D_VEGETABLE_BLOCK_ELTDIST;
+				Array[i] = d * d;
+			}
+		}
+	};
+	const CDynVBSqrDistLUT DynVBSqrDistLUT;
+
+	// (biome, material) -> first top-texture tile id, i.e. the same lookup
+	// bindRegionMeshTexture uses for the diffuse binding. 0xFFFF = unresolvable.
+	const uint16 VegetInvalidTileId = 0xFFFF;
+	uint16 resolveTileIdForGroup(Voxel::BiomeType biome, Voxel::MaterialType material)
+	{
+		const CMaterialDefinition* matDef = CMaterialLibrary::instance().getMaterialDef(material);
+		if (matDef == nullptr)
+			return VegetInvalidTileId;
+		const CMaterialTextureSet* textSet = matDef->getTextureSet(biome);
+		if (textSet == nullptr || textSet->m_textures.empty() || textSet->m_textures[0].m_variations.empty())
+			return VegetInvalidTileId;
+		return textSet->m_textures[0].m_variations[0];
+	}
+}
+
+// ****************************************************************************
+void CDynVegetableBlock::init(CRegionMesh& mesh, CVegetableManager& vegetManager, const CVector& sectorCenter,
+	const CTileBank& tileBank)
+{
+	nlassert(_ClipBlock == nullptr && _Entries.empty());
+	_Center = sectorCenter;
+	_Mesh = &mesh;
+	_ClipBlock = vegetManager.createClipBlock();
+
+	const DYNWORLD::CDynVegetPlacementSet& placements = mesh.m_vegetPlacements;
+	for (const DYNWORLD::CVegetSurfaceGroup& group : placements.Groups)
+	{
+		const uint16 tileId = resolveTileIdForGroup(group.Biome, group.Material);
+		if (tileId == VegetInvalidTileId)
+			continue;
+		const CTileVegetableDesc& tileVegetDesc = tileBank.getTileVegetableDesc(tileId);
+		if (tileVegetDesc.empty())
+			continue;
+
+		for (const DYNWORLD::CVegetBucket& bucket : group.Buckets)
+		{
+			TBucketEntry entry;
+			entry.Bucket = &bucket;
+			entry.TileVegetDesc = &tileVegetDesc;
+			// NB: same scale as the stock 2x2 m tile radius.
+			entry.SortBlock = vegetManager.createSortBlock(_ClipBlock, bucket.Center, NL3D_PATCH_TILE_RADIUS);
+			_Entries.push_back(entry);
+		}
+	}
+}
+
+// ****************************************************************************
+void CDynVegetableBlock::release(CVegetableManager& vegetManager)
+{
+	// release all Igs, then all Sbs, then the clip block (stock order).
+	for (TBucketEntry& entry : _Entries)
+	{
+		for (uint i = 0; i < NL3D_VEGETABLE_BLOCK_NUMDIST; ++i)
+			deleteIg(entry, i, vegetManager);
+		if (entry.SortBlock != nullptr)
+		{
+			vegetManager.deleteSortBlock(entry.SortBlock);
+			entry.SortBlock = nullptr;
+		}
+	}
+	_Entries.clear();
+
+	if (_ClipBlock != nullptr)
+	{
+		vegetManager.deleteClipBlock(_ClipBlock);
+		_ClipBlock = nullptr;
+	}
+	_Mesh = nullptr;
+}
+
+// ****************************************************************************
+uint CDynVegetableBlock::getIgCount() const
+{
+	uint count = 0;
+	for (const TBucketEntry& entry : _Entries)
+		for (uint i = 0; i < NL3D_VEGETABLE_BLOCK_NUMDIST; ++i)
+			if (entry.Igs[i] != nullptr)
+				++count;
+	return count;
+}
+
+// ****************************************************************************
+void CDynVegetableBlock::deleteIg(TBucketEntry& entry, uint distType, CVegetableManager& vegetManager)
+{
+	if (entry.Igs[distType] != nullptr)
+	{
+		vegetManager.deleteIg(entry.Igs[distType]);
+		entry.Igs[distType] = nullptr;
+	}
+}
+
+// ****************************************************************************
+void CDynVegetableBlock::createIgForDistType(TBucketEntry& entry, uint distType, CVegetableManager& vegetManager)
+{
+	nlassert(entry.Igs[distType] == nullptr);
+
+	// get list of vegetables for this distType category (stock rule: each
+	// distType hosts the vegetables declared for exactly that distance band)
+	const std::vector<CVegetable>& vegetableList = entry.TileVegetDesc->getVegetableList(distType);
+	if (vegetableList.empty())
+		return; // nothing for this band: no IG (budget unaffected)
+
+	CVegetableInstanceGroup* vegetIg = vegetManager.createIg(entry.SortBlock);
+	entry.Igs[distType] = vegetIg;
+
+	// First, for each vegetable, generate the number of instances to create
+	// and their relative UV positions (bucket = the generating "patch"; runs
+	// at commit time on the main thread: reads the manager global density and
+	// needs the OptFastFloor window opened by the caller).
+	const uint distAddSeed = entry.TileVegetDesc->getVegetableSeed(distType);
+	CVegetableInstanceGroupReserve vegetIgReserve;
+	std::vector<std::vector<CVector2f>> instanceUVArray(vegetableList.size());
+	for (uint v = 0; v < vegetableList.size(); ++v)
+	{
+		const CVegetable& veget = vegetableList[v];
+		veget.generateGroup(entry.Bucket->Center, entry.Bucket->Normal, entry.Bucket->Area,
+			v + distAddSeed, instanceUVArray[v]);
+		veget.reserveIgAddInstances(vegetIgReserve, CVegetable::AboveWater, (uint)instanceUVArray[v].size());
+	}
+	vegetManager.reserveIgCompile(vegetIg, vegetIgReserve);
+
+	// Then generate the real instances. Lighting v1 (plan): white ambient,
+	// diffuse shade from the landing facet slope; water state AboveWater.
+	const CRGBAF ambientF(1.f, 1.f, 1.f, 1.f);
+	const float blendDistMax = (distType + 1) * NL3D_VEGETABLE_BLOCK_ELTDIST;
+	for (uint v = 0; v < vegetableList.size(); ++v)
+	{
+		const CVegetable& veget = vegetableList[v];
+		const std::vector<CVector2f>& instanceUV = instanceUVArray[v];
+		for (uint j = 0; j < instanceUV.size(); ++j)
+		{
+			CVector instancePos, instanceNormal;
+			DYNWORLD::vegetBucketResolvePosition(*entry.Bucket, instanceUV[j], instancePos, instanceNormal);
+
+			// surface-aligned basis (stock style: K up the facet normal,
+			// I/J in the surface plane)
+			CVector K = instanceNormal;
+			CVector I = K ^ CVector(0.f, 0.f, 1.f);
+			if (I.norm() < 0.01f)
+				I = CVector(1.f, 0.f, 0.f);
+			I.normalize();
+			CVector J = K ^ I;
+			J.normalize();
+
+			CMatrix instanceMat;
+			instanceMat.setRot(I, J, K);
+			instanceMat.setPos(instancePos);
+
+			const float shade = 0.35f + 0.65f * std::max(0.f, instanceNormal.z);
+			const CRGBAF diffuseF(shade, shade, shade, 1.f);
+
+			veget.generateInstance(vegetIg, instanceMat, ambientF, diffuseF, blendDistMax,
+				CVegetable::AboveWater, CVegetableUV8());
+		}
+	}
+
+	// If the ig is empty, delete him. This optimize rendering because no
+	// useless ig are tested for rendering (stock rule).
+	if (vegetIg->isEmpty())
+	{
+		vegetManager.deleteIg(vegetIg);
+		entry.Igs[distType] = nullptr;
+	}
+}
+
+// ****************************************************************************
+void CDynVegetableBlock::update(const CVector& viewCenter, CVegetableManager& vegetManager, sint& budget)
+{
+	for (TBucketEntry& entry : _Entries)
+	{
+		if (entry.SortBlock == nullptr)
+			continue;
+
+		// compute new distance type from the bucket center (stock incremental
+		// band walk over the squared-distance LUT)
+		const float sqrDist = (viewCenter - entry.Bucket->Center).sqrnorm();
+		uint newDistType = entry.CurDistType;
+		while (newDistType > 0 && sqrDist < DynVBSqrDistLUT.Array[newDistType])
+			--newDistType;
+		while (newDistType < NL3D_VEGETABLE_BLOCK_NUMDIST && sqrDist > DynVBSqrDistLUT.Array[newDistType + 1])
+			++newDistType;
+		if (newDistType == entry.CurDistType)
+			continue;
+
+		if (newDistType > entry.CurDistType)
+		{
+			// receding: release IGs [CurDistType, newDistType)
+			for (uint i = entry.CurDistType; i < newDistType; ++i)
+				deleteIg(entry, i, vegetManager);
+			entry.SortBlock->updateSortBlock(vegetManager);
+			entry.CurDistType = (uint8)newDistType;
+		}
+		else
+		{
+			// approaching: create IGs [newDistType, CurDistType). All-or-
+			// nothing per entry so the committed state stays coherent: when
+			// the budget cannot cover the whole band change, the entry keeps
+			// its current state and retries next frame.
+			uint needed = 0;
+			for (uint i = newDistType; i < entry.CurDistType; ++i)
+			{
+				if (!entry.TileVegetDesc->getVegetableList(i).empty())
+					++needed;
+			}
+			if ((sint)needed > budget)
+				continue;
+			for (uint i = newDistType; i < entry.CurDistType; ++i)
+				createIgForDistType(entry, i, vegetManager);
+			entry.SortBlock->updateSortBlock(vegetManager);
+			entry.CurDistType = (uint8)newDistType;
+			budget -= (sint)needed;
+		}
+	}
+}
+
+// ****************************************************************************
+void CDynLandscape::clearVegetableBlocks()
+{
+	if (!m_vegetableBlocks.empty() && _VegetableManager != nullptr)
+	{
+		OptFastFloorBegin();
+		_VegetableManager->lockBuffers();
+		for (auto& kv : m_vegetableBlocks)
+			kv.second->release(*_VegetableManager);
+		_VegetableManager->unlockBuffers();
+		OptFastFloorEnd();
+	}
+	for (auto& kv : m_vegetableBlocks)
+		delete kv.second;
+	m_vegetableBlocks.clear();
+}
+
+// ****************************************************************************
+void CDynLandscape::createVegetableBlock(uint lod, TGenericSectorId sectorId, CRegionMesh& mesh)
+{
+	// sector center (same origin/scale conventions as renderRegions)
+	NLMISC::CVectorI sectorPosI;
+	CSectorLod::idToPos(lod, sectorId, sectorPosI);
+	const float sideSize = CSectorLod::getSideSize(lod);
+	const CVector center(float(sectorPosI.x) * sideSize + sideSize * 0.5f,
+		float(sectorPosI.y) * sideSize + sideSize * 0.5f,
+		float(sectorPosI.z) * sideSize);
+
+	CDynVegetableBlock* block = new CDynVegetableBlock;
+	block->init(mesh, *_VegetableManager, center, TileBank);
+	if (block->getEntryCount() == 0)
+	{
+		// nothing plantable in this mesh (no soil groups or empty vegetable
+		// descs): don't keep an empty block around, the structural sync would
+		// otherwise erase/recreate it every frame.
+		block->release(*_VegetableManager);
+		delete block;
+		return;
+	}
+	m_vegetableBlocks[std::make_pair(lod, sectorId)] = block;
+}
+
+// ****************************************************************************
+void CDynLandscape::updateVegetableBlocks(const CVector& viewCenter)
+{
+	if (_VegetableManager == nullptr || !isVegetableActive())
+		return;
+
+	// Structural sync (cheap pass, no NL3D calls): blocks exist for (lod 0/1)
+	// sectors whose mesh is fully visible (displayFactor >= 1) and carries a
+	// non-empty placement set. Recreate on mesh pointer change (re-extraction
+	// = new placement data), release when the sector left the list.
+	std::vector<std::pair<uint, TGenericSectorId>> toErase;
+	std::vector<std::pair<uint, TGenericSectorId>> toCreate;
+	for (uint lod = 0; lod < LOD_COUNT && lod <= 1; ++lod)
+	{
+		for (auto& kv : m_regionsList[lod])
+		{
+			CRegionMesh* mesh = static_cast<CRegionMesh*>(kv.second.getPtr());
+			if (mesh == nullptr || mesh->m_displayFactor < 1.f || mesh->m_vegetPlacements.empty())
+				continue;
+			auto blockIt = m_vegetableBlocks.find(std::make_pair(lod, kv.first));
+			if (blockIt == m_vegetableBlocks.end())
+				toCreate.push_back(std::make_pair(lod, kv.first));
+			else if (blockIt->second->getMesh() != mesh)
+			{
+				toErase.push_back(std::make_pair(lod, kv.first)); // replaced below
+				toCreate.push_back(std::make_pair(lod, kv.first));
+			}
+		}
+	}
+	for (auto& kv : m_vegetableBlocks)
+	{
+		auto meshIt = m_regionsList[kv.first.first].find(kv.first.second);
+		if (meshIt == m_regionsList[kv.first.first].end())
+		{
+			toErase.push_back(kv.first);
+			continue;
+		}
+		CRegionMesh* mesh = static_cast<CRegionMesh*>(meshIt->second.getPtr());
+		if (mesh == nullptr || mesh->m_displayFactor < 1.f || mesh->m_vegetPlacements.empty())
+			toErase.push_back(kv.first);
+	}
+	// dedup (a replaced key appears in both passes)
+	std::sort(toErase.begin(), toErase.end());
+	toErase.erase(std::unique(toErase.begin(), toErase.end()), toErase.end());
+
+	if (toErase.empty() && toCreate.empty() && m_vegetableBlocks.empty())
+		return; // nothing to do this frame: no lock window at all
+
+	// Commit window (stock discipline): updateDriver, lock, ops, unlock; the
+	// OptFastFloor window is required by CVegetable::generateGroup.
+	_VegetableManager->updateDriver(_Driver);
+	OptFastFloorBegin();
+	_VegetableManager->lockBuffers();
+
+	// release stale blocks first (frees vegetable VB space before allocations)
+	for (const auto& key : toErase)
+	{
+		auto blockIt = m_vegetableBlocks.find(key);
+		if (blockIt != m_vegetableBlocks.end())
+		{
+			blockIt->second->release(*_VegetableManager);
+			delete blockIt->second;
+			m_vegetableBlocks.erase(blockIt);
+		}
+	}
+	for (const auto& key : toCreate)
+	{
+		auto meshIt = m_regionsList[key.first].find(key.second);
+		if (meshIt == m_regionsList[key.first].end())
+			continue;
+		CRegionMesh* mesh = static_cast<CRegionMesh*>(meshIt->second.getPtr());
+		createVegetableBlock(key.first, key.second, *mesh);
+	}
+
+	// ring-band updates for all live blocks, under the per-frame IG budget
+	sint budget = (sint)g_maxVegetCommit;
+	for (auto& kv : m_vegetableBlocks)
+		kv.second->update(viewCenter, *_VegetableManager, budget);
+
+	_VegetableManager->unlockBuffers();
+	OptFastFloorEnd();
 }
 
 // ****************************************************************************
@@ -519,11 +891,20 @@ void CDynLandscape::logVegetStats() const
 	uint numVisibleClipBlocks, numZSortRegistered, zSortFacesLast, zSortVBVerts;
 	_VegetableManager->getVegetProbeState(numClipBlocks, numEmptyClipBlocks, numIgs, numTris, numVerts,
 		numVisibleClipBlocks, numZSortRegistered, zSortFacesLast, zSortVBVerts);
-	nlinfo("DYNVEGET: stats: renderVegetables=%d active=%d facesRendered=%u clipBlocks=%u emptyClipBlocks=%u igs=%u tris=%u verts=%u visibleClipBlocks=%u zsortRegistered=%u zsortFacesLast=%u zsortVBVerts=%u",
+	// P2 block-level state (const map: the pointer is const, the block isn't)
+	uint vegetBlocks = 0, vegetEntries = 0, vegetBlockIgs = 0;
+	for (auto& kv : m_vegetableBlocks)
+	{
+		++vegetBlocks;
+		vegetEntries += kv.second->getEntryCount();
+		vegetBlockIgs += kv.second->getIgCount();
+	}
+	nlinfo("DYNVEGET: stats: renderVegetables=%d active=%d facesRendered=%u clipBlocks=%u emptyClipBlocks=%u igs=%u tris=%u verts=%u visibleClipBlocks=%u zsortRegistered=%u zsortFacesLast=%u zsortVBVerts=%u vegetBlocks=%u vegetEntries=%u vegetBlockIgs=%u",
 		(int)g_renderVegetables, (int)isVegetableActive(),
 		(uint)_VegetableManager->getNumVegetableFaceRendered(),
 		numClipBlocks, numEmptyClipBlocks, numIgs, numTris, numVerts,
-		numVisibleClipBlocks, numZSortRegistered, zSortFacesLast, zSortVBVerts);
+		numVisibleClipBlocks, numZSortRegistered, zSortFacesLast, zSortVBVerts,
+		vegetBlocks, vegetEntries, vegetBlockIgs);
 }
 void CDynLandscape::render(const CVector &refineCenter, const CVector &frontVector, const CPlane pyramid[NL3D_TESSBLOCK_NUM_CLIP_PLANE], bool doTileAddPass /*= false*/, bool doVegetables /*= true*/)
 {

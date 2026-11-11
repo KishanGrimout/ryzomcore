@@ -66,7 +66,10 @@ const uint8 VegetNoSoil = 0xFF;
 /// One plantable-surface bucket: the geometry data the commit phase needs to
 /// plant with CVegetable::generateGroup (Center is the noise/density seed,
 /// Area the density driver, the triangle list the UV-to-position mapping
-/// surface). Triangles are stored in mesh-index order.
+/// surface). Triangles are stored in mesh-index order. Member triangle
+/// CORNERS are pre-resolved to world units: the commit phase runs after the
+/// decoded mesh is destroyed (only CRegionMesh survives extraction), so it
+/// must not need the mesh/origin/scale context.
 struct CVegetBucket
 {
 	/// Quantized cell center in world XY (z = 0). Commit-time noise seed.
@@ -75,11 +78,11 @@ struct CVegetBucket
 	NLMISC::CVector Normal;
 	/// Sum of the member triangle areas, in m^2. Equals sum(TriAreas).
 	float Area;
-	/// Member triangles: indices into the decoded mesh index array, value =
-	/// index of the triangle's first corner (corner stride is 3).
-	std::vector<uint32> Triangles;
-	/// Per-member triangle area, parallel to Triangles.
+	/// Member triangle areas, in mesh-index order (one per member triangle).
 	std::vector<float> TriAreas;
+	/// Member triangle corners in world space, 3 per member triangle (stride
+	/// 3, same order as TriAreas).
+	std::vector<NLMISC::CVector> TriCorners;
 };
 
 /// All plantable buckets of one (biome, material) soft-soil surface.
@@ -125,10 +128,9 @@ void computeVegetPlacements(const TDecodedMesh& mesh, const uint8 (&soilIds)[Veg
 /// bucket's triangle surface: a deterministic hash of the UV pair selects a
 /// member triangle area-proportionally, then the standard unit-square
 /// barycentric fold positions the instance inside it. Deterministic given
-/// (mesh, bucket, uv). \param outPos world position on the facet;
+/// (bucket, uv). \param outPos world position on the facet;
 /// \param outNormal the landing triangle's face normal (orientation basis).
-void vegetBucketResolvePosition(const TDecodedMesh& mesh, const CVegetBucket& bucket,
-	const NLMISC::CVector2f& uv, const NLMISC::CVector& worldOrigin, float scale,
+void vegetBucketResolvePosition(const CVegetBucket& bucket, const NLMISC::CVector2f& uv,
 	NLMISC::CVector& outPos, NLMISC::CVector& outNormal);
 
 } // namespace DYNWORLD

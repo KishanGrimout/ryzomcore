@@ -163,7 +163,7 @@ TEST(DynworldVegetationPlacementTest, SoilSurfaceBuildsPlacementSet)
 	float sumTriAreas = 0.f;
 	for (const CVegetBucket& bucket : group.Buckets)
 	{
-		ASSERT_EQ(bucket.Triangles.size(), bucket.TriAreas.size());
+		ASSERT_EQ(bucket.TriAreas.size() * 3, bucket.TriCorners.size());
 		// centers quantized on the 2 m cell grid
 		EXPECT_FLOAT_EQ(bucket.Center.x, (floorf(bucket.Center.x / VegetBucketCellSize) + 0.5f) * VegetBucketCellSize);
 		EXPECT_FLOAT_EQ(bucket.Center.y, (floorf(bucket.Center.y / VegetBucketCellSize) + 0.5f) * VegetBucketCellSize);
@@ -173,12 +173,11 @@ TEST(DynworldVegetationPlacementTest, SoilSurfaceBuildsPlacementSet)
 		EXPECT_NEAR(bucket.Normal.y, 0.f, 1e-4f);
 		EXPECT_FLOAT_EQ(bucket.Normal.z, 1.f);
 		// every member triangle's centroid falls inside the bucket's cell
-		for (uint tri = 0; tri < bucket.Triangles.size(); ++tri)
+		for (uint tri = 0; tri < bucket.TriAreas.size(); ++tri)
 		{
-			const uint32 firstCorner = bucket.Triangles[tri];
-			const CVector p0 = ToNeLVectorF(mesh.getVertex(mesh.getIndex(firstCorner)).position);
-			const CVector p1 = ToNeLVectorF(mesh.getVertex(mesh.getIndex(firstCorner + 1)).position);
-			const CVector p2 = ToNeLVectorF(mesh.getVertex(mesh.getIndex(firstCorner + 2)).position);
+			const CVector& p0 = bucket.TriCorners[tri * 3];
+			const CVector& p1 = bucket.TriCorners[tri * 3 + 1];
+			const CVector& p2 = bucket.TriCorners[tri * 3 + 2];
 			const float cx = (p0.x + p1.x + p2.x) / 3.f;
 			const float cy = (p0.y + p1.y + p2.y) / 3.f;
 			EXPECT_NEAR(cx, bucket.Center.x, VegetBucketCellSize * 0.5f);
@@ -234,7 +233,7 @@ TEST(DynworldVegetationPlacementTest, NoInstancesOnLiquidOrObjectTops)
 	EXPECT_NEAR(totalArea(set), 4.f, 1e-4f);
 	uint triCount = 0;
 	for (const CVegetBucket& bucket : set.Groups[0].Buckets)
-		triCount += (uint)bucket.Triangles.size();
+		triCount += (uint)bucket.TriAreas.size();
 	EXPECT_EQ(triCount, 8u);
 }
 
@@ -259,7 +258,7 @@ TEST(DynworldVegetationPlacementTest, MixedMaterialFacetExcluded)
 	ASSERT_EQ(set.Groups.size(), 1u);
 	ASSERT_EQ(set.Groups[0].Buckets.size(), 1u);
 	const CVegetBucket& bucket = set.Groups[0].Buckets[0];
-	ASSERT_EQ(bucket.Triangles.size(), 1u);
+	ASSERT_EQ(bucket.TriAreas.size(), 1u);
 	EXPECT_NEAR(bucket.Area, 0.5f, 1e-4f); // only the clean facet
 }
 
@@ -289,7 +288,7 @@ TEST(DynworldVegetationPlacementTest, Determinism)
 			EXPECT_EQ(a.Center, c.Center);
 			EXPECT_EQ(a.Normal, c.Normal);
 			EXPECT_EQ(a.Area, c.Area);
-			EXPECT_EQ(a.Triangles, c.Triangles);
+			EXPECT_EQ(a.TriCorners, c.TriCorners);
 			ASSERT_EQ(a.TriAreas.size(), c.TriAreas.size());
 			for (uint t = 0; t < a.TriAreas.size(); ++t)
 				EXPECT_EQ(a.TriAreas[t], c.TriAreas[t]);
@@ -342,16 +341,16 @@ TEST(DynworldVegetationBucketResolveTest, PositionLandsOnSurfaceFacet)
 		for (const CVector2f& uv : uvs)
 		{
 			CVector pos, normal;
-			vegetBucketResolvePosition(mesh, bucket, uv, CVector::Null, 1.f, pos, normal);
+			vegetBucketResolvePosition(bucket, uv, pos, normal);
 
 			// the position must lie ON one of the bucket's triangles, and the
 			// returned normal must be that triangle's face normal
 			bool found = false;
-			for (uint32 firstCorner : bucket.Triangles)
+			for (uint tri = 0; tri < bucket.TriAreas.size(); ++tri)
 			{
-				const CVector p0 = ToNeLVectorF(mesh.getVertex(mesh.getIndex(firstCorner)).position);
-				const CVector p1 = ToNeLVectorF(mesh.getVertex(mesh.getIndex(firstCorner + 1)).position);
-				const CVector p2 = ToNeLVectorF(mesh.getVertex(mesh.getIndex(firstCorner + 2)).position);
+				const CVector& p0 = bucket.TriCorners[tri * 3];
+				const CVector& p1 = bucket.TriCorners[tri * 3 + 1];
+				const CVector& p2 = bucket.TriCorners[tri * 3 + 2];
 				if (pointOnTriangle(pos, p0, p1, p2))
 				{
 					CVector triNormal = (p1 - p0) ^ (p2 - p0);
@@ -384,8 +383,8 @@ TEST(DynworldVegetationBucketResolveTest, ResolveIsDeterministic)
 	for (const CVector2f& uv : uvs)
 	{
 		CVector posA, normA, posB, normB;
-		vegetBucketResolvePosition(mesh, bucket, uv, CVector::Null, 1.f, posA, normA);
-		vegetBucketResolvePosition(mesh, bucket, uv, CVector::Null, 1.f, posB, normB);
+		vegetBucketResolvePosition(bucket, uv, posA, normA);
+		vegetBucketResolvePosition(bucket, uv, posB, normB);
 		EXPECT_EQ(posA, posB);
 		EXPECT_EQ(normA, normB);
 	}

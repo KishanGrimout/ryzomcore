@@ -574,6 +574,20 @@ NLMISC_COMMAND(dyn_renderveget, "Toggle render of stock microvegetation in dyn l
 	return true;
 }
 
+// P2 commit budget knob (issue #7 plan): per-frame cap of vegetable IG
+// commits (initial plantings + ring band changes), declared in dyn_landscape.cpp.
+extern uint g_maxVegetCommit;
+NLMISC_COMMAND(dyn_vegetbudget, "Set the per-frame vegetable IG commit budget (P2, issue #7)", "<maxIgCommitsPerFrame>")
+{
+	if (args.empty())
+		return false;
+	uint budget = 0;
+	fromString(args[0], budget);
+	g_maxVegetCommit = budget;
+	nlinfo("DYNVEGET: g_maxVegetCommit = %u", g_maxVegetCommit);
+	return true;
+}
+
 NLMISC_COMMAND(dyn_vegetstats, "Log microvegetation render state + last-frame face count (P0 probe, issue #7)", "")
 {
 	extern ULandscape *Landscape;
@@ -807,6 +821,11 @@ void CDynLandscapeUser::refreshLodSectors(const CVector& pos, float radius, uint
 
 	// Check for finished generation deferred commands
 	updateGenerateMeshesCommands();
+
+	// P2 (issue #7): sync the vegetable blocks against m_regionsList and run
+	// the ring-band commits (create/release IGs) under the per-frame budget,
+	// inside the vegetable-manager lock window.
+	landscape.updateVegetableBlocks(CVector(MainCam.getPos()));
 
 	// .
 	updateTransitionMeshes();

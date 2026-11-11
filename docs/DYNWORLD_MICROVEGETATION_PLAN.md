@@ -359,17 +359,56 @@ Validation: unit tests green in Release. **P1 DONE 2026-11-11.**
 
 ### P2 — Vegetable blocks + main-thread commit
 
-- [ ] `CDynVegetableBlock` per (sector, lod): clip block + per-ring IGs;
-      commit/delete API implementing the lock discipline
-      (`updateDriver → lockBuffers → ops → unlockBuffers`,
-      `OptFastFloorBegin/End`), respecting this tree's
-      `setUnsynchronizedMode`/`processDeferredFrees` triple-buffer rules.
-- [ ] Wire the mesh lifecycle: commit on visible, delete+re-commit on replaced
-      (via the existing `updateTouchedMeshes`/transition paths), delete-all on
-      `removeMeshes`. Watch: delete+re-commit must not exceed the per-frame
-      budget (`g_maxToGeneratePerFrame` analogue; add a `g_maxVegetCommit`
-      knob).
-- [ ] LOD scope: only LOD0/LOD1 meshes carry placements (P1 already enforces).
+- [x] `CDynVegetableBlock` per (sector, lod) (2026-11-11, `dyn_landscape.h/.cpp`):
+      stock clip block per sector + one sort block and per-DistType instance
+      groups per plantable **bucket** (the 2 m clustering cell of the placement
+      engine — the analog of the stock 2x2 m tile; stock scale: one vegetable
+      block per 4 m tessblock with 4 sort blocks, ours: one block per 32/64 m
+      sector with up to ~256 sort blocks — only for buckets whose group's tile
+      vegetable desc is non-empty). Ring-band logic mirrors stock
+      `CLandscapeVegetableBlock::update` (squared-distance LUT band walk over
+      `(i·10 m)²`, receding deletes IGs `[cur,new)`, approaching creates
+      `[new,cur)`), but applied **per bucket entry** so the per-frame budget
+      can starve individual entries without breaking committed state (an
+      entry's band change is all-or-nothing; left untouched and retried next
+      frame when out of budget). Planting mirrors
+      `CPatch::generateTileVegetable` per bucket: `getVegetableList(distType)`
+      + `getVegetableSeed`, `CVegetable::generateGroup` (bucket Center as the
+      noise seed, bucket Area as the density driver — the D3 clustering
+      contract), `vegetBucketResolvePosition` for the UV→facet landing
+      (surface-aligned I/J/K basis), empty IGs freed immediately (stock rule),
+      `updateSortBlock` after each batch, `blendDistMax=(distType+1)·10 m`,
+      lighting v1 = white ambient + diffuse shade `0.35+0.65·max(0,normal.z)`,
+      water state `AboveWater`, LOD0/LOD1 only. Commit path respects the
+      stock lock discipline (`updateDriver → lockBuffers → ops →
+      unlockBuffers`, `OptFastFloorBegin/End` around `generateGroup`;
+      triple-buffer `processDeferredFrees` happens inside the manager's
+      `lockBuffers`). **P1 refinement required by this**: buckets now carry
+      world-space triangle corners (`CVegetBucket::TriCorners`) — the commit
+      phase runs after the decoded mesh is destroyed (only `CRegionMesh`
+      survives extraction), so `vegetBucketResolvePosition` no longer needs
+      the mesh/origin/scale context; placement test updated and green.
+- [x] Wire the mesh lifecycle (2026-11-11): per-frame structural sync
+      `CDynLandscape::updateVegetableBlocks(viewCenter)` called from
+      `CDynLandscapeUser::refreshLodSectors` (right after
+      `updateGenerateMeshesCommands`), keyed by (lod, sectorId) against
+      `m_regionsList`: create on fully visible meshes (`displayFactor ≥ 1`,
+      placement set non-empty; blocks with zero plantable entries are not
+      kept, to avoid erase/recreate churn), release when the sector left the
+      list or the mesh pointer changed (re-extraction = new placement data),
+      release-all in `clearGeneratedMeshes`/`clear`/destructor (before the
+      base dtor destroys `_VegetableManager`). Budget knob
+      `g_maxVegetCommit` (default 256 IG commits/frame; counts each IG
+      creation) with the `dyn_vegetbudget <n>` command; blocks/entries beyond
+      the budget simply stay pending for later frames. Tile→desc resolution
+      at commit: `(biome, material)` →
+      `CMaterialLibrary::getMaterialDef(material)->getTextureSet(biome)
+      ->m_textures[0].m_variations[0]` (tile id, same lookup
+      `bindRegionMeshTexture` uses) → `TileBank.getTileVegetableDesc(tileId)`;
+      empty descs/unresolvable materials are skipped.
+      Validation: stats-only in-engine check pending (`dyn_vegetstats` now
+      also reports `vegetBlocks`/`vegetEntries`/`vegetBlockIgs`); client
+      build green, whole dynworld test set green (13 suites).
 
 Validation: build + client session (no render call yet — count instances via
 debug log/`dyn_vegetstats`).

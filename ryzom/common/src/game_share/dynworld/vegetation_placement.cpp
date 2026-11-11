@@ -150,13 +150,15 @@ void computeVegetPlacements(const TDecodedMesh& mesh, const uint8 (&soilIds)[Veg
 		const TCellKey cellKey = cellKeyOf(centroidX, centroidY);
 		CVegetBucket& bucket = group.Cells[cellKey];
 
-		if (bucket.Triangles.empty())
+		if (bucket.TriAreas.empty())
 		{
 			bucket.Center.set((cellKey.X + 0.5f) * VegetBucketCellSize,
 				(cellKey.Y + 0.5f) * VegetBucketCellSize, 0.f);
 		}
-		bucket.Triangles.push_back((uint32)idx);
 		bucket.TriAreas.push_back(area);
+		bucket.TriCorners.push_back(p0);
+		bucket.TriCorners.push_back(p1);
+		bucket.TriCorners.push_back(p2);
 		bucket.Area += area;
 		bucket.Normal += normal * area;
 	}
@@ -183,11 +185,10 @@ void computeVegetPlacements(const TDecodedMesh& mesh, const uint8 (&soilIds)[Veg
 }
 
 // ****************************************************************************
-void vegetBucketResolvePosition(const TDecodedMesh& mesh, const CVegetBucket& bucket,
-	const CVector2f& uv, const CVector& worldOrigin, float scale,
+void vegetBucketResolvePosition(const CVegetBucket& bucket, const CVector2f& uv,
 	CVector& outPos, CVector& outNormal)
 {
-	nlassert(!bucket.Triangles.empty() && bucket.Triangles.size() == bucket.TriAreas.size());
+	nlassert(bucket.TriAreas.size() * 3 == bucket.TriCorners.size());
 
 	// deterministic area-proportional triangle selection from the UV pair
 	uint32 h = (uint32)(uv.x * 16777216.f);
@@ -202,7 +203,7 @@ void vegetBucketResolvePosition(const TDecodedMesh& mesh, const CVegetBucket& bu
 	// area CDF walk (member triangles are in mesh-index order)
 	float acc = 0.f;
 	uint triIdx = 0;
-	const uint nbTris = (uint)bucket.Triangles.size();
+	const uint nbTris = (uint)bucket.TriAreas.size();
 	const float rTarget = r * bucket.Area;
 	for (; triIdx + 1 < nbTris; ++triIdx)
 	{
@@ -212,10 +213,10 @@ void vegetBucketResolvePosition(const TDecodedMesh& mesh, const CVegetBucket& bu
 	}
 
 	// folded barycentric position inside the selected triangle
-	const uint32 firstCorner = bucket.Triangles[triIdx];
-	const CVector p0 = worldOrigin + ToNeLVectorF(mesh.getVertex(mesh.getIndex(firstCorner)).position) * scale;
-	const CVector p1 = worldOrigin + ToNeLVectorF(mesh.getVertex(mesh.getIndex(firstCorner + 1)).position) * scale;
-	const CVector p2 = worldOrigin + ToNeLVectorF(mesh.getVertex(mesh.getIndex(firstCorner + 2)).position) * scale;
+	const CVector* tri = &bucket.TriCorners[triIdx * 3];
+	const CVector& p0 = tri[0];
+	const CVector& p1 = tri[1];
+	const CVector& p2 = tri[2];
 
 	float s = uv.x;
 	float t = uv.y;

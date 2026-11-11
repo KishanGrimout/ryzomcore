@@ -19,6 +19,7 @@
 
 #include "nel/misc/smart_ptr.h"
 #include "nel/3d/landscape.h"
+#include "nel/3d/vegetable_def.h"
 
 #include "game_share/dynworld/map_sector.h"
 
@@ -28,6 +29,17 @@ namespace NL3D
 {
 	class CVertexProgram;
 	class CPixelProgram;
+	class CVegetableManager;
+	class CVegetableClipBlock;
+	class CVegetableSortBlock;
+	class CVegetableInstanceGroup;
+	class CTileVegetableDesc;
+	class CTileBank;
+}
+
+namespace DYNWORLD
+{
+	struct CVegetBucket;
 }
 
 class CRegionMesh;
@@ -35,6 +47,69 @@ class CSectorTransition;
 
 typedef std::map<TGenericSectorId, NLMISC::CSmartPtr<IRegionMesh>> TRegionModelContainer;
 typedef std::vector<NLMISC::CSmartPtr<CSectorTransition>> TTransitionContainer;
+
+// ***************************************************************************
+/**
+ * P2 (issue #7): dynworld analogue of NL3D::CLandscapeVegetableBlock.
+ *
+ * One per (lod, sectorId) whose mesh hosts plantable surface. A stock
+ * CVegetableClipBlock owns the sector vegetable geometry; one sort block and
+ * per-DistType instance groups exist per plantable bucket (the 2 m clustering
+ * cell of the placement engine — the analog of the stock 2x2 m tile). The
+ * ring-band logic mirrors the stock CLandscapeVegetableBlock::update()
+ * (camera distance band -> IG create/delete, sort block refresh), applied
+ * per bucket entry so the per-frame commit budget can starve individual
+ * entries without breaking their state.
+ */
+class	CDynVegetableBlock
+{
+public:
+	struct TBucketEntry
+	{
+		NL3D::CVegetableSortBlock* SortBlock = nullptr;
+		NL3D::CVegetableInstanceGroup* Igs[NL3D_VEGETABLE_BLOCK_NUMDIST] = { };
+		/// Stock semantics: NL3D_VEGETABLE_BLOCK_NUMDIST means "no IG yet";
+		/// band [0..NUMDIST) = IGs [0..CurDistType) exist.
+		uint8 CurDistType = NL3D_VEGETABLE_BLOCK_NUMDIST;
+		/// Planting data, owned by the sector mesh's placement set (the block
+		/// is recreated whenever the mesh pointer changes).
+		const DYNWORLD::CVegetBucket* Bucket = nullptr;
+		const NL3D::CTileVegetableDesc* TileVegetDesc = nullptr;
+	};
+
+	CDynVegetableBlock() { }
+	/// Releases everything that is still allocated.
+	~CDynVegetableBlock() { nlassert(_Entries.empty() && _ClipBlock == nullptr); }
+
+	/// Resolve the placement set into bucket entries (tile vegetable desc per
+	/// (biome, material) group) and create the clip + sort blocks. Must run
+	/// inside the vegetable manager lock window.
+	void init(CRegionMesh& mesh, NL3D::CVegetableManager& vegetManager, const NLMISC::CVector& sectorCenter,
+		const NL3D::CTileBank& tileBank);
+
+	/// Delete IGs, sort blocks and the clip block. Must run inside the
+	/// vegetable manager lock window.
+	void release(NL3D::CVegetableManager& vegetManager);
+
+	/// Stock ring-band update per entry. \\param budget remaining per-frame IG
+	/// commit budget (decremented); an entry whose band change does not fit is
+	/// left untouched and retried next frame.
+	void update(const NLMISC::CVector& viewCenter, NL3D::CVegetableManager& vegetManager, sint& budget);
+
+	CRegionMesh* getMesh() const { return _Mesh; }
+	const NLMISC::CVector& getCenter() const { return _Center; }
+	uint getEntryCount() const { return (uint)_Entries.size(); }
+	uint getIgCount() const;
+
+private:
+	void createIgForDistType(TBucketEntry& entry, uint distType, NL3D::CVegetableManager& vegetManager);
+	void deleteIg(TBucketEntry& entry, uint distType, NL3D::CVegetableManager& vegetManager);
+
+	NLMISC::CVector _Center;
+	NL3D::CVegetableClipBlock* _ClipBlock = nullptr;
+	CRegionMesh* _Mesh = nullptr;
+	std::vector<TBucketEntry> _Entries;
+};
 
 // ***************************************************************************
 /**
@@ -57,6 +132,14 @@ public:
 	virtual float getRayCollision(const NLMISC::CVector &start, const NLMISC::CVector &end) override;
 
 	void clearGeneratedMeshes();
+
+	/// P2 (issue #7 plan): per-frame vegetable block sync against
+	/// m_regionsList (blocks keyed by (lod, sectorId), created on fully
+	/// visible meshes, released on removal, recreated when the mesh pointer
+	/// changed), then stock ring-band updates under the per-frame
+	/// g_maxVegetCommit IG budget. Main thread only; opens the vegetable
+	/// manager lock window itself when there is any work to do.
+	void updateVegetableBlocks(const NLMISC::CVector& viewCenter);
 
 	/// Debug probe (P0, issue #7 plan): dump the tile-bank vegetable
 	/// descriptors (tileset name, desc file, per-DistType vegetable shapes)
@@ -90,6 +173,9 @@ private:
 	void deletePrograms();
 	void readShaderFiles();
 
+	void clearVegetableBlocks();
+	void createVegetableBlock(uint lod, TGenericSectorId sectorId, CRegionMesh& mesh);
+
 	std::string m_VPSource;
 	std::string m_PPSource;
 	std::string m_VPGLSLBody;
@@ -97,6 +183,11 @@ private:
 	NL3D::CVertexProgram* m_VP;
 	NL3D::CPixelProgram* m_PP;
 	NL3D::CMaterial m_Mat;
+
+	/// P2 vegetable blocks, keyed by (lod, sectorId). Blocks are created only
+	/// for meshes with a non-empty placement set (a block with zero plantable
+	/// entries stays in the map but costs only its empty structures).
+	std::map<std::pair<uint, TGenericSectorId>, CDynVegetableBlock*> m_vegetableBlocks;
 };
 
 
