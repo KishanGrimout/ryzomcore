@@ -277,7 +277,16 @@ drives texture binding.
       attributable. **Confirmed fixed 2026-11-11 10:27:34:**
       `zsortRegistered=1 zsortFacesLast=240 zsortVBVerts=390` and the patch
       is visible in-engine.
-- [ ] Write down the decisions D1–D3 (status quo defaults if data is absent).
+- [x] Write down the decisions D1–D3 (status quo defaults if data is absent).
+      DECIDED 2026-11-11 (P0 data confirmed): **D1 = stock `CTileVegetableDesc`**
+      from the tile bank (data present and resolving in-engine, D1 audit);
+      **D2 = filter (a)** — a ground voxel is plantable when `Raw` and its
+      material equals `CMaterialLibrary::getEnvironmentDef(biome)
+      ->getDefaultSoilId()`; no per-material `.cfg` flag in v1 (add later only
+      if art wants control); **D3 = per-triangle `generateGroup` first**
+      (measure with P1 numbers, cluster into spatial buckets only if it proves
+      too costly/repetitive); **D4** stays open by design — decided with P4
+      measurements.
 
 Validation: notes appended to the new system doc (§6).
 
