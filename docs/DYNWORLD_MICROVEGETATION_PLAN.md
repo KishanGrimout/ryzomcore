@@ -410,6 +410,22 @@ Validation: unit tests green in Release. **P1 DONE 2026-11-11.**
       also reports `vegetBlocks`/`vegetEntries`/`vegetBlockIgs`); client
       build green, whole dynworld test set green (13 suites).
 
+**Validation 2026-11-11 (in-engine, PASS — P2 DONE):** session stats
+      `vegetBlocks=209 vegetEntries=22660 vegetBlockIgs=335 tris=5746
+      verts=10711` with render still off (only the ≤50 m band entries hold
+      IGs — the band logic keeps the 22k far entries dormant), then after
+      `.dyn_renderveget`: `facesRendered=3780 visibleClipBlocks=14
+      zsortRegistered=205 zsortVBVerts=10847`, vegetation visibly rendered.
+      Consistency checks: `clipBlocks+emptyClipBlocks == vegetBlocks`
+      (27+182=209, then 28+220=248 — the manager moves empty clip blocks to
+      `_EmptyClipBlockList`, so the probe's split lists reconcile exactly);
+      `igs == vegetBlockIgs`; no vegetable-related warnings or asserts in
+      `client.log`. Note for P4/P5: 209 blocks/22.7k entries are created for
+      every visible plantable sector even far beyond the 50 m band (cheap
+      dormant structures: one clip block + up to ~100 sort blocks each);
+      if profiling shows this matters, lazy sort-block creation for far
+      blocks is the candidate fix (D4 territory).
+
 Validation: build + client session (no render call yet — count instances via
 debug log/`dyn_vegetstats`).
 
