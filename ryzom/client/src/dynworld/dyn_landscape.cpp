@@ -460,6 +460,14 @@ void CDynLandscape::vegetTest(const CVector& pos, const CVector& normal, const s
 		veget.generateInstance(ig, mat, white, white, 50.f, CVegetable::AboveWater, CVegetableUV8());
 	}
 
+	// Stock parity: CLandscapeVegetableBlock::update() calls updateSortBlock()
+	// right after creating/deleting IGs (landscape_vegetable_block.cpp:189/208).
+	// generateInstance only marks the sortBlock _Dirty; _NTriangles is computed
+	// by updateSortBlock. Skipping it leaves _NTriangles==0, and the manager's
+	// ZSort pass registers nothing (observed: zsortRegistered=0 with the whole
+	// IG in the ZSort pass).
+	_VegetableManager->updateSortBlockForIg(ig);
+
 	_VegetableManager->unlockBuffers();
 	OptFastFloorEnd();
 
@@ -508,14 +516,14 @@ void CDynLandscape::logVegetStats() const
 		return;
 	}
 	uint numClipBlocks, numEmptyClipBlocks, numIgs, numTris, numVerts;
-	uint numVisibleClipBlocks, numZSortRegistered, zSortFacesLast;
+	uint numVisibleClipBlocks, numZSortRegistered, zSortFacesLast, zSortVBVerts;
 	_VegetableManager->getVegetProbeState(numClipBlocks, numEmptyClipBlocks, numIgs, numTris, numVerts,
-		numVisibleClipBlocks, numZSortRegistered, zSortFacesLast);
-	nlinfo("DYNVEGET: stats: renderVegetables=%d active=%d facesRendered=%u clipBlocks=%u emptyClipBlocks=%u igs=%u tris=%u verts=%u visibleClipBlocks=%u zsortRegistered=%u zsortFacesLast=%u",
+		numVisibleClipBlocks, numZSortRegistered, zSortFacesLast, zSortVBVerts);
+	nlinfo("DYNVEGET: stats: renderVegetables=%d active=%d facesRendered=%u clipBlocks=%u emptyClipBlocks=%u igs=%u tris=%u verts=%u visibleClipBlocks=%u zsortRegistered=%u zsortFacesLast=%u zsortVBVerts=%u",
 		(int)g_renderVegetables, (int)isVegetableActive(),
 		(uint)_VegetableManager->getNumVegetableFaceRendered(),
 		numClipBlocks, numEmptyClipBlocks, numIgs, numTris, numVerts,
-		numVisibleClipBlocks, numZSortRegistered, zSortFacesLast);
+		numVisibleClipBlocks, numZSortRegistered, zSortFacesLast, zSortVBVerts);
 }
 void CDynLandscape::render(const CVector &refineCenter, const CVector &frontVector, const CPlane pyramid[NL3D_TESSBLOCK_NUM_CLIP_PLANE], bool doTileAddPass /*= false*/, bool doVegetables /*= true*/)
 {

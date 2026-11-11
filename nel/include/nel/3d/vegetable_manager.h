@@ -293,7 +293,13 @@ public:
 	// vertices, plus the last frame's clip/ZSort/blend-layer state). Strip at
 	// P0 validation end.
 	void		getVegetProbeState(uint &numClipBlocks, uint &numEmptyClipBlocks, uint &numIgs, uint &numTris, uint &numVerts,
-					uint &numVisibleClipBlocks, uint &numZSortRegistered, uint &zSortFacesLast);
+					uint &numVisibleClipBlocks, uint &numZSortRegistered, uint &zSortFacesLast, uint &zSortVBVerts);
+
+	// TEMPORARY P0 (dynworld microvegetation, issue #7): stock planting keeps
+	// sort blocks fresh from CLandscapeVegetableBlock::update() after IG
+	// add/delete batches. External block owners (dyn probe / later dyn
+	// vegetable blocks) must do the same or the ZSort pass sees _NTriangles==0.
+	void		updateSortBlockForIg(CVegetableInstanceGroup *ig);
 
 	// @}
 
@@ -343,6 +349,9 @@ private:
 	uint											_ProbeNumVisibleClipBlocks;
 	uint											_ProbeNumZSortRegistered;
 	uint											_ProbeZSortFacesLast;
+	// vertices allocated in the ZSort-pass VB allocators (hard+soft): the
+	// manager's outer ZSort gate. 0 means the faces never reached the pass.
+	uint											_ProbeZSortVBVerts;
 
 
 	// return true if the ith rdrPass is 2Sided.

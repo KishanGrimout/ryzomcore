@@ -1969,6 +1969,8 @@ void			CVegetableManager::render(const CVector &viewCenter, const CVector &front
 	_ProbeNumVisibleClipBlocks= 0;
 	_ProbeNumZSortRegistered= 0;
 	_ProbeZSortFacesLast= 0;
+	_ProbeZSortVBVerts= getVBAllocatorForRdrPassAndVBHardMode(NL3D_VEGETABLE_RDRPASS_UNLIT_2SIDED_ZSORT, 0).getNumUserVerticesAllocated()
+		+ getVBAllocatorForRdrPassAndVBHardMode(NL3D_VEGETABLE_RDRPASS_UNLIT_2SIDED_ZSORT, 1).getNumUserVerticesAllocated();
 	while(ptrClipBlock)
 	{
 		// if the clipBlock is visible and not empty
@@ -2458,7 +2460,7 @@ uint		CVegetableManager::getNumVegetableFaceRendered() const
 // TEMPORARY P0 probe (dynworld microvegetation, issue #7). Strip at P0
 // validation end.
 void		CVegetableManager::getVegetProbeState(uint &numClipBlocks, uint &numEmptyClipBlocks, uint &numIgs, uint &numTris, uint &numVerts,
-				uint &numVisibleClipBlocks, uint &numZSortRegistered, uint &zSortFacesLast)
+				uint &numVisibleClipBlocks, uint &numZSortRegistered, uint &zSortFacesLast, uint &zSortVBVerts)
 {
 	numClipBlocks= 0;
 	numEmptyClipBlocks= 0;
@@ -2492,6 +2494,16 @@ void		CVegetableManager::getVegetProbeState(uint &numClipBlocks, uint &numEmptyC
 	numVisibleClipBlocks= _ProbeNumVisibleClipBlocks;
 	numZSortRegistered= _ProbeNumZSortRegistered;
 	zSortFacesLast= _ProbeZSortFacesLast;
+	zSortVBVerts= _ProbeZSortVBVerts;
+}
+
+
+// ***************************************************************************
+// TEMPORARY P0 (dynworld microvegetation, issue #7). See header comment.
+void		CVegetableManager::updateSortBlockForIg(CVegetableInstanceGroup *ig)
+{
+	if(ig != nullptr && ig->_SortOwner != nullptr)
+		ig->_SortOwner->updateSortBlock(*this);
 }
 
 

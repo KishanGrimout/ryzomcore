@@ -258,6 +258,26 @@ drives texture binding.
       render toggle went on). Fix: reorder — unlock first, then manager
       render (`dyn_landscape.cpp`, P0-fix commit). Renderer result pending
       re-test with the rebuilt exe.
+- [x] Zero-draw investigation (2026-11-11): with the reorder landed, faces
+      stayed 0. First instrumented run (10:13:52):
+      `visibleClipBlocks=1 zsortRegistered=0 zsortFacesLast=0` — the clip
+      test passes but the manager registers nothing in the ZSort pass.
+      Root cause: **the probe never calls `updateSortBlock`**. Stock keeps
+      sort blocks fresh only from `CLandscapeVegetableBlock::update()`
+      (landscape_vegetable_block.cpp:189/208) after IG add/delete batches;
+      `generateInstance` merely marks the sortBlock `_Dirty`, and the
+      manager's ZSort loop requires `sortBlock->_NTriangles != 0`
+      (vegetable_manager.cpp:2269), a value computed only inside
+      `CVegetableSortBlock::updateSortBlock()`. Fix: new public
+      `CVegetableManager::updateSortBlockForIg(ig)` helper
+      (`_SortOwner` is private) called by the probe after planting — the
+      P2 `CDynVegetableBlock` commit path must do the same after every IG
+      create/delete batch. Probe extended with `zsortVBVerts` (summed ZSort
+      VB-allocator vertices, the outer ZSort gate) so a future zero stays
+      attributable. NEXT TEST: expect `zsortRegistered=1, zsortVBVerts=390`;
+      then `zsortFacesLast` decides between "blend-layer models don't draw
+      in the transparent pass" (scene/traversal bug) and "state-side
+      invisibility" (blend/alpha/depth).
 - [ ] Write down the decisions D1–D3 (status quo defaults if data is absent).
 
 Validation: notes appended to the new system doc (§6).
