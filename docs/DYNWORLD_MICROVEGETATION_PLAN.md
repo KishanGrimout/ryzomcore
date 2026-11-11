@@ -292,21 +292,70 @@ Validation: notes appended to the new system doc (§6).
 
 ### P1 — Placement engine (pure data)
 
-- [ ] New module `ryzom/client/src/dynworld/dyn_vegetation.{h,cpp}`:
-      placement computation from a decoded mesh (triangle walk, soft-soil
-      filter, per-DistType `generateGroup`, deterministic seeds, per-instance
-      shade color), producing a placement list owned by the sector mesh
-      result. No NL3D manager calls on the worker thread.
-- [ ] Hook into `CGenerateMeshCommand::generateMesh` after extraction;
-      placement list stored in/next to the `CRegionMesh`.
-- [ ] Unit test (`ryzom_dynworld_vegetation_test` in
-      `ryzom/tools/server/test_modules/game_share_test/` conventions — note
-      it links `NeL::3d` unlike the other dynworld tests): fixed-seed
-      determinism, instance-count scaling vs area/density, filter correctness
-      (default-soil vs non-soil materials), no instances on Liquid tops.
-      Re-run the full dynworld exe set green (`docs/TestEnvironmentNotes.md`).
+- [x] New module (2026-11-11):
+      `ryzom/common/src/game_share/dynworld/vegetation_placement.{h,cpp}`
+      (goes into `Ryzom::gameshare` — refinement over the plan's
+      client/src/dynworld location: the placement engine is pure data with no
+      client/NL3D dependency, so the established dynworld convention of
+      shared dyn code in game_share applies and the unit test needs no client
+      source). Contains:
+      - `buildSoftSoilTable` (D2 filter (a)): per-biome table of the
+        environment default-soil material ids from `CMaterialLibrary`
+        (`VegetNoSoil=0xFF` disables a biome). MAIN THREAD ONLY (reads the
+        immutable-after-init material library); worker commands capture it
+        in their constructor.
+      - `computeVegetPlacements`: walks the decoded mesh; a triangle is
+        plantable iff **all three corners** share the same (biome, material)
+        pair, are `Raw`, and the material equals the biome's soil entry
+        (all-3-corners rule: mixed soil/rock/water boundary facets host no
+        vegetation and can never be double-planted, which the per-corner
+        CRegionSubMesh splitting would otherwise cause). Plantable triangles
+        are clustered into **2 m XY cells** (`VegetBucketCellSize`) per
+        (biome, material): bucket = { quantized cell center (noise seed),
+        area-weighted normal, total area, member triangle indices + areas,
+        mesh-index order }. Output ordering fully deterministic
+        (std::map keyed groups/cells; plain `floorf` — never OptFastFloor on
+        the worker, it fiddles a process-global FPU control word).
+      - `vegetBucketResolvePosition`: commit-time UV→world mapping —
+        deterministic hash of the generateGroup UV pair → area-CDF triangle
+        pick, folded barycentric position inside it, face normal out.
+        Design refinement: `CVegetable::generateGroup` itself runs at COMMIT
+        time (P2, main thread), not on the worker — it reads
+        `_Manager->getGlobalDensity()` and needs the OptFastFloor window,
+        which would break the "no NL3D calls on the worker" invariant. The
+        worker produces geometry only; commit calls generateGroup per bucket
+        (Center, Normal, Area) exactly like stock calls it per tile.
+- [x] Hook into mesh extraction (2026-11-11):
+      `CMapClient::extractMesh` grew an optional `TDecodedMesh*` out-param;
+      the placement set is computed right after extraction and stored on
+      `CRegionMesh::m_vegetPlacements` — so it follows the mesh lifecycle
+      automatically (recomputed on every re-extraction, freed with the
+      mesh). Both generation paths wired:
+      `CGenerateMeshCommand::generateMesh` (worker; soil table captured in
+      the command ctor on the main thread) and
+      `CDynLandscapeUser::generateMesh` (main-thread sync path). Same
+      world transform as `CDynLandscape::renderRegions`
+      (`sectorOrigin = idPos * sideSize`, `scale = voxelSize(lod) * 2^lod` —
+      the decoded mesh carries sector-local resampled-voxel units). LOD2
+      never plants (plan).
+- [x] Unit test `ryzom_dynworld_vegetation_test`
+      (`game_share_test/test_dynworld_vegetation.cpp`, links `NeL::3d` +
+      `Ryzom::gameshare`, per plan note): 11 tests, all green in Release
+      (2026-11-11) — empty mesh, soil-surface clustering (16 m² → 4 buckets,
+      cell-quantized centers, up normals, triangle/area invariants),
+      non-soil/no-soil-biome exclusion, **no instances on Liquid/Object
+      tops** (mixed surface → only the soil group), mixed-material facet
+      exclusion, bit-exact determinism, origin/scale transform, UV mapping
+      lands on a member facet with its face normal + determinism, and
+      **generateGroup instance-count scaling** (D3 numbers): 16 m² at
+      `Density(1, 0 noise)` → exactly 16 instances, doubling density → 32 —
+      validates the bucket-as-16m²-tile-analogue design. Whole dynworld exe
+      set green (13 suites, 76 tests). Environment note: the test exe needs
+      `freetype.dll` on PATH (pulled by `NeL::3d`) — used
+      `redist\nel_tools_win_x64` (same loader-failure class as
+      `docs/TestEnvironmentNotes.md` §1).
 
-Validation: unit tests green in Release.
+Validation: unit tests green in Release. **P1 DONE 2026-11-11.**
 
 ### P2 — Vegetable blocks + main-thread commit
 

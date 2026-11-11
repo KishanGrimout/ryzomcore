@@ -26,6 +26,8 @@
 #include "game_share/dynworld/marching_controller.h"
 #include "game_share/dynworld/material_library.h"
 #include "game_share/dynworld/map_deferred_command_manager.h"
+#include "game_share/dynworld/map_sector.h"
+#include "game_share/dynworld/vegetation_placement.h"
 
 #include "nel/misc/common.h"
 #include "nel/misc/file.h"
@@ -59,6 +61,34 @@ float g_updateTransitionSpeed = .1f;
 bool g_forUsePlayerPosPriority = false;
 
 float g_camPosOffset = 16.f;
+
+// Microvegetation placement hook (issue #7 P1): compute the placement
+// geometry of an extracted mesh into regMesh->m_vegetPlacements. Only
+// LOD0/LOD1 meshes host vegetables; LOD2 (far 350 m box) never plants.
+// soilIds is the per-biome soft-soil table (see DYNWORLD::buildSoftSoilTable,
+// main-thread only — capture it there when calling from a worker command).
+static void vegetPlacementsFromMesh(TGenericSectorId sectorId, uint lod,
+	const uint8 (&soilIds)[DYNWORLD::VegetMaxBiomeCount], const TDecodedMesh& decodedMesh, CRegionMesh* regMesh)
+{
+	if (regMesh == nullptr || lod >= CDynLandscapeUser::LODCOUNT)
+		return;
+	regMesh->m_vegetPlacements.clear();
+	if (lod >= 2)
+		return;
+
+	// same transform as CDynLandscape::renderRegions: world =
+	// sectorOrigin + scale * meshLocal, with sectorOrigin = idPos * sideSize
+	// and scale = voxelSize(lod) * 2^lod (the extracted mesh carries
+	// sector-local resampled-voxel units)
+	NLMISC::CVectorI sectorPosI;
+	CSectorLod::idToPos(lod, sectorId, sectorPosI);
+	const float sideSize = CSectorLod::getSideSize(lod);
+	NLMISC::CVector worldOrigin(float(sectorPosI.x) * sideSize, float(sectorPosI.y) * sideSize, float(sectorPosI.z) * sideSize);
+	const float scale = CSectorLod::getVoxelSize(lod) * pow(2.f, float(lod));
+
+	DYNWORLD::computeVegetPlacements(decodedMesh, soilIds, worldOrigin, scale, regMesh->m_vegetPlacements);
+}
+
 float getPriorityToPlayer(const CVectorI& sectorPosI)
 {
 	if (MainCam.getObjectPtr() == nullptr)
@@ -106,6 +136,10 @@ public:
 		, m_outMesh(nullptr)
 		, m_prefetchDone(false)
 	{
+		// MAIN THREAD (ctor): capture the per-biome soft-soil table before the
+		// worker runs (CMaterialLibrary is main-thread-owned).
+		DYNWORLD::buildSoftSoilTable(m_soilIds);
+
 		TRegion regionToEmerge;
 		CSectorLod::getRegion(m_lod, m_sectorId, regionToEmerge);
 
@@ -163,7 +197,14 @@ private:
 		//NLMISC-PIX-STRIPPED NL_PROF_F("GenerateMesh%d(%p)", m_lod, m_sectorId);
 		MarchingCubesController controller(g_densityThreshold);
 		CRegionMesh* regMesh = new CRegionMesh;
-		m_map->extractMesh(m_sectorId, *regMesh, controller, m_lod, m_lod);
+		TDecodedMesh decodedMesh;
+		m_map->extractMesh(m_sectorId, *regMesh, controller, m_lod, m_lod, &decodedMesh);
+
+		// P1 microvegetation placement (issue #7): worker-side pure-data
+		// clustering of the plantable soft-soil surface, stored on the mesh
+		// result; committed by the landscape when the mesh becomes visible (P2).
+		vegetPlacementsFromMesh(m_sectorId, m_lod, m_soilIds, decodedMesh, regMesh);
+
 		m_outMesh = regMesh;
 	}
 
@@ -195,6 +236,7 @@ private:
 
 	TSectorsList m_loadingSectors;
 	bool m_prefetchDone;
+	uint8 m_soilIds[DYNWORLD::VegetMaxBiomeCount];
 };
 
 // ***************************************************************************
@@ -405,7 +447,14 @@ IRegionMesh* CDynLandscapeUser::generateMesh(TGenericSectorId sectorId, uint lod
 {
 	MarchingCubesController controller(g_densityThreshold);
 	CRegionMesh* regMesh = new CRegionMesh;
-	m_map->extractMesh(sectorId, *regMesh, controller, lod, lod);
+	TDecodedMesh decodedMesh;
+	m_map->extractMesh(sectorId, *regMesh, controller, lod, lod, &decodedMesh);
+
+	// P1 microvegetation placement (issue #7): main-thread path, the soil
+	// table can be built directly here.
+	uint8 soilIds[DYNWORLD::VegetMaxBiomeCount];
+	DYNWORLD::buildSoftSoilTable(soilIds);
+	vegetPlacementsFromMesh(sectorId, lod, soilIds, decodedMesh, regMesh);
 
 	bindRegionMeshTexture(regMesh);
 

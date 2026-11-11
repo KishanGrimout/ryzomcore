@@ -18,6 +18,7 @@
 #define REGION_MESH_HEADER
 
 #include "game_share/dynworld/region_mesh_interface.h"
+#include "game_share/dynworld/vegetation_placement.h"
 
 #include "nel/misc/aabbox.h"
 #include "nel/3d/vertex_buffer.h"
@@ -65,6 +66,12 @@ public:
 	std::vector<CRegionSubMesh*> m_submeshes;
 	NLMISC::CAABBox m_bv;
 	float m_displayFactor;
+
+	// Microvegetation placement geometry (issue #7 P1): computed worker-side
+	// right after extraction, consumed by the commit phase when the mesh
+	// becomes visible (P2). Follows the mesh lifecycle automatically (rebuilt
+	// on every re-extraction, freed with the mesh).
+	DYNWORLD::CDynVegetPlacementSet m_vegetPlacements;
 };
 
 class CSkirtRegionMesh : public IRegionMesh
