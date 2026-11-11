@@ -876,10 +876,10 @@ float g_tighten = 0.4679f;
 float g_shaderDebugMode = 0.f;
 Voxel::MaterialType g_discardMaterial = 0xFF;
 bool g_clipBV = true;
-// P0 probe (issue #7): render planted vegetable IGs with the stock manager,
-// gated behind the dyn_renderveget debug toggle until the planting pipeline
-// lands (P3 honors doVegetables for real).
-bool g_renderVegetables = false;
+// P3 (issue #7): render planted vegetable IGs with the stock manager. On by
+// default now that the planting pipeline is live; .dyn_renderveget toggles it
+// off for A/B comparison against bare terrain.
+bool g_renderVegetables = true;
 void CDynLandscape::logVegetStats() const
 {
 	if (_VegetableManager == nullptr)
@@ -981,9 +981,14 @@ void CDynLandscape::render(const CVector &refineCenter, const CVector &frontVect
 		// The manager's render takes a vector pyramid (stock CLandscape::render
 		// builds the same from the tessblock array).
 		std::vector<CPlane> vegetPyramid(pyramid, pyramid + NL3D_TESSBLOCK_NUM_CLIP_PLANE);
+		// Stock parity: CLandscape::render resets the face counter right before
+		// the manager render (landscape.cpp:1820-ish); the manager itself only
+		// zeroes it at construction, so without this the counter would just be
+		// the max face count ever seen in one frame.
+		_VegetableManager->resetNumVegetableFaceRendered();
 		_VegetableManager->render(refineCenter, frontVector, vegetPyramid, NULL, _Driver);
 		// P0 probe: log only on change so the log stays readable. The counter
-		// covers this frame (the manager resets it when it renders).
+		// is exactly this frame's rendered faces (reset above).
 		uint32 faces = _VegetableManager->getNumVegetableFaceRendered();
 		static sint32 lastFaces = -1;
 		if ((sint32)faces != lastFaces)

@@ -567,7 +567,7 @@ NLMISC_COMMAND(dyn_vegettest, "Plant test vegetable instances at the player posi
 	return true;
 }
 
-NLMISC_COMMAND(dyn_renderveget, "Toggle render of stock microvegetation in dyn landscape (P0 probe, issue #7)", "")
+NLMISC_COMMAND(dyn_renderveget, "Toggle render of stock microvegetation in dyn landscape (on by default since P3, issue #7)", "")
 {
 	g_renderVegetables = !g_renderVegetables;
 	nlinfo("DYNVEGET: dyn_renderveget = %d", g_renderVegetables);
