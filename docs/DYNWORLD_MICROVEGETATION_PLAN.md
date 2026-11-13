@@ -431,24 +431,29 @@ debug log/`dyn_vegetstats`).
 
 ### P3 — Render integration (first in-engine result)
 
-- [ ] `CDynLandscape::render` honors `doVegetables` + `_VegetableActive` +
+- [x] `CDynLandscape::render` honors `doVegetables` + `_VegetableActive` +
       `FilterVegetable`, calls the manager render with the tessblock pyramid
       and `textureDLM = nullptr`; fog behavior checked (stock fog setup is
-      inside the manager).
-- [ ] Milestone **M1**: in a client session, random microvegetation visibly
+      inside the manager). (2026-11-13, user sign-off: "except for P5, I
+      think everything is OK".)
+- [x] Milestone **M1**: in a client session, random microvegetation visibly
       covers soft-soil surfaces (grass on Humus forest floor), none on
       non-soil materials, none under water where water tops the ground.
+      (Validated in-engine, user sign-off 2026-11-13.)
 
 Validation: in-engine, screenshots recorded in the system doc.
 
 ### P4 — Rings, edits, transitions
 
-- [ ] Ring policy per D4 (incremental switching or plant-all), measured.
-- [ ] Edit sync: `dyn_setvoxel`/`dyn_addvoxel` edits re-extract the mesh and
+- [x] Ring policy per D4 (incremental switching or plant-all), measured.
+      (Shipped: incremental switching with near-first ordering + §6.7/§6.8/§6.9
+      budget pools; user sign-off 2026-11-13.)
+- [x] Edit sync: `dyn_setvoxel`/`dyn_addvoxel` edits re-extract the mesh and
       the vegetation re-plants deterministically (no reshuffle) and stays
       consistent with the new surface (plants removed where voxels buried
-      them, appear on new soil).
-- [ ] LOD transitions: no popping regression from the existing
+      them, appear on new soil). (User: "planting is deterministic", validated
+      in-engine 2026-11-13; blink fixed by the §6.9 near budget.)
+- [x] LOD transitions: no popping regression from the existing
       `CSectorTransition` factor animation (vegetation is planted from the
       target mesh only, IG count transitioned or cut per D4).
 
@@ -457,23 +462,30 @@ recorded.
 
 ### P5 — Config, debug commands, performance sign-off
 
-- [ ] Reuse `ClientCfg.MicroVeget`/`MicroVegetDensity` (already partially
+- [x] Reuse `ClientCfg.MicroVeget`/`MicroVegetDensity` (already partially
       wired through `continent_manager.cpp`); live-toggle path
       (`main_loop_utilities.cpp:167-196`) verified for the dyn landscape.
-- [ ] Debug commands in the `dyn_*` block (`commands.cpp:5338+`):
+      (2026-11-13: both commands forward through `CDynLandscapeUser` unchanged.)
+- [x] Debug commands in the `dyn_*` block (`commands.cpp:5338+`):
       `dyn_veget` (on/off), `dyn_vegetdensity <pct>`, `dyn_vegetstats`
       (per-lod instances/faces/IGs, `getNumVegetableFaceRendered`).
-- [ ] Budget sign-off: VB allocator limits (stock
+      (2026-11-13: `dyn_veget`/`dyn_vegetdensity` added via
+      `CDynLandscape::setVegetableActive` + `CDynLandscapeUser::
+      isVegetableActive` wrapper; §6.11.)
+- [x] Budget sign-off: VB allocator limits (stock
       `NL3D_LANDSCAPE_VEGETABLE_MAX_AGP_VERTEX_*` sized for the 50 m band),
       worker cost of placement, main-thread commit cost. Adjust ring policy
-      (D4) and density defaults if needed.
-- [ ] Create the **system doc** `docs/DynMicroVegetation.md` (CamelCase): what
+      (D4) and density defaults if needed. (2026-11-13, §6.11: measured
+      ~8k AGP verts vs Unlit quota 50000 — ~6x headroom, no density change.)
+- [x] Create the **system doc** `docs/DynMicroVegetation.md` (CamelCase): what
       the system is, its data flow, invariants (lock discipline, seed
       determinism, soft-soil rule), the instrumentation/debug registry, and
       the P0–P5 findings; add it to the `AGENTS.md` ToC. Update the roadmap's
-      plan-doc list to point here with status.
+      plan-doc list to point here with status. (Done 2026-11-13.)
 
-Validation: full dynworld exe set green; Release client build; session walk.
+Validation: full dynworld exe set green (13 suites, 2026-11-13); Release
+client build; session walk (user sign-off: everything validated except P5
+deliverables, which are now complete).
 
 ## 5. Risks / notes
 
@@ -497,3 +509,444 @@ Validation: full dynworld exe set green; Release client build; session walk.
   (`dyn_instance_group_user.cpp:113-162`); microvegetation is a pure client
   visual on top and must not collide with that pipeline (soft-soil filter keys
   on `Raw` soil materials only).
+
+## 6. Close-pop investigation (issue #7 follow-up, started 2026-11-12)
+
+Symptom report: microvegetation pops near the player when the camera is put
+close to the ground; toggling `/dyn_refreshpos` stops it. (Reference: that
+command toggles `g_refresh`, which gates the whole
+`CDynLandscapeUser::refreshZonesAround` → `refreshLodSectors` path — and
+`CDynLandscape::updateVegetableBlocks` is the only vegetation-driving call
+inside it, `dyn_landscape_user.cpp:828`. So the pops are proven to come from
+the per-frame band/block updates, not from the render pass.)
+
+### 6.1 Correction of the record (previous session summary is void)
+
+A prior session's closing summary described a fix path built on identifiers
+that **do not exist in this tree** — `VegetationEventProbe`, `PopLogProbe`,
+`PlantGridSideLand.json`, `FreshActionCache`, `PendingVegetationList`,
+`PerFrameApplyTag`, `MosaicTileKey`, `applyPopPendingApply`, `TActionPopTask`,
+`CDynVegetableAction::updateVegetableActionLoop`, `CoarseUpdate`,
+`PlantGridEdgeBudget` (verified by tree-wide grep 2026-11-12). Do **not**
+implement that path; it was confabulated. The real pop-relevant machinery is
+only: `CDynVegetableBlock` (per (sector, lod) block: 1 clip block + 1 sort
+block + per-band IGs per 2 m bucket entry), its stock-mirroring band walk in
+`CDynVegetableBlock::update` (`dyn_landscape.cpp:513`), and the per-frame IG
+commit budget `g_maxVegetCommit` (256, `dyn_vegetbudget`). The existing
+TEMP-PROBE `nlinfo` lines (`probe band cell=…`, `probe block
+create/erase center=…`) are from that investigation and stay until it closes.
+
+### 6.2 Ground truth: how the stock band system masks its own swaps
+
+Stock `CLandscapeVegetableBlock::update`
+(`nel/src/3d/landscape_vegetable_block.cpp:149`) invariant (re-derived
+2026-11-12): an entry holds IGs for **all bands `[CurDistType, NUMDIST)`** —
+approach (`new < cur`) *creates* `[new, cur)` without deleting anything;
+recede (`new > cur`) *deletes* `[cur, new)`. Combined with the per-instance
+ZSort-pass alpha computed per frame in the vegetable VP
+(`vegetable_manager.cpp:1494`: `alpha = (blendDistMax - dist) /
+NL3D_VEGETABLE_BLOCK_BLEND_TRANSITION_DIST`, with
+`blendDistMax = (distType+1)·10 m`, transition width 10 m), every create and
+delete lands where the affected IG's alpha ≈ 0:
+
+- create happens only when *entering* a nearer band → the new band's IG
+  starts at the band's outer edge, alpha ≈ 0, and fades in across the whole
+  10 m band width while approaching;
+- delete happens only when *leaving* a band at its outer edge, where that
+  IG's alpha has already faded to ≈ 0.
+
+So band-boundary swaps are invisible **by construction** — provided the
+accumulation invariant holds every frame. Our port replicates create/delete
+directions, `blendDistMax`, the LUT walk and the sort-block refresh exactly.
+
+Data note from the 2026-11-12 20:56 dump: **band 0 (0–10 m) lists are empty
+for all 14 loaded tilesets** (the dump skips empty lists, hence zero
+`distType=0` lines). Benign for masking (empty band ⇒ no-op create/delete,
+other bands keep rendering: a band-1 IG stays full-alpha at 5 m), but it
+means nothing new is planted inside 10 m of the camera.
+
+### 6.3 Log analysis of the 2026-11-12 20:56 session (`client.log`)
+
+- 3350 band transitions in ~34 s over 909 unique cells, all within ~80×72 m
+  around the player area; approach=1359 / recede=1991. Mix:
+  `5→4` 671, `2↔3` 1050, `3↔4` 899, `5→3` 337, `4↔5`, `5→2` 84.
+- **Zero transitions involving bands 0/1** ⇒ the camera was ≥ 20 m from every
+  cell the whole capture — the "camera close to the ground" repro is *not* in
+  this window (or the camera never went low). Cells churn only at the 20–50 m
+  rings.
+- **Zero block erases, 116 block creates** spread through the whole session
+  (31 at start, then a trickle): LOD transitions near the camera keep
+  creating new blocks mid-walk — each first update of a new block plants its
+  entries 5→current-band **in one step**, i.e. all bands `[cur, 5)` appear at
+  whatever their current alpha is (mid/far bands at **full alpha** — the
+  fade-in they would have had was skipped). Candidate pop source #1.
+- Budget starvation is currently **silent** (the `needed > budget` branch
+  just `continue`s) — unknown whether it fires. Candidate pop source #2:
+  a deferred approach-create commits later, when the camera is already
+  deeper in the band ⇒ the fade-in starts mid-band at partial alpha = visible
+  pop-in.
+- Candidate pop source #3: camera moves ≥ 10 m in one frame (dragging the
+  camera down fast, teleports) produce multi-band jumps `5→2/3/4` (present in
+  the log); the created mid bands then start at their *current* alpha, not at
+  ≈ 0.
+
+### 6.4 Probes added 2026-11-12 (same TEMP-PROBE class, strip together)
+
+- `DYNVEGET: probe budget starve cell=… need=%d budget=%d` — in
+  `CDynVegetableBlock::update`'s deferred-approach branch (source #2).
+- `DYNVEGET: probe cam pos=…` every 30 frames in `updateVegetableBlocks` —
+  correlates churn with camera position/height (source: the bands-0/1
+  question). Rebuilt `ryzom_client_dev_r.exe` (build green).
+
+### 6.5 In-engine repro 2026-11-12 21:10 (probes live) → ROOT CAUSE FOUND
+
+Session with the two added probes (camera low → lift → low; ground at
+z≈24.5, camera z 26.9↔30.8). Rotated logs `client000.log` (4217 band events,
+202 block creates) + `client001.log` (875 band events, 11 block creates):
+
+- **0 budget starves, 0 block erases** — sources #2/#3 from §6.4 eliminated;
+  the deferred-approach and erase/recreate hypotheses are dead.
+- The lift (z 26.7→30.8, one second) fired 2→3×84, 3→4×34, 4→5×16 recedes
+  plus a 5→2/5→3/5→4 create wave; descending back inverted it. 875
+  transitions with a *nearly static camera* (xy fixed, z bobbing 4 m) ⇒ the
+  classification distance is hypersensitive to camera z.
+- **Every logged cell z printed 0.00** across 909+ cells while the terrain
+  surface is at z≈24.5.
+
+Root cause: `CVegetBucket::Center` is the *quantized 2 m cell center with
+z = 0* (`vegetation_placement.h` — designed as the generateGroup noise seed),
+but `CDynVegetableBlock::update` used it as the **band-distance reference
+point**. With terrain at 24.5 m, every classification distance is inflated by
+≈24.5 m ⇒ cells 2+ bands too far; a band's create/delete then fires when the
+camera crosses a sphere around the WRONG center — mid-band in real instance
+distance, where the per-frame ZSort alpha (`(blendDistMax-dist)/10`) is at
+full alpha ⇒ unmasked hard pops. Lifting the camera 4 m pushes all near cells
+across the fake 30 m boundary (their visible band-2 grasses deleted at full
+alpha, replaced by different band-3 content) = "unpop"; descending back =
+"pop again". Also confirmed benign-but-real: band 0 (0–10 m) lists are empty
+for all 14 loaded tilesets (stock data), and the same z=0 center fed
+`createSortBlock` (sort blocks 24 m under the terrain: wrong pyramid-clip
+geometry and ZSort layer assignment).
+
+### 6.6 Fix (2026-11-12, code landed, awaiting in-engine confirmation)
+
+- `CVegetBucket` gained `SurfaceCenter`: area-weighted centroid of the
+  member triangle corners (real surface position). `Center` is unchanged
+  (quantized z=0) and remains the generateGroup noise seed — plant layouts
+  are bit-identical to before.
+- `CDynVegetableBlock::update` classifies bands from `SurfaceCenter`;
+  `createSortBlock` is centered on it too.
+- Probes print `SurfaceCenter` now (real z visible in future logs).
+- Unit test: `SurfaceCenterCarriesElevation` regression (flat surface at
+  z=24.5 ⇒ `SurfaceCenter.z == 24.5`, `Center.z == 0`) + centroid re-derivation
+  in the clustering test. **Whole dynworld exe set green: 13 suites, 77
+  tests** (Release, direct-exe run from `build\bin\Release` with
+  `pipeline/client_dev/local` + `redist\nel_tools_win_x64` on PATH — same
+  loader class as `docs/TestEnvironmentNotes.md` §1). Client rebuilt.
+- Expected effect in-engine: band transitions only at real 10/20/30/40/50 m
+  boundaries around the true surface ⇒ the fade masking holds again (swaps
+  at alpha≈0), and the near-field churn should stop entirely. Cells within
+  10 m real distance classify band 0, whose lists are empty ⇒ nothing plants
+  inside 10 m of the camera; the nearest content is band-1 grasses
+  (10–20 m), full alpha inside 10 m.
+- Retest protocol (clean signal): spawn, wait for the probe log to go quiet
+  (chunk gen / LOD transitions settled — `probe band`/`probe block` lines
+  stop), then do the low → lift → low steps with a few seconds between each;
+  the pops should be gone and `probe band` events should only fire when the
+  camera actually crosses real ring boundaries.
+- Note: with centers fixed, the first session after the fix reclassifies
+  every entry once (one-time reshuffle of when plants appear) — expected,
+  not a regression.
+- In-engine confirmation (2026-11-12): "no more poping, good job!" — the
+  close-pop bug is closed. Second report the same session: "still it looks
+  like some fading is missing" → §6.7.
+
+### 6.7 "Some fading is missing" (2026-11-12, second pass)
+
+Symptom (user): moving forward through loaded terrain, plants pop in at
+~15 m and ~40 m; moving backward, plants disappear abruptly (consistently).
+
+**How the stock fade actually works** (verified in NeL source): there is no
+temporal fade. The alpha is spatial, computed per-frame in the vegetable
+vertex program: `alpha = (blendDistMax − distToVertex) / BTD` with
+`blendDistMax = (distType+1) × 10` (`NL3D_VEGETABLE_BLOCK_ELTDIST`,
+`BLEND_TRANSITION_DIST` = 10; VP `MAD o[COL0].w, dist, c[11].x, v[9].w`,
+c[11] = negInvTransDist). A band's IG is created exactly when the camera
+crosses the band's outer ring (alpha 0 there) and reaches full alpha at the
+inner ring — so on-time creates/deletes are invisible. The formula only
+applies to the `UNLIT_2SIDED_ZSORT` pass; opaque passes pop.
+
+**Shape data check**: unpacked `jungle_vegetables.bnp` (the "veget" files
+there are CVegetableShape binaries — the per-plant `.veget` names are shape
+files, the `*_Sp.vegetset` files hold the descriptors). All 35 jungle shapes
+are `Lighted=1, DoubleSided=1, PreComputeLighting=1` → `destLighted = 0`
+(because PreComputeLighting) → with `AlphaBlend=1` they take
+`UNLIT_2SIDED_ZSORT`, i.e. the fade pass. Only `Ju_DebrisA/B`
+(`AlphaBlend=0`, desert plateau tileset) are opaque. So the fade pipeline is
+live for the vegetation in the test area — the pops are NOT unfaded shapes.
+
+**Log evidence** (probe build still running, session 21:32): ~4,500 band
+transitions in 20 s during a fly-around (balanced create/delete pairs around
+ring boundaries = normal), 121 block creates / 54 erases with the same
+sectors erase+create cycled 4–5×, and budget-starve bursts (125/177 entries
+skipped in single seconds) coinciding with the churn storms.
+
+**Root cause — the structural sync is displayFactor-gated**
+(`CDynLandscape::updateVegetableBlocks`): blocks exist only while
+`m_displayFactor ≥ 1`. But `CSectorTransition::updateFactors` stages the
+transition: the NEXT mesh fades 0→1 first, THEN the PREVIOUS mesh fades
+1→0. Therefore, for every LOD change / mesh re-extraction:
+
+1. next mesh at factor 0 → block NOT created (gate) → vegetation missing
+   while the terrain fades in;
+2. next mesh reaches 1 → block created, but its IGs are filled by the
+   budget-gated band walk; during churn bursts (15–50 blocks/frame) entries
+   starve for seconds → IGs appear mid-band at partial/full alpha = the
+   15 m / 40 m pop-ins (a starved band-1 create lands at ~15 m instead of
+   the 20 m ring edge, alpha ≈ 0.5);
+3. previous mesh starts fading out → its block is erased at fade-out START,
+   at full alpha → abrupt disappearances (visible when moving backward).
+
+**Fix (landed, same session):**
+- Block lifecycle decoupled from `m_displayFactor`: created as soon as the
+  mesh enters `m_regionsList` (factor 0 — hidden under the still-visible
+  previous mesh, which shows the same ground) and erased only when the mesh
+  leaves the list (transition end, by which time the replacement block is
+  populated). Vegetation becomes continuous across LOD transitions and
+  re-extractions; during the transition both LODs' vegetation is briefly
+  alive (placements derive from the same voxels → near-identical plants,
+  negligible ghosting, documented trade-off vs. gap+flash+vanish).
+- Near-first band walk: blocks are sorted by distance to the viewCenter and
+  updated closest-first, so the per-frame IG budget (`g_maxVegetCommit`,
+  tunable via `dyn_vegetbudget`) can no longer be consumed by far churn
+  refills before the visible near-field creates. A starved near entry is
+  what pops mid-band; far entries tolerate deferral (their creates happen at
+  alpha ≈ 0 anyway).
+
+Awaiting in-engine confirmation of §6.7's fix before stripping the probes
+(still present in the running exe; already stripped from source).
+
+**Second report (same session): "it still pops in the same manner"** with the
+§6.7 fix live. User's reading: pops at *constant distances* while moving,
+independent of ground mesh/LOD — i.e. the band rings themselves, pointing at
+the alpha path rather than the structural sync. User also notes LOD1 is far
+and likely vegetation-free.
+
+Added two debug commands to settle it (built, in client since this rebuild):
+
+- `dyn_vegfade <scale>` — scales the slope of the stock vegetable VP alpha
+  formula (`NegInvTransDist` uniform, `CVegetableManager::setupVertexProgram`
+  Constants`, stock `NL3D_VegetFadeSlopeScale = 1` in
+  `nel/src/3d/vegetable_manager.cpp`). Semantics:
+  `alpha = blendDistMax/10 − dist·scale/10`, i.e. alpha hits 0 at
+  `blendDistMax/scale`. **scale 1 = stock**; **scale 0 = no fade at all**
+  (constant alpha ≥ 1, every plant full, pops maximal); **scale 0.1 = 10×
+  longer fade** (plants fade in over 100–500 m, an obvious gradient).
+  Verdict rule: if the rendering does NOT change between 0 and 0.1, the VP
+  alpha path is dead in the GL3 driver and the band rings render at full
+  alpha (constant-distance pops explained); if it changes smoothly, the fade
+  is live and the pops are timing (budget/structural).
+- `dyn_wireframe` — toggles whole-scene wireframe (`IDriver::setPolygonMode`)
+  to see which terrain LOD meshes exist where (lod boundary = triangle size
+  change) and compare with the plant rings. Vegetation blocks are created
+  for lod 0 AND lod 1 meshes by the sync (`lod <= 1`); whether a lod1 sector
+  actually hosts plants depends on its placement set.
+  **REMOVED after the A/B**: driver-level polygon-mode switching corrupts the
+  GL3 render state after one frame (terrain back to filled, big flora rendered
+  without fog). Do not re-add. LOD coverage will be answered by a per-block
+  dump in `dyn_vegetdump` instead. The command, `toggleWireframe()` and the
+  `CDynLandscape::getDriver()` getter were all removed.
+
+Static review of the GL3 alpha path (no bug found): nelvp→GLSL converter
+maps `o[COL0]` → `diffuseColor` varying (alpha included); the synthesized
+fragment program does `fragColor = diffuseColor` then standard texenv
+modulation (alpha multiplies), alpha test via `discard`, material blend
+state translated (`convBlend` + `IDRV_TOUCHED_BLENDFUNC`). So the fade
+should be live — the A/B run decides.
+
+**A/B outcome (user):** `dyn_vegfade 0` displays opaque vegetation,
+`dyn_vegfade 1` shows some alpha → the VP alpha path IS live. The pops are
+therefore *timing* (creates happening mid-band at partial/full alpha), not a
+dead alpha path. `dyn_wireframe` confirmed broken (GL3 state corruption) and
+was removed.
+
+**Fade-timing probe pass (probes re-added, source + rebuilt exe):** to find
+the remaining mid-band creates, TEMP-PROBE instrumentation in
+`dyn_landscape.cpp`:
+
+- `probe band cell=... A->B dist=... alphaCreate=... fresh=...` — per band
+  transition: |viewCenter − SurfaceCenter| and the alpha the created band
+  carries at the transition moment (approach: `((newDistType+1)·10 − dist)/10`,
+  the innermost created band; recede: `((CurDistType+1)·10 − dist)/10`).
+  `fresh=1` = the entry had no IG yet (block-creation burst) vs a ring
+  crossing. On-time ring-edge creates must show alphaCreate ≈ 0; alpha > 0.2
+  at create = the visible pop.
+- `probe budget starve ... needed=... budget=...` — entries deferred by the
+  IG budget (they create late, mid-band).
+- `probe block create/erase center=... lod=...` — structural churn timing.
+- `probe cam pos=...` every 30 frames — correlates pop reports with position.
+
+`dyn_vegetdump` extended with a per-block inventory line
+(`block lod=... sector=(...) center=... entries=... igs=...`) to settle
+whether LOD1 meshes carry vegetation blocks.
+
+Repro protocol: walk forward through loaded terrain until pops occur, note
+the moments; then the log analysis checks, around the pop seconds, whether
+creates happen with alpha > 0.2 and whether they are fresh-entry or
+ring-crossing creates. Probe strip + test run + commit after validation.
+
+### 6.8 Reference-point mismatch: band walk vs VP alpha (2026-11-13, root cause found)
+
+**User observation (decisive):** "on first person view, there is no pop";
+"the closer the camera is to the player, the less pop I see and blend works
+fine". Third person pops at constant distances (~15 m, ~40 m), disappearing
+consistently when moving backward.
+
+**Log analysis (18:39 session, 36 s of walking, 5236 band transitions):**
+
+- 4917 logged creates: only 502 (~10%) at alpha ≈ 0 (on-time); 2139 at alpha
+  0.5–1.0 and 1425 at 0.2–0.5 → **72% of creates mid-band at visible alpha**.
+- 4716 of them `fresh=1` (whole-block burst: the block did not exist yet);
+  their dist distribution: 3459 at 30–50 m, 839 at 20–30 m, 287 at 10–20 m,
+  93 at <10 m from the view center.
+- 3306 budget starves, but ALL with `needed=0` → not real starvation; the
+  create path is not budget-limited in this session (near-first ordering
+  working). Fresh bursts at 20–50 m are the dominant artifact.
+
+**Root cause — the band walk and the VP alpha use different reference
+points.** The vegetable VP alpha is computed against `_ViewCenter`
+(`CVegetableManager::render(viewCenter...)` ← `CLandscape::render(refineCenter,...)`
+← `CDynLandscapeModel::clipAndRenderLandscape`: `refineCenter =
+_RefineCenterUser` ← `main_loop.cpp: "Landscape->setRefineCenterUser(View.refinePos())"`
+= **the player position in 3rd person** (`user_controls.cpp: View.refinePos(UserEntity->pos())`,
+fly mode: view pos)). Stock runs the band walk on the SAME point
+(`CLandscape::refine(refineCenter)` → `vegetBlock->update(refineCenter,...)`,
+landscape.cpp:739). Our P2 port passed `MainCam.getPos()` — the **camera** —
+to `updateVegetableBlocks`.
+
+Consequence in 3rd person (camera trails the player by D):
+
+1. Ring-edge creates fire when the *camera* crosses the ring; the player is
+   still D inside the band → alpha (player-based) = D/10 > 0 → pop-in while
+   moving forward (15 m ≈ band-1 ring 20 − D; 40 m ≈ band-4 ring 50 − D).
+2. Ring-edge deletes fire when the *camera* exits the band; the player is
+   still D inside → plants deleted at alpha = D/10 (visible) → abrupt
+   disappearance when moving backward.
+3. 1st person: D ≈ 0 → creates/deletes at alpha ≈ 0 → no artifact.
+4. Pop alpha = D/10 → bigger camera offset = bigger pops.
+
+**Secondary artifact — fresh blocks materializing at 20–50 m:** dynworld
+terrain sectors stream in around the player (unlike stock patches, loaded at
+800 m vision), so a new block's whole band set is created at once at the
+current distance; every band whose outer ring is beyond that distance is
+instantly visible (stock alpha ≥ 0) → pop even with a consistent reference.
+
+**Fixes (landed, built):**
+
+1. `updateVegetableBlocks(pos)` at the call site — pass the same `pos`
+   (`View.refinePos()`) that sector streaming and the render refine center
+   use, restoring the stock single-reference invariant.
+2. Late-create fade in `createIgForDistType`: when the IG would be visible
+   at creation (dist < blendDistMax), shift its blend window to start at the
+   current distance (`blendDist = max(dist, ELTDIST)`): alpha = 0 at
+   creation, ramps to full over the next 10 m of approach. Kills the
+   fresh-burst pops at 20–50 m; stock behavior unchanged for on-time
+   creates (dist ≈ ring edge → shift is a no-op).
+   **DISABLED after in-engine test (same day)**: user confirmed fix 1 alone
+   is enough ("OK it works" — no pops while walking), and the shift has a
+   visible downside on near-voxel edits: a block recreated under the view
+   center gets `blendDist = dist` → its plants start at alpha (dist)/10, so
+   vegetation visibly fades/dims when touching a nearby voxel. Stock blend
+   formula restored (comment tombstone in `createIgForDistType`); the fresh
+   blocks materializing at 20–50 m keep their stock full-alpha appearance,
+   accepted for now. A true temporal fade remains a P4 ring-policy option.
+3. Probes extended with `late=N` (number of created bands that got the
+   shifted window) to validate fix 2 from the log. (Removed again when fix 2
+   was disabled.)
+
+Awaiting in-engine validation; probes still in the exe.
+
+### 6.9 Voxel-edit vegetation blink (2026-11-13)
+
+User report (after §6.8 fix validated: "OK it works"): touching a nearby
+voxel sometimes shows a blink of vegetation. Question asked: async update?
+Can we keep the old vegetation until the new one is ready?
+
+**Flow analysis (voxel edit, same-lod mesh update):** `updateMesh`
+(dyn_landscape_user.cpp:665) registers a `CSectorTransition` and posts an
+async `CGenerateMeshCommand`; the OLD mesh stays in `m_regionsList` until
+the transition completes, so the old vegetation block stays alive during
+extraction — asyncness is NOT the gap. When the extraction completes,
+`updateTransitionMeshes` (line 1142-1148) inserts the new mesh into
+`m_regionsList` only once `m_nextFactor >= 1` (same-lod update path). The
+next vegetable sync then sees the pointer change and does erase-old +
+create-new in ONE commit window — but the new block's initial IG fill goes
+through the shared per-frame budget (`g_maxVegetCommit`): a full 16 m lod0
+sector needs up to 64 buckets × 4 bands = 256 IGs, so the all-or-nothing
+per-entry fill can spill over 1–3 frames → the renderer shows bare terrain
+where plants just were → the blink. Matches "sometimes" (depends on the
+other blocks competing for the same frame's budget).
+
+**Fix (landed, build pending client close):** dedicated budget pool for
+near blocks. Blocks with center within the vegetation render range
+(`NL3D_VEGETABLE_DEFAULT_DIST_MAX` = 60 m) draw from `nearBudget =
+2 × g_maxVegetCommit` instead of the shared budget, so a freshly
+(re)created near block fills completely in its creation frame; erase +
+create + fill become one atomic pre-render operation — the rendered frame
+never shows the gap. Far blocks keep the shared budget (their creates land
+at alpha ≈ 0; timing irrelevant).
+
+Fallback if blinks persist (fills larger than the pool): retire-and-swap —
+keep the replaced block alive in a retiring list (receding-only band
+updates) until the replacement block is settled (no pending band creates),
+then release it in one window. Deferred until needed.
+
+### 6.10 §6.5–§6.9 validation complete, probes stripped (2026-11-13)
+
+User confirmed in-engine: close-pop fixed ("no more poping"), fading
+fixed ("OK it works" after §6.8 fix 1; late-create fade disabled same
+session), voxel-edit blink fixed ("no more blink, that's perfect"). All
+TEMP-PROBE instrumentation (band/budget/block/cam, §6.4 class) stripped
+from `dyn_landscape.cpp` per convention; the permanent debug commands
+(`dyn_vegetdump`, `dyn_vegettest`, `dyn_renderveget`, `dyn_vegetbudget`,
+`dyn_vegetstats`, `dyn_vegfade`) stay. Remaining before commit: rebuild
+(client exe must be closed), full dynworld unit test set green, then commit
+the whole feature branch.
+
+### 6.11 P5 completion (2026-11-13)
+
+- **`_VegetableManager` origin resolved**: created once in the `CLandscape`
+  ctor (`nel/src/3d/landscape.cpp:230`) with the stock VB quotas; `CDynLandscape`
+  only inherits it and its dtor destroys it (blocks released in the
+  `CDynLandscape` dtor first, `dyn_landscape.cpp:268`). No dangling risk from
+  enable/disable toggling.
+- **New debug commands** (`dyn_landscape_user.cpp`): `dyn_veget [0|1]` —
+  toggle; disable goes through the new `CDynLandscape::setVegetableActive`
+  which releases all vegetable blocks (`clearVegetableBlocks`) before the
+  stock `enableVegetable(false)`, so the vegetable VB space is freed; the next
+  structural sync recreates them on re-enable. `dyn_vegetdensity <pct>` —
+  forwards to `setVegetableDensity(pct/100)`, no-arg prints the current value.
+  `ULandscape` has no active-state getter, so `CDynLandscapeUser::
+  isVegetableActive()` was added (forwards to the model), following the
+  `dumpVegetableData`/`logVegetStats` wrapper pattern.
+- **Live-toggle verified**: `ClientCfg.MicroVeget`/`MicroVegetDensity`
+  (`main_loop_utilities.cpp:167-196` → `enableVegetable`/`setVegetableDensity`)
+  works unchanged for the dyn landscape — both forward through
+  `CDynLandscapeUser`.
+- **Budget sign-off** (no density change needed):
+  - VB quotas: the manager is the stock one — `Unlit 50000` / `Lighted 5000`
+    AGP vertices (`landscape_def.h:57-58`); `CVegetableVBAllocator::
+    exceedMaxVertexInBufferHard` drops allocations beyond the quota (the
+    stock degradation mode, not a crash).
+  - Measured steady state (§4 P2/M1 record, `dyn_renderveget` at default
+    density): 14 visible clip blocks ≈ 3780 rendered faces ≈ ~8k AGP
+    vertices — under 16% of the Unlit quota, so the vegetation window
+    (60 m) has ~6x headroom; density increases stay viable.
+  - Main-thread commit cost: capped at `g_maxVegetCommit = 256` IG
+    creates/frame shared budget + `nearBudget = 2×256` pool for near blocks
+    (§6.9); worst case a full 16 m sector fill = 256 IGs fits one near-pool
+    frame. Plant generation is amortized in the worker (async mesh
+    extraction); band-walk cost is a per-frame sort of the block map
+    (reused buffer, ~O(n log n), n ≈ tens).
+- **Test set**: 13 dynworld suites green after the strip + P5 additions
+  (direct-exe Release run, 2026-11-13).

@@ -72,8 +72,15 @@ const uint8 VegetNoSoil = 0xFF;
 /// must not need the mesh/origin/scale context.
 struct CVegetBucket
 {
-	/// Quantized cell center in world XY (z = 0). Commit-time noise seed.
+	/// Quantized cell center in world XY (z = 0). Commit-time noise seed for
+	/// CVegetable::generateGroup ONLY — never a distance reference: the band
+	/// walk must use SurfaceCenter (issue #7 close-pop: a z=0 center inflates
+	/// classification distances by the terrain elevation, which fires every
+	/// band create/delete mid-band at full alpha, i.e. visible pops).
 	NLMISC::CVector Center;
+	/// Area-weighted centroid of the member triangle corners (real surface
+	/// position). Used by the client band walk and as the sort-block center.
+	NLMISC::CVector SurfaceCenter;
 	/// Area-weighted average of the member triangle face normals (normalized).
 	NLMISC::CVector Normal;
 	/// Sum of the member triangle areas, in m^2. Equals sum(TriAreas).

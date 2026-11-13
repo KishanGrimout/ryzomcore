@@ -218,6 +218,11 @@ public:
 	/// Micro-Vegetation.
 	// @{
 	virtual	void		enableVegetable(bool enable);
+	/** Debug command support (issue #7 "dyn_veget"): disable also releases
+	 * the vegetable blocks, not just the stock enable flag. */
+	virtual void		setVegetableActive(bool enable);
+	/// Debug command support (issue #7): ULandscape has no active-state getter.
+	virtual bool		isVegetableActive() const;
 	virtual	void		loadVegetableTexture(const std::string &textureFileName);
 	virtual	void		setupVegetableLighting(const NLMISC::CRGBA &ambient, const NLMISC::CRGBA &diffuse, const NLMISC::CVector &directionalLight);
 	virtual	void		setVegetableWind(const NLMISC::CVector &windDir, float windFreq, float windPower, float windBendMin);

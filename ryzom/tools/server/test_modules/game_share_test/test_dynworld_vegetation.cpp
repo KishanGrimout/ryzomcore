@@ -168,6 +168,25 @@ TEST(DynworldVegetationPlacementTest, SoilSurfaceBuildsPlacementSet)
 		EXPECT_FLOAT_EQ(bucket.Center.x, (floorf(bucket.Center.x / VegetBucketCellSize) + 0.5f) * VegetBucketCellSize);
 		EXPECT_FLOAT_EQ(bucket.Center.y, (floorf(bucket.Center.y / VegetBucketCellSize) + 0.5f) * VegetBucketCellSize);
 		EXPECT_FLOAT_EQ(bucket.Center.z, 0.f);
+		// surface center = area-weighted centroid of the member corners
+		// (real surface position; the band-walk distance reference)
+		{
+			CVector centroidAccum(0.f, 0.f, 0.f);
+			float areaSum = 0.f;
+			for (uint tri = 0; tri < bucket.TriAreas.size(); ++tri)
+			{
+				const CVector& p0 = bucket.TriCorners[tri * 3];
+				const CVector& p1 = bucket.TriCorners[tri * 3 + 1];
+				const CVector& p2 = bucket.TriCorners[tri * 3 + 2];
+				const float a = bucket.TriAreas[tri];
+				centroidAccum += (p0 + p1 + p2) * (a / 3.f);
+				areaSum += a;
+			}
+			EXPECT_FLOAT_EQ(areaSum, bucket.Area);
+			EXPECT_NEAR(bucket.SurfaceCenter.x, centroidAccum.x / areaSum, 1e-4f);
+			EXPECT_NEAR(bucket.SurfaceCenter.y, centroidAccum.y / areaSum, 1e-4f);
+			EXPECT_NEAR(bucket.SurfaceCenter.z, centroidAccum.z / areaSum, 1e-4f);
+		}
 		// flat ground: area-weighted normal points straight up
 		EXPECT_NEAR(bucket.Normal.x, 0.f, 1e-4f);
 		EXPECT_NEAR(bucket.Normal.y, 0.f, 1e-4f);
@@ -188,6 +207,31 @@ TEST(DynworldVegetationPlacementTest, SoilSurfaceBuildsPlacementSet)
 
 	EXPECT_NEAR(sumTriAreas, 16.f, 1e-4f);
 	EXPECT_NEAR(totalArea(set), 16.f, 1e-4f);
+}
+
+// Regression (issue #7 close-pop): the bucket SurfaceCenter must carry the
+// real surface elevation — the z=0 quantized Center is a noise seed only, and
+// using it as the band-walk distance reference inflated classification
+// distances by the terrain elevation (24.5 m in-game), firing band swaps
+// mid-band at full alpha near the player (visible pops).
+TEST(DynworldVegetationPlacementTest, SurfaceCenterCarriesElevation)
+{
+	const float zElev = 24.5f;
+	TDecodedMesh mesh;
+	addSoilSurface(mesh, 4, makeRawVoxel(0, SoilMaterial), zElev); // flat 4x4 m at z=24.5
+	uint8 soilIds[VegetMaxBiomeCount];
+	makeSoilTable(soilIds);
+
+	CDynVegetPlacementSet set;
+	computeVegetPlacements(mesh, soilIds, CVector::Null, 1.f, set);
+
+	ASSERT_EQ(set.Groups.size(), 1u);
+	ASSERT_EQ(set.Groups[0].Buckets.size(), 4u);
+	for (const CVegetBucket& bucket : set.Groups[0].Buckets)
+	{
+		EXPECT_FLOAT_EQ(bucket.Center.z, 0.f);       // noise seed stays quantized/z=0
+		EXPECT_FLOAT_EQ(bucket.SurfaceCenter.z, zElev); // banding reference is the real surface
+	}
 }
 
 TEST(DynworldVegetationPlacementTest, NonSoilMaterialExcluded)

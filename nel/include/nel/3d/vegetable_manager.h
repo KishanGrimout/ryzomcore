@@ -51,6 +51,14 @@ class	CVegetableLightEx;
 // default distance is 60 meters.
 #define	NL3D_VEGETABLE_DEFAULT_DIST_MAX			60.f
 
+/// Debug knob (dynworld issue #7 fade investigation): multiplier applied to the
+/// per-frame NegInvTransDist uniform slope. 1 = stock fade ((blendDistMax-
+/// dist)/10). 0 = no slope: alpha is constant = blendDistMax/10 >= 1, i.e. all
+/// ZSort vegetables render at full alpha (no distance fade at all). Values < 1
+/// stretch the fade window (alpha reaches 0 at blendDistMax/scale). Tune with
+/// the "dyn_vegfade" client command.
+extern	float	NL3D_VegetFadeSlopeScale;
+
 class CVertexProgramVeget;
 
 // ***************************************************************************

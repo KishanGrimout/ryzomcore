@@ -51,6 +51,7 @@ System/reference docs (CamelCase):
 | `docs/TestEnvironmentNotes.md` | test runner & validation environment: `0xC0000135` ctest DLL quirk, direct-exe convention, Release-validation config, debugging process rules |
 | `docs/UnitTesting.md` | how to add and run unit tests: the two test homes (NeL `ut_*`, ryzom `test_modules`), `add_test_executable` checklist, build/run commands, pitfalls |
 | `docs/LegacyAssetInventory.md` | survey of the legacy tree `D:\Programmation\ryzomcore_old` (client run dir, data repos, Mercurial access recipe, external ANL/PolyVox checkouts) |
+| `docs/DynMicroVegetation.md` | client-side microvegetation on soft soil (stock NeL vegetable system reuse, placement engine, block/band lifecycle, commit budgets, debug command catalog) |
 
 Plan/handoff docs:
 

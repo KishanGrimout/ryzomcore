@@ -154,6 +154,7 @@ void computeVegetPlacements(const TDecodedMesh& mesh, const uint8 (&soilIds)[Veg
 		{
 			bucket.Center.set((cellKey.X + 0.5f) * VegetBucketCellSize,
 				(cellKey.Y + 0.5f) * VegetBucketCellSize, 0.f);
+			bucket.SurfaceCenter.set(0.f, 0.f, 0.f);
 		}
 		bucket.TriAreas.push_back(area);
 		bucket.TriCorners.push_back(p0);
@@ -161,6 +162,9 @@ void computeVegetPlacements(const TDecodedMesh& mesh, const uint8 (&soilIds)[Veg
 		bucket.TriCorners.push_back(p2);
 		bucket.Area += area;
 		bucket.Normal += normal * area;
+		// area-weighted centroid accumulation: sum(area * facetCentroid)
+		// = sum over corners of (area/3 * corner); finalized below.
+		bucket.SurfaceCenter += (p0 + p1 + p2) * (area / 3.f);
 	}
 
 	// flatten, normalizing bucket normals
@@ -178,6 +182,8 @@ void computeVegetPlacements(const TDecodedMesh& mesh, const uint8 (&soilIds)[Veg
 				bucket.Normal.normalize();
 			else
 				bucket.Normal.set(0.f, 0.f, 1.f); // degenerate: all normals cancelled out
+			if (bucket.Area > 0.f)
+				bucket.SurfaceCenter /= bucket.Area;
 			surfaceGroup.Buckets.push_back(bucket);
 		}
 		out.Groups.push_back(surfaceGroup);

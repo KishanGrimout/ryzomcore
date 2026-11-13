@@ -383,8 +383,10 @@ void CDynVegetableBlock::init(CRegionMesh& mesh, CVegetableManager& vegetManager
 			TBucketEntry entry;
 			entry.Bucket = &bucket;
 			entry.TileVegetDesc = &tileVegetDesc;
-			// NB: same scale as the stock 2x2 m tile radius.
-			entry.SortBlock = vegetManager.createSortBlock(_ClipBlock, bucket.Center, NL3D_PATCH_TILE_RADIUS);
+			// NB: same scale as the stock 2x2 m tile radius. Centered on the
+			// real surface (the z=0 Center would offset it by the terrain
+			// elevation: wrong pyramid clip + wrong ZSort layer assignment).
+			entry.SortBlock = vegetManager.createSortBlock(_ClipBlock, bucket.SurfaceCenter, NL3D_PATCH_TILE_RADIUS);
 			_Entries.push_back(entry);
 		}
 	}
@@ -469,6 +471,14 @@ void CDynVegetableBlock::createIgForDistType(TBucketEntry& entry, uint distType,
 	// diffuse shade from the landing facet slope; water state AboveWater.
 	const CRGBAF ambientF(1.f, 1.f, 1.f, 1.f);
 	const float blendDistMax = (distType + 1) * NL3D_VEGETABLE_BLOCK_ELTDIST;
+	// NB: the "late-create fade" experiment (shift the blend window to start
+	// at the current distance when the IG would be visible at creation) was
+	// tried and DISABLED: it is only needed for fresh blocks materializing at
+	// 20-50 m, which do not visibly pop when walking once the band walk uses
+	// the same reference as the alpha (§6.8 fix 1), and it makes vegetation
+	// fade out when a voxel is edited near the view center (block recreated
+	// under the camera -> blendDist = dist -> alpha drops). Stock formula
+	// kept. See plan doc §6.8.
 	for (uint v = 0; v < vegetableList.size(); ++v)
 	{
 		const CVegetable& veget = vegetableList[v];
@@ -517,9 +527,12 @@ void CDynVegetableBlock::update(const CVector& viewCenter, CVegetableManager& ve
 		if (entry.SortBlock == nullptr)
 			continue;
 
-		// compute new distance type from the bucket center (stock incremental
-		// band walk over the squared-distance LUT)
-		const float sqrDist = (viewCenter - entry.Bucket->Center).sqrnorm();
+		// compute new distance type from the bucket SURFACE center (stock
+		// incremental band walk over the squared-distance LUT). NB: must be
+		// the real surface position — the quantized Center is z=0 (noise seed
+		// only) and would inflate distances by the terrain elevation, firing
+		// band swaps mid-band at full alpha (the close-pop bug).
+		const float sqrDist = (viewCenter - entry.Bucket->SurfaceCenter).sqrnorm();
 		uint newDistType = entry.CurDistType;
 		while (newDistType > 0 && sqrDist < DynVBSqrDistLUT.Array[newDistType])
 			--newDistType;
@@ -602,15 +615,30 @@ void CDynLandscape::createVegetableBlock(uint lod, TGenericSectorId sectorId, CR
 }
 
 // ****************************************************************************
+void CDynLandscape::setVegetableActive(bool enable)
+{
+	if (!enable && isVegetableActive())
+		clearVegetableBlocks();
+	enableVegetable(enable);
+}
+
+// ****************************************************************************
 void CDynLandscape::updateVegetableBlocks(const CVector& viewCenter)
 {
 	if (_VegetableManager == nullptr || !isVegetableActive())
 		return;
 
 	// Structural sync (cheap pass, no NL3D calls): blocks exist for (lod 0/1)
-	// sectors whose mesh is fully visible (displayFactor >= 1) and carries a
-	// non-empty placement set. Recreate on mesh pointer change (re-extraction
-	// = new placement data), release when the sector left the list.
+	// sectors whose mesh is in the list and carries a non-empty placement set.
+	// NB: deliberately NOT gated on m_displayFactor — the sector transition
+	// fades the next mesh in first and the previous one out afterwards, so a
+	// factor gate makes vegetation pop in only after the terrain is visible
+	// and vanish at fade-out start (issue #7 "fading missing"). Creating at
+	// mesh insertion (factor 0, hidden under the still-visible previous mesh)
+	// and erasing only at mesh removal (the replacement block is populated by
+	// then) keeps vegetation continuous across LOD transitions. Recreate on
+	// mesh pointer change (re-extraction = new placement data), release when
+	// the sector left the list.
 	std::vector<std::pair<uint, TGenericSectorId>> toErase;
 	std::vector<std::pair<uint, TGenericSectorId>> toCreate;
 	for (uint lod = 0; lod < LOD_COUNT && lod <= 1; ++lod)
@@ -618,7 +646,7 @@ void CDynLandscape::updateVegetableBlocks(const CVector& viewCenter)
 		for (auto& kv : m_regionsList[lod])
 		{
 			CRegionMesh* mesh = static_cast<CRegionMesh*>(kv.second.getPtr());
-			if (mesh == nullptr || mesh->m_displayFactor < 1.f || mesh->m_vegetPlacements.empty())
+			if (mesh == nullptr || mesh->m_vegetPlacements.empty())
 				continue;
 			auto blockIt = m_vegetableBlocks.find(std::make_pair(lod, kv.first));
 			if (blockIt == m_vegetableBlocks.end())
@@ -639,7 +667,7 @@ void CDynLandscape::updateVegetableBlocks(const CVector& viewCenter)
 			continue;
 		}
 		CRegionMesh* mesh = static_cast<CRegionMesh*>(meshIt->second.getPtr());
-		if (mesh == nullptr || mesh->m_displayFactor < 1.f || mesh->m_vegetPlacements.empty())
+		if (mesh == nullptr || mesh->m_vegetPlacements.empty())
 			toErase.push_back(kv.first);
 	}
 	// dedup (a replaced key appears in both passes)
@@ -675,10 +703,39 @@ void CDynLandscape::updateVegetableBlocks(const CVector& viewCenter)
 		createVegetableBlock(key.first, key.second, *mesh);
 	}
 
-	// ring-band updates for all live blocks, under the per-frame IG budget
+	// Ring-band updates for all live blocks, under the per-frame IG budget.
+	// Near-first ordering: the budget must never feed far blocks (e.g. refills
+	// after structural churn) before the near field, whose band creates are
+	// the visible ones — a starved near entry creates its IG mid-band, at
+	// partial/full alpha, i.e. a pop (issue #7 "fading missing").
 	sint budget = (sint)g_maxVegetCommit;
-	for (auto& kv : m_vegetableBlocks)
-		kv.second->update(viewCenter, *_VegetableManager, budget);
+	// Near blocks get a dedicated budget pool so a freshly (re)created near
+	// block fills completely in its creation frame: the old block is erased
+	// in the same commit window, so a budget-deferred fill renders 1-3 frames
+	// of bare terrain over unchanged ground — the "veget blink" on near voxel
+	// edits (issue #7 §6.9). Far blocks don't need the guarantee (their
+	// creates land at alpha ~0 anyway). Pool = 2x the shared budget covers a
+	// full sector refill (a 16 m lod0 sector needs up to 64 buckets x 4 bands
+	// = 256 IGs) plus margin.
+	sint nearBudget = 2 * (sint)g_maxVegetCommit;
+	static const float VegetNearFillDist2 = NL3D_VEGETABLE_DEFAULT_DIST_MAX * NL3D_VEGETABLE_DEFAULT_DIST_MAX;
+	{
+		static std::vector<std::pair<float, CDynVegetableBlock*>> orderedBlocks; // reused buffer, main thread only
+		orderedBlocks.clear();
+		orderedBlocks.reserve(m_vegetableBlocks.size());
+		for (auto& kv : m_vegetableBlocks)
+			orderedBlocks.emplace_back((kv.second->getCenter() - viewCenter).sqrnorm(), kv.second);
+		std::sort(orderedBlocks.begin(), orderedBlocks.end(),
+			[](const std::pair<float, CDynVegetableBlock*>& a, const std::pair<float, CDynVegetableBlock*>& b)
+			{ return a.first < b.first; });
+		for (auto& orderedBlock : orderedBlocks)
+		{
+			if (orderedBlock.first <= VegetNearFillDist2)
+				orderedBlock.second->update(viewCenter, *_VegetableManager, nearBudget);
+			else
+				orderedBlock.second->update(viewCenter, *_VegetableManager, budget);
+		}
+	}
 
 	_VegetableManager->unlockBuffers();
 	OptFastFloorEnd();
@@ -769,6 +826,19 @@ void CDynLandscape::dumpVegetableData() const
 				matDef->getName(), envId, (uint)tileId, ownerTileSetName.c_str(),
 				(ownerTileSetDesc != nullptr && !ownerTileSetDesc->empty()) ? "OK" : "EMPTY/MISSING");
 		}
+	}
+
+	// Live block inventory (issue #7): answers "does lod 1 carry vegetation
+	// blocks?" and gives the (lod, sector) <-> block <-> IG coverage map.
+	nlinfo("DYNVEGET: %u live vegetable blocks", (uint)m_vegetableBlocks.size());
+	for (auto& kv : m_vegetableBlocks)
+	{
+		const CVector& c = kv.second->getCenter();
+		NLMISC::CVectorI sectorPosI;
+		CSectorLod::idToPos(kv.first.first, kv.first.second, sectorPosI);
+		nlinfo("DYNVEGET: block lod=%u sector=(%d,%d) center=(%.2f,%.2f,%.2f) entries=%u igs=%u",
+			kv.first.first, sectorPosI.x, sectorPosI.y,
+			c.x, c.y, c.z, kv.second->getEntryCount(), kv.second->getIgCount());
 	}
 
 	nlinfo("DYNVEGET: dump end");

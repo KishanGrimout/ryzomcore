@@ -134,9 +134,10 @@ public:
 	void clearGeneratedMeshes();
 
 	/// P2 (issue #7 plan): per-frame vegetable block sync against
-	/// m_regionsList (blocks keyed by (lod, sectorId), created on fully
-	/// visible meshes, released on removal, recreated when the mesh pointer
-	/// changed), then stock ring-band updates under the per-frame
+	/// m_regionsList (blocks keyed by (lod, sectorId), created on mesh
+	/// insertion regardless of displayFactor — see §6.7 —, released on
+	/// removal, recreated when the mesh pointer changed), then stock
+	/// ring-band updates nearest-block-first under the per-frame
 	/// g_maxVegetCommit IG budget. Main thread only; opens the vegetable
 	/// manager lock window itself when there is any work to do.
 	void updateVegetableBlocks(const NLMISC::CVector& viewCenter);
@@ -157,6 +158,12 @@ public:
 	/// (toggle, active flag, face counter of the last manager render).
 	/// Run via the "dyn_vegetstats" command.
 	void logVegetStats() const;
+
+	/// P5 debug command support (issue #7 "dyn_veget"): enable/disable
+	/// microvegetation. Disabling also releases the vegetable blocks
+	/// (frees the vegetable VB space); re-enabling recreates them through
+	/// the structural sync in updateVegetableBlocks.
+	void setVegetableActive(bool enable);
 
 	TRegionModelContainer m_regionsList[LOD_COUNT];
 	TTransitionContainer m_transitionsList;

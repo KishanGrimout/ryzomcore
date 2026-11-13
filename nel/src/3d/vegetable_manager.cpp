@@ -50,6 +50,9 @@ namespace NL3D
 #define	NL3D_VEGETABLE_SORT_BLOCK_BLOCKSIZE			64
 #define	NL3D_VEGETABLE_INSTANCE_GROUP_BLOCKSIZE		128
 
+// Debug knob (dynworld issue #7 fade investigation), see vegetable_manager.h.
+float	NL3D_VegetFadeSlopeScale = 1.f;
+
 
 // ***************************************************************************
 CVegetableManager::CVegetableManager(uint maxVertexVbHardUnlit, uint maxVertexVbHardLighted,
@@ -1911,7 +1914,7 @@ void			CVegetableManager::setupVertexProgramConstants(IDriver *driver, bool fogE
 	// c[10] take pos of camera
 	driver->setUniform3f(IDriver::VertexProgram, _ActiveVertexProgram->idx().ViewCenter, _ViewCenter);
 	// c[11] take factor for Blend formula
-	driver->setUniform1f(IDriver::VertexProgram, _ActiveVertexProgram->idx().NegInvTransDist, -1.f/NL3D_VEGETABLE_BLOCK_BLEND_TRANSITION_DIST);
+	driver->setUniform1f(IDriver::VertexProgram, _ActiveVertexProgram->idx().NegInvTransDist, -1.f*NL3D_VegetFadeSlopeScale/NL3D_VEGETABLE_BLOCK_BLEND_TRANSITION_DIST);
 
 
 

@@ -36,6 +36,7 @@
 #include "nel/misc/progress_callback.h"
 
 #include "nel/3d/scene_user.h"
+#include "nel/3d/vegetable_manager.h"
 
 using namespace NLMISC;
 using namespace NL3D;
@@ -601,6 +602,73 @@ NLMISC_COMMAND(dyn_vegetstats, "Log microvegetation render state + last-frame fa
 	return true;
 }
 
+// Fade-slope A/B knob (issue #7 fade investigation, §6.7): scales the slope of
+// the vegetable VP alpha formula. alpha = (blendDistMax - dist)/10 in stock
+// (scale 1). With scale 0 the alpha is constant (>= 1): NO distance fade at
+// all — every ZSort plant renders full alpha, pops should be maximized. With
+// scale 0.1 the fade window is stretched 10x (alpha reaches 0 at
+// blendDistMax*10): fades should become an obvious long gradient. If the
+// rendering does not change at all between these settings, the VP alpha path
+// is dead (driver-side) rather than the band logic.
+NLMISC_COMMAND(dyn_vegfade, "Set the vegetable alpha-fade slope scale (1=stock, 0=no fade, 0.1=10x longer fade)", "[scale=1]")
+{
+	float scale = 1.f;
+	if (!args.empty())
+		fromString(args[0], scale);
+	NL3D::NL3D_VegetFadeSlopeScale = scale;
+	nlinfo("DYNVEGET: NL3D_VegetFadeSlopeScale = %g (1=stock fade, 0=no fade)", scale);
+	return true;
+}
+
+// Vegetation on/off toggle (P5 debug command, issue #7). ULandscape has no
+// isVegetableActive() getter, so query the concrete model like the other
+// dyn_veget* commands. Disabling releases all vegetable blocks (frees the
+// vegetable VB space); re-enabling recreates them through the next structural
+// sync in updateVegetableBlocks.
+NLMISC_COMMAND(dyn_veget, "Toggle dynworld microvegetation on/off", "[0|1]")
+{
+	extern ULandscape *Landscape;
+	CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
+	if (dynLandscape == nullptr)
+	{
+		nlinfo("DYNVEGET: no dyn landscape (not in a dyn world session)");
+		return true;
+	}
+	bool enable = !dynLandscape->isVegetableActive();
+	if (!args.empty())
+		fromString(args[0], enable);
+	dynLandscape->setVegetableActive(enable);
+	nlinfo("DYNVEGET: microvegetation %s", enable ? "enabled" : "disabled");
+	return true;
+}
+
+// Vegetable density knob (P5 debug command, issue #7): percentage of the
+// tile-bank density, same semantic as ClientCfg.MicroVegetDensity.
+NLMISC_COMMAND(dyn_vegetdensity, "Set microvegetation density (percentage, default from ClientCfg)", "<pct>")
+{
+	extern ULandscape *Landscape;
+	CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
+	if (dynLandscape == nullptr)
+	{
+		nlinfo("DYNVEGET: no dyn landscape (not in a dyn world session)");
+		return true;
+	}
+	float pct = 0.f;
+	if (args.empty() || !fromString(args[0], pct))
+	{
+		nlinfo("DYNVEGET: usage: dyn_vegetdensity <pct> (current: %.0f%%)", dynLandscape->getVegetableDensity() * 100.f);
+		return true;
+	}
+	dynLandscape->setVegetableDensity(pct / 100.f);
+	nlinfo("DYNVEGET: vegetable density = %.0f%%", pct);
+	return true;
+}
+
+// Wireframe toggle (issue #7 fade investigation): REMOVED — driver-level
+// polygon-mode switching corrupts GL3 render state after the first frame
+// (terrain back to filled, big flora rendered without fog). Use the
+// "dyn_vegetdump" block list for LOD coverage questions instead.
+
 // ****************************************************************************
 void CDynLandscapeUser::removeMeshes(const TSectorsList& sectorsToRemove, uint lod)
 {
@@ -824,8 +892,14 @@ void CDynLandscapeUser::refreshLodSectors(const CVector& pos, float radius, uint
 
 	// P2 (issue #7): sync the vegetable blocks against m_regionsList and run
 	// the ring-band commits (create/release IGs) under the per-frame budget,
-	// inside the vegetable-manager lock window.
-	landscape.updateVegetableBlocks(CVector(MainCam.getPos()));
+	// inside the vegetable-manager lock window. NB: the viewCenter MUST be the
+	// same point the vegetable VP alpha uses, i.e. the landscape refine center
+	// (View.refinePos(), = the player in 3rd person), NOT the camera: stock
+	// CLandscape::refine()/render() use refineCenter for both the band walk
+	// and the alpha, and a camera-vs-player offset makes every ring-edge
+	// create land at alpha = camOffset/10 (pop-in while moving forward,
+	// disappear-while-visible when moving backward) — issue #7 §6.8.
+	landscape.updateVegetableBlocks(pos);
 
 	// .
 	updateTransitionMeshes();
@@ -1484,10 +1558,25 @@ void		CDynLandscapeUser::setHeightField(const CHeightMap &hf)
 
 
 // ****************************************************************************
-void		CDynLandscapeUser::enableVegetable(bool enable)
+void	CDynLandscapeUser::enableVegetable(bool enable)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
 	_Landscape->getLandscape().enableVegetable(enable);
+}
+
+// ****************************************************************************
+void	CDynLandscapeUser::setVegetableActive(bool enable)
+{
+	NL3D_HAUTO_UI_LANDSCAPE;
+	CDynLandscape* dynLandscape = static_cast<CDynLandscape*>(&_Landscape->getLandscape());
+	dynLandscape->setVegetableActive(enable);
+}
+
+// ****************************************************************************
+bool	CDynLandscapeUser::isVegetableActive() const
+{
+	NL3D_HAUTO_UI_LANDSCAPE;
+	return _Landscape->getLandscape().isVegetableActive();
 }
 
 // ****************************************************************************
