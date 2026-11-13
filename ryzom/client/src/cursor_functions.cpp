@@ -999,18 +999,21 @@ void contextSetVoxel(TMouseButton button, bool dblClick)
 	{
 		// TODO: use map deferred command
 		Voxel selectedVoxel = CDynContinent::MAP->getVoxelAt(CDynContinent::MAP->voxelUnderCursor());
-		if (selectedVoxel.getDensity() != Voxel::MaxDensity)
+		if (selectedVoxel.getType() == Voxel::Raw)
 		{
-			Voxel::DensityType newDensity = std::min<uint>(g_voxelFillSpeed + selectedVoxel.getDensity(), Voxel::MaxDensity);
-			selectedVoxel.setDensity(newDensity);
-			// TODO: use map deferred command
-			CDynContinent::MAP->setVoxelAt(CDynContinent::MAP->voxelUnderCursor(), selectedVoxel);
-		}
-		else
-		{
-			selectedVoxel.setDensity(g_voxelFillSpeed);
-			// TODO: use map deferred command
-			CDynContinent::MAP->setVoxelAt(CDynContinent::MAP->emptyVoxelUnderCursor(), selectedVoxel);
+			if (selectedVoxel.getDensity() != Voxel::MaxDensity)
+			{
+				Voxel::DensityType newDensity = std::min<uint>(g_voxelFillSpeed + selectedVoxel.getDensity(), Voxel::MaxDensity);
+				selectedVoxel.setDensity(newDensity);
+				// TODO: use map deferred command
+				CDynContinent::MAP->setVoxelAt(CDynContinent::MAP->voxelUnderCursor(), selectedVoxel);
+			}
+			else
+			{
+				selectedVoxel.setDensity(g_voxelFillSpeed);
+				// TODO: use map deferred command
+				CDynContinent::MAP->setVoxelAt(CDynContinent::MAP->emptyVoxelUnderCursor(), selectedVoxel);
+			}
 		}
 	}
 	else if (button == middleButton)
