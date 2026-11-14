@@ -51,14 +51,6 @@ class	CVegetableLightEx;
 // default distance is 60 meters.
 #define	NL3D_VEGETABLE_DEFAULT_DIST_MAX			60.f
 
-/// Debug knob (dynworld issue #7 fade investigation): multiplier applied to the
-/// per-frame NegInvTransDist uniform slope. 1 = stock fade ((blendDistMax-
-/// dist)/10). 0 = no slope: alpha is constant = blendDistMax/10 >= 1, i.e. all
-/// ZSort vegetables render at full alpha (no distance fade at all). Values < 1
-/// stretch the fade window (alpha reaches 0 at blendDistMax/scale). Tune with
-/// the "dyn_vegfade" client command.
-extern	float	NL3D_VegetFadeSlopeScale;
-
 class CVertexProgramVeget;
 
 // ***************************************************************************
@@ -296,19 +288,6 @@ public:
 	/// get the number of faces rendered by the vegetable manager
 	uint		getNumVegetableFaceRendered() const;
 
-	// TEMPORARY P0 probe (dynworld microvegetation, issue #7): dump the
-	// clip/IG bookkeeping (block counts, IG count, summed pass triangles and
-	// vertices, plus the last frame's clip/ZSort/blend-layer state). Strip at
-	// P0 validation end.
-	void		getVegetProbeState(uint &numClipBlocks, uint &numEmptyClipBlocks, uint &numIgs, uint &numTris, uint &numVerts,
-					uint &numVisibleClipBlocks, uint &numZSortRegistered, uint &zSortFacesLast, uint &zSortVBVerts);
-
-	// TEMPORARY P0 (dynworld microvegetation, issue #7): stock planting keeps
-	// sort blocks fresh from CLandscapeVegetableBlock::update() after IG
-	// add/delete batches. External block owners (dyn probe / later dyn
-	// vegetable blocks) must do the same or the ZSort pass sees _NTriangles==0.
-	void		updateSortBlockForIg(CVegetableInstanceGroup *ig);
-
 	// @}
 
 // *********************
@@ -352,14 +331,6 @@ private:
 
 	/// profile
 	uint											_NumVegetableFaceRendered;
-	// TEMPORARY P0 probe (dynworld microvegetation, issue #7). Strip at P0
-	// validation end.
-	uint											_ProbeNumVisibleClipBlocks;
-	uint											_ProbeNumZSortRegistered;
-	uint											_ProbeZSortFacesLast;
-	// vertices allocated in the ZSort-pass VB allocators (hard+soft): the
-	// manager's outer ZSort gate. 0 means the faces never reached the pass.
-	uint											_ProbeZSortVBVerts;
 
 
 	// return true if the ith rdrPass is 2Sided.

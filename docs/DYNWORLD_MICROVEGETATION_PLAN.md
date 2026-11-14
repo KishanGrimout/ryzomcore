@@ -909,7 +909,7 @@ session), voxel-edit blink fixed ("no more blink, that's perfect"). All
 TEMP-PROBE instrumentation (band/budget/block/cam, §6.4 class) stripped
 from `dyn_landscape.cpp` per convention; the permanent debug commands
 (`dyn_vegetdump`, `dyn_vegettest`, `dyn_renderveget`, `dyn_vegetbudget`,
-`dyn_vegetstats`, `dyn_vegfade`) stay. Remaining before commit: rebuild
+`dyn_vegetstats`) stay. Remaining before commit: rebuild
 (client exe must be closed), full dynworld unit test set green, then commit
 the whole feature branch.
 
@@ -950,3 +950,238 @@ the whole feature branch.
     (reused buffer, ~O(n log n), n ≈ tens).
 - **Test set**: 13 dynworld suites green after the strip + P5 additions
   (direct-exe Release run, 2026-11-13).
+
+## 7. Only jungle has vegetation — desert/lakes/roots (2026-11-14)
+
+User report: after P0–P5 completion, only jungle sectors had microvegetation;
+desert and lakes stayed bare (prime roots too, same cause).
+
+**Root cause — the vegetable desc lookup is bank-local and the dyn session
+loads only the jungle bank.** `CDynContinent` reuses the newbieland
+continent sheet (`continent_manager.cpp:227`), whose form sets
+`Ecosystem = jungle.ecosystem` → `SmallBank = jungle.smallbank`. The
+soft-soil materials of the other biomes bind tiles living in other
+ecosystems' banks (`saw_dust.cfg`: desert `f-desert*`, lakes
+`y-sable-marin`; `humus.cfg` Roots `PR-mousse*`), so
+`CDynVegetableBlock::init`'s main-bank tile→desc resolution returned
+empty descs and skipped their whole surface groups. Live proof in the
+2026-11-13 20:18 `dyn_vegetdump` (`client000.log`): `material 'Humus'
+env=0/1 -> tile 1573 … OK` vs `material 'SawDust' env=2 -> tile 523
+tileset '<no tileset>' EMPTY/MISSING`, `env=3 -> tile 1615 … EMPTY/MISSING`
+(desert/lakes), plus the equivalent silent case for roots (`PR-*` tiles
+don't even exist in the jungle bank). This was pre-flagged in the P0 dump
+audit ("benign until those biomes are used") and plan §5.
+
+**Data audit**: all three missing ecosystems ship their vegetation data —
+`desert_bank.bnp` + `desert_vegetables.bnp`/`desert_vegetable_sets.bnp`
+(`Fyros_*`), lacustre equivalents (`Tryker_*`) already in the sandbox data
+dir; prime roots exists only as unpacked copies under
+`pipeline/install/primes_racines_{bank,vegetables,vegetable_sets}`
+(`Pr_*.veget`, `primesr_*.vegetset`, `primes_racines.smallbank` + season
+farbanks). Texture-name cross-checks confirmed the material cfg base names
+match the tile filenames inside each bank case-sensitively.
+
+**Fix (landed, built)**: per-biome **side banks** —
+`CDynLandscape::loadVegetSideBanks()` (called from `flushTiles`) loads
+desert/lacustre/primes_racines smallbanks into dedicated `CTileBank`s
+(desc-only; no textures, no season postfix — base `.vegetset` files exist
+for all three); `CDynLandscape::resolveVegetDescForGroup(biome, material)`
+resolves main bank first (stock path, jungle/forest unchanged) then the
+biome's side bank with the `bindSet` name-prefix tile match. Side banks
+owned by `CDynLandscape` (`m_vegetSideBanks`, must outlive the blocks;
+reload releases blocks first). `dyn_vegetdump` now reports the final
+resolution per (material, env). `PreDataPath` grew the three
+`primes_racines_*` dirs (`pipeline/client_dev/local/client.cfg`).
+
+Validation: full dynworld exe set green (13 suites, 2026-11-14, direct-exe
+Release); client build green; in-engine sign-off pending (expected:
+desert → `Fyros_*` flora, lakes → `Tryker_*`, roots → `Pr_*`/`PR_*`,
+jungle unchanged). System doc: `docs/DynMicroVegetation.md` § "Vegetable
+data source per biome (side banks)".
+
+## 8. Desert plant texels wrong — one atlas for all biomes (2026-11-14)
+
+In-engine validation of §7 (user): desert and lakes now plant, but two
+new reports — (a) **desert plants look wrong ("mesh or uv mapping")**,
+user confirmed it is the plants, not the terrain; (b) lakes sawdust
+unreachable (blocked by wall/cliff) — tracked separately below, it is a
+mapgen/collision question, not vegetation.
+
+**Root cause of (a)**: every `.veget` shape carries Tex0 UVs of its own
+ecosystem's atlas (independent 512x512 DXT5 textures: `MicroVeget_Jungle`
+[jungle_maps.bnp], `MicroVeget_Fyros` [desert_maps.bnp],
+`MicroVeget_Tryker` [lacustre_maps.bnp], `microveget_prime_roots`
+[primes_racines_maps]), while `CVegetableManager` binds ONE stage-1
+texture for the whole pass (`_VegetableMaterial.setTexture(1, …)`, set by
+`loadTexture`; texenv stage 1 = Diffuse × Texture). The dyn continent
+sheet loads `microveget_jungle.tga` only, so after the §7 fix the newly
+planted `Fy_*`/`Tryker_*`/`Pr_*` shapes sampled jungle texels. (Stock
+clients never hit this: one continent sheet = one ecosystem = one atlas.)
+
+**Alternatives rejected**: per-atlas `CVegetableManager` instances —
+would fragment the carefully-tuned block lifecycle (`_ClipBlock`,
+per-entry sort blocks, band walk, commit budget) across 4 managers, 4×
+VB allocators and render calls; blocks also span multiple biomes, so a
+block would need per-manager sub-structures. Offline-merged atlas
+artifact — needs a new generation step + regeneration discipline;
+runtime composition is smaller and self-updating.
+
+**Fix (dyn-side only, no NeL core change)**:
+- `CMicroVegetDynAtlasTexture` (`dyn_landscape.cpp`): `ITexture` whose
+  `doGenerate` composes the four ecosystem atlases into 2x2
+  1024x1024 RGBA (raw-row `blit` quarters: jungle TL, fyros TR, tryker
+  BL, prime roots BR; `buildMipMaps` precomputed). Sources via CPath;
+  prime roots is a deployment-local COPY in
+  `pipeline/install/microveget_dyn/` because the whole
+  `primes_racines_maps` dir cannot be mounted (`fy_nothing.dds` bytes
+  differ from `desert_maps.bnp`'s — shadowing, verified 2026-11-14).
+- `CDynLandscape::loadDynVegetableAtlas()` prechecks all four sources
+  (fallback to the stock season-postfixed single-atlas load otherwise)
+  and installs the composite via the manager's public
+  `loadTexture(ITexture*)` overload; called from `dyn_continent.cpp`.
+- `CDynLandscape::ensureVegetShapeAtlasRemap(shape, biome)`: scales the
+  cached shape's Tex0 into its biome's quarter (uv = quarterMin + uv·0.5)
+  once, before the first IG of the shape compiles (Tex0 is copied into
+  the vegetable VBs at compile time). Called from
+  `CDynVegetableBlock::createIgForDistType` (entries now carry the group
+  `Biome`; blocks store their `CDynLandscape*`) and from the
+  `dyn_vegettest` probe (biome param added, default jungle).
+- Quarter mapping: forest+jungle → TL, desert → TR, lakes → BL,
+  roots → BR (`DynVegetQuarterMin` in `dyn_landscape.cpp`; v axis: the
+  GL3 driver uploads bitmap rows without a vertical flip, so v=0 is the
+  first stored row in both the composition and the remap).
+- `NL3D::ULandscape::loadDynVegetableAtlas()` was originally a
+  default-empty virtual (`u_landscape.h`); removed in the §10 footprint
+  strip — the call is dispatched via `dynamic_cast<CDynLandscapeUser*>` in
+  `dyn_continent.cpp`.
+
+Known limits (superseded per §8.2): the composite initially used the
+**base** (non-seasonal) variants only. Mip levels blend quarter texels at
+quarter borders (no gutters — distance-only artifact). A cross-quarter
+reuse of one shape name (same `.veget` in two ecosystems' descs) warns
+once and keeps the first quarter.
+
+Validation: 2026-11-14 user sign-off — "desert and jungle look OK now".
+System doc: `docs/DynMicroVegetation.md` § "Merged microveget atlas".
+
+### 8.1 "Jungle now mixes desert texels" — remap ran while the fallback atlas was bound (2026-11-14, fix landed)
+
+User report after the §8 fix: "desert still looks off, but different. And
+now jungle is broken: veget looks a bit like desert ones".
+
+**Independent pre-validation (no engine needed)**: decoded the loose
+`PR_*.veget` shapes directly from disk (temp decoder
+`%TEMP%/opencode/veget_decode.py`; the exact `CVegetableShape::serial` +
+`CVertexBuffer::serial` layout was confirmed in source first: outer ver 1
+with the 4 NELID checks + 4 bools + BendCenterMode sint32; VB serial ver 2
+with header **ver 3** — `SerialOldPreferredMemory` was on when these were
+written; subset ver 2 with 8-byte UVRouting). All 21 shapes parse to the
+exact file size. Result: **Tex0 = full 0..1 ecosystem-atlas UVs scattered
+across all four quadrants** of the 512x512 atlas (e.g. `Pr_Cils` TR,
+`Pr_Mush_A` BL, `Pr_Bibu` TL, `Pr_toopetzy_*` crossing u=0.5). This
+confirms the §8 remap model (uv·0.5 + quarterMin) is the right one.
+
+**Root cause (found in deployment + code, before the instrumented run)**:
+1. `pipeline/install/microveget_dyn` was **missing from
+   `pipeline/client_dev/local/client.cfg` PreDataPath** (README_SANDBOX §
+   PreDataPath documents the entry; the cfg had lost it). So
+   `loadDynVegetableAtlas()`'s precheck failed and the client silently
+   took the stock season-postified single-atlas fallback — the composite
+   never installed in that session (and the merged-atlas TGA dumps were
+   never produced).
+2. `ensureVegetShapeAtlasRemap` was called **unconditionally** from
+   `createIgForDistType`, so even with the fallback bound the shapes had
+   their Tex0 compressed into quarters of a 512x512 SINGLE atlas: every
+   plant rendered only a quarter-sized crop. Jungle shapes (quarter 0)
+   sampled the top-left crop of the fallback atlas — a fyros seasonal
+   atlas in that session — hence "jungle looks a bit like desert ones";
+   desert shapes (quarter 1) sampled another wrong crop, hence "off, but
+   different". Both symptoms follow exactly.
+
+**Fix**: (1) restored the `microveget_dyn` PreDataPath entry in the
+sandbox cfg; (2) `CDynLandscape::m_vegetMergedAtlasInstalled` flag (set
+true only when `loadDynVegetableAtlas()` installs the composite);
+`ensureVegetShapeAtlasRemap` now returns early without remapping (with a
+one-shot warning) while the flag is false — under the fallback, shapes
+keep their full-range UVs, i.e. previous single-atlas semantics.
+
+Build green, 13 dynworld suites green (direct-exe Release, 2026-11-14).
+Validation signature: `microveget_dyn_merged_debug.tga` appearing in the
+client dir (proof the composite installed) and the
+`DYNVEGET: atlas remap '<name>' biome=%u quarter=%u … uv=[…]` log with
+per-quarter bounds inside the merged atlas. Instrumentation stripped
+2026-11-14 (after the season round): all TEMP probes (merged+source TGA
+dumps, per-shape remap log, fallback info log, load-time one-shot
+`dumpVegetableData`) are gone; the durable warnings and the `dyn_*` debug
+command catalog remain.
+
+### 8.2 Per-season merged atlases (2026-11-14, user request after §8 sign-off)
+
+User: "desert and jungle look OK now, but with wrong season variation.
+I'd like to have season mapping work." The §8 composite was BASE-only by
+design; the data supports seasons everywhere: all four ecosystems ship
+`_Sp/_Su/_Au/_Wi` variants (`MicroVeget_*` in jungle/desert/lacustre
+`*_maps.bnp`s — verified by BNP header scan — and `microveget_prime_roots_*`
+loose in `primes_racines_maps`).
+
+**Fix (extension of the §8 mechanism, no NeL core change)**:
+- `CMicroVegetDynAtlasTexture(uint8 season)`: the composite names the
+  season-postfixed variants (`dynVegetSeasonSource`, same `_Sp…` postfix
+  convention as `CSeasonFileExt`, kept local to dyn_landscape); a missing
+  seasonal variant falls back to that quarter's BASE with a warning (so
+  deployments shipping only base atlases still render, uncolored).
+- `CDynLandscape::loadDynVegetableAtlas(uint8 season)` (0..3, 0xFF/../>=4
+  = base); `dyn_continent.cpp` passes `(uint8)Season` through a
+  `dynamic_cast<CDynLandscapeUser*>` (the `u_landscape.h` virtual was
+  removed in the §10 footprint strip).
+- Reload plumbing for free: a mid-session season change runs
+  `CContinentManager::select` → same-continent complete re-select
+  (continent_manager.cpp: "Season has changed?") → `CDynContinent::select`
+  re-installs the composite for the new season. The quarter layout is
+  season-independent, so `m_vegetShapeAtlasQuarter` records and
+  already-compiled Tex0s stay valid — no remap reset needed.
+
+Build green, 13 dynworld suites green (direct-exe Release, 2026-11-14).
+Instrumentation stripped in the same pass (plan §8.1 strip note);
+in-engine validation of the uninstrumented build: observe vegetation
+across seasons — easiest via the `dyn_vegetseason` debug command (each
+ecosystem's flora must take its seasonal tint).
+
+## 9. Lakes sawdust unreachable (RESOLVED as expected behavior, 2026-11-14)
+
+User answer: the map generation indeed provides **no path** down to the
+lakes sawdust ground — that is expected, not a wall-collision bug. The
+real future need is a way to traverse without terrain pathways —
+**disable collisions and snap to ground**. Deferred: do not implement in
+this issue/branch; it is a separate task (candidate: a client debug
+command or a mapgen option; compare `docs/PLAYER_WALL_CLIFF_COLLISION_PLAN.md`
+mechanics when scheduled). No further vegetation-side work here.
+
+## 10. Shared-engine footprint strip (2026-11-14)
+
+Per the new AGENTS.md "Dynworld footprint discipline" rule, the branch's
+non-dynworld file changes were minimized after P5 sign-off (user decision):
+
+- Stripped, `nel/` back to stock: `NL3D_VegetFadeSlopeScale` (fade-slope
+  debug knob; A/B verdict in its section stands: the VP alpha path is
+  live), the whole P0 probe (`getVegetProbeState`, `_Probe*` members, the
+  render()/`vegetable_blend_layer_model.cpp` instrumentation), and
+  `updateSortBlockForIg` — the `dyn_vegettest` probe now calls the public
+  `sortBlock->updateSortBlock(...)` exactly like the production
+  `CDynVegetableBlock` path already did.
+- Replaced: the `u_landscape.h` `loadDynVegetableAtlas` virtual -> dyn-side
+  dispatch via `dynamic_cast<CDynLandscapeUser*>(Landscape)` in
+  `dyn_continent.cpp` (the Landscape global is a `CDynLandscapeUser` in
+  dyn sessions -- `init_main_loop.cpp`; the `dyn_landscape_user.cpp`
+  commands already used this idiom).
+- Removed with the knob: the `dyn_vegfade` command; `dyn_vegetstats`
+  trimmed to dyn-side block stats + stock `getNumVegetableFaceRendered()`.
+- Accepted residual shared-file changes (additive, user choice):
+  `game_share` CMake registration of `vegetation_placement`, the
+  `game_share_test` registration, and the `Voxel::Raw` guard in
+  `cursor_functions.cpp` (dynworld-only code in an existing dyn hook).
+
+Rebuild + in-engine re-validation needed after the strip; nothing in stock
+NeL behavior changes (pure reverts). Historical references above to the
+removed helpers/commands describe the investigation as it happened; Section
+10 is the final state.

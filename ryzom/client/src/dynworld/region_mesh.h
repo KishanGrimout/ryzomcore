@@ -67,7 +67,7 @@ public:
 	NLMISC::CAABBox m_bv;
 	float m_displayFactor;
 
-	// Microvegetation placement geometry (issue #7 P1): computed worker-side
+	// Microvegetation placement geometry: computed worker-side
 	// right after extraction, consumed by the commit phase when the mesh
 	// becomes visible (P2). Follows the mesh lifecycle automatically (rebuilt
 	// on every re-extraction, freed with the mesh).

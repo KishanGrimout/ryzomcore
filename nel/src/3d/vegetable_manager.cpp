@@ -50,9 +50,6 @@ namespace NL3D
 #define	NL3D_VEGETABLE_SORT_BLOCK_BLOCKSIZE			64
 #define	NL3D_VEGETABLE_INSTANCE_GROUP_BLOCKSIZE		128
 
-// Debug knob (dynworld issue #7 fade investigation), see vegetable_manager.h.
-float	NL3D_VegetFadeSlopeScale = 1.f;
-
 
 // ***************************************************************************
 CVegetableManager::CVegetableManager(uint maxVertexVbHardUnlit, uint maxVertexVbHardLighted,
@@ -1914,7 +1911,7 @@ void			CVegetableManager::setupVertexProgramConstants(IDriver *driver, bool fogE
 	// c[10] take pos of camera
 	driver->setUniform3f(IDriver::VertexProgram, _ActiveVertexProgram->idx().ViewCenter, _ViewCenter);
 	// c[11] take factor for Blend formula
-	driver->setUniform1f(IDriver::VertexProgram, _ActiveVertexProgram->idx().NegInvTransDist, -1.f*NL3D_VegetFadeSlopeScale/NL3D_VEGETABLE_BLOCK_BLEND_TRANSITION_DIST);
+	driver->setUniform1f(IDriver::VertexProgram, _ActiveVertexProgram->idx().NegInvTransDist, -1.f/NL3D_VEGETABLE_BLOCK_BLEND_TRANSITION_DIST);
 
 
 
@@ -1968,12 +1965,6 @@ void			CVegetableManager::render(const CVector &viewCenter, const CVector &front
 	//--------------------
 	// For all current not empty clipBlocks, clip against pyramid, and insert visibles in list.
 	CVegetableClipBlock		*ptrClipBlock= _ClipBlockList.begin();
-	// TEMPORARY P0 probe (issue #7)
-	_ProbeNumVisibleClipBlocks= 0;
-	_ProbeNumZSortRegistered= 0;
-	_ProbeZSortFacesLast= 0;
-	_ProbeZSortVBVerts= getVBAllocatorForRdrPassAndVBHardMode(NL3D_VEGETABLE_RDRPASS_UNLIT_2SIDED_ZSORT, 0).getNumUserVerticesAllocated()
-		+ getVBAllocatorForRdrPassAndVBHardMode(NL3D_VEGETABLE_RDRPASS_UNLIT_2SIDED_ZSORT, 1).getNumUserVerticesAllocated();
 	while(ptrClipBlock)
 	{
 		// if the clipBlock is visible and not empty
@@ -1982,8 +1973,6 @@ void			CVegetableManager::render(const CVector &viewCenter, const CVector &front
 			// insert into visible list.
 			ptrClipBlock->_RenderNext= rootToRender;
 			rootToRender= ptrClipBlock;
-			// TEMPORARY P0 probe (issue #7)
-			_ProbeNumVisibleClipBlocks++;
 		}
 
 		// next
@@ -2334,9 +2323,6 @@ void			CVegetableManager::render(const CVector &viewCenter, const CVector &front
 		// QSort. (I tried, better than radix sort, guckk!!)
 		sort(sortVegetSbs.begin(), sortVegetSbs.end());
 
-		// TEMPORARY P0 probe (issue #7)
-		_ProbeNumZSortRegistered= (uint)sortVegetSbs.size();
-
 
 		// setup material for this rdrPass. NB: rendered after (in LayerModels).
 		//-------------
@@ -2457,56 +2443,6 @@ void		CVegetableManager::resetNumVegetableFaceRendered()
 uint		CVegetableManager::getNumVegetableFaceRendered() const
 {
 	return _NumVegetableFaceRendered;
-}
-
-// ***************************************************************************
-// TEMPORARY P0 probe (dynworld microvegetation, issue #7). Strip at P0
-// validation end.
-void		CVegetableManager::getVegetProbeState(uint &numClipBlocks, uint &numEmptyClipBlocks, uint &numIgs, uint &numTris, uint &numVerts,
-				uint &numVisibleClipBlocks, uint &numZSortRegistered, uint &zSortFacesLast, uint &zSortVBVerts)
-{
-	numClipBlocks= 0;
-	numEmptyClipBlocks= 0;
-	numIgs= 0;
-	numTris= 0;
-	numVerts= 0;
-	CVegetableClipBlock	*cb;
-	for(cb= _ClipBlockList.begin(); cb; cb= (CVegetableClipBlock*)cb->Next)
-	{
-		numClipBlocks++;
-		numIgs+= cb->_NumIgs;
-		CVegetableSortBlock	*sb;
-		for(sb= cb->_SortBlockList.begin(); sb; sb= (CVegetableSortBlock*)sb->Next)
-		{
-			CVegetableInstanceGroup	*ig;
-			for(ig= sb->_InstanceGroupList.begin(); ig; ig= (CVegetableInstanceGroup*)ig->Next)
-			{
-				for(uint r=0; r<NL3D_VEGETABLE_NRDRPASS; r++)
-				{
-					numTris+= ig->_RdrPass[r].NTriangles;
-					numVerts+= ig->_RdrPass[r].NVertices;
-				}
-			}
-		}
-	}
-	for(cb= _EmptyClipBlockList.begin(); cb; cb= (CVegetableClipBlock*)cb->Next)
-	{
-		numEmptyClipBlocks++;
-		numIgs+= cb->_NumIgs;
-	}
-	numVisibleClipBlocks= _ProbeNumVisibleClipBlocks;
-	numZSortRegistered= _ProbeNumZSortRegistered;
-	zSortFacesLast= _ProbeZSortFacesLast;
-	zSortVBVerts= _ProbeZSortVBVerts;
-}
-
-
-// ***************************************************************************
-// TEMPORARY P0 (dynworld microvegetation, issue #7). See header comment.
-void		CVegetableManager::updateSortBlockForIg(CVegetableInstanceGroup *ig)
-{
-	if(ig != nullptr && ig->_SortOwner != nullptr)
-		ig->_SortOwner->updateSortBlock(*this);
 }
 
 

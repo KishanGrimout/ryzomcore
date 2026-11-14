@@ -63,7 +63,7 @@ bool g_forUsePlayerPosPriority = false;
 
 float g_camPosOffset = 16.f;
 
-// Microvegetation placement hook (issue #7 P1): compute the placement
+// Microvegetation placement hook: compute the placement
 // geometry of an extracted mesh into regMesh->m_vegetPlacements. Only
 // LOD0/LOD1 meshes host vegetables; LOD2 (far 350 m box) never plants.
 // soilIds is the per-biome soft-soil table (see DYNWORLD::buildSoftSoilTable,
@@ -201,7 +201,7 @@ private:
 		TDecodedMesh decodedMesh;
 		m_map->extractMesh(m_sectorId, *regMesh, controller, m_lod, m_lod, &decodedMesh);
 
-		// P1 microvegetation placement (issue #7): worker-side pure-data
+		// P1 microvegetation placement: worker-side pure-data
 		// clustering of the plantable soft-soil surface, stored on the mesh
 		// result; committed by the landscape when the mesh becomes visible (P2).
 		vegetPlacementsFromMesh(m_sectorId, m_lod, m_soilIds, decodedMesh, regMesh);
@@ -313,10 +313,11 @@ void	CDynLandscapeUser::flushTiles (NLMISC::IProgressCallback &progress)
 
 	CMaterialLibrary::getInstance().bindMaterials(_Landscape->getLandscape().TileBank);
 
-	// P0 probe (issue #7): one-shot vegetable data dump after the bank + desc
-	// load. TEMPORARY instrumentation — strip at P0 validation end.
-	// (Repeatable version: the "dyn_vegetdump" command.)
-	dumpVegetableData();
+	// Per-biome vegetable side banks: the main TileBank only holds
+	// the jungle ecosystem (the dyn continent reuses the newbieland sheet);
+	// desert/lakes/roots surface groups resolve their vegetable descs from
+	// their own ecosystem banks.
+	static_cast<CDynLandscape&>(_Landscape->getLandscape()).loadVegetSideBanks();
 }
 
 // ****************************************************************************
@@ -451,7 +452,7 @@ IRegionMesh* CDynLandscapeUser::generateMesh(TGenericSectorId sectorId, uint lod
 	TDecodedMesh decodedMesh;
 	m_map->extractMesh(sectorId, *regMesh, controller, lod, lod, &decodedMesh);
 
-	// P1 microvegetation placement (issue #7): main-thread path, the soil
+	// P1 microvegetation placement: main-thread path, the soil
 	// table can be built directly here.
 	uint8 soilIds[DYNWORLD::VegetMaxBiomeCount];
 	DYNWORLD::buildSoftSoilTable(soilIds);
@@ -514,10 +515,10 @@ void CDynLandscapeUser::logVegetStats() const
 	dynLandscape->logVegetStats();
 }
 
-// P0 probe commands (issue #7 plan) — registered from here to avoid pulling
+// P0 probe commands — registered from here to avoid pulling
 // the dynworld headers into commands.cpp (they drag nel/3d/animation.h, which
 // collides with the client's own CAnimation there).
-NLMISC_COMMAND(dyn_vegetdump, "Dump dyn landscape vegetable data (P0 probe, issue #7)", "")
+NLMISC_COMMAND(dyn_vegetdump, "Dump dyn landscape vegetable data", "")
 {
 	extern ULandscape *Landscape;
 	CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
@@ -531,13 +532,21 @@ NLMISC_COMMAND(dyn_vegetdump, "Dump dyn landscape vegetable data (P0 probe, issu
 }
 
 // ****************************************************************************
-void CDynLandscapeUser::vegetTest(const NLMISC::CVector& pos, const NLMISC::CVector& normal, const std::string& shapeName, uint count)
+void CDynLandscapeUser::vegetTest(const NLMISC::CVector& pos, const NLMISC::CVector& normal, const std::string& shapeName, uint count,
+	Voxel::BiomeType biome)
 {
 	CDynLandscape* dynLandscape = static_cast<CDynLandscape*>(&_Landscape->getLandscape());
-	dynLandscape->vegetTest(pos, normal, shapeName, count);
+	dynLandscape->vegetTest(pos, normal, shapeName, count, biome);
 }
 
-NLMISC_COMMAND(dyn_vegettest, "Plant test vegetable instances at the player position (P0 probe, issue #7)", "<shapeName> [count=20]")
+// ****************************************************************************
+bool CDynLandscapeUser::loadDynVegetableAtlas(uint8 season)
+{
+	CDynLandscape* dynLandscape = static_cast<CDynLandscape*>(&_Landscape->getLandscape());
+	return dynLandscape->loadDynVegetableAtlas(season);
+}
+
+NLMISC_COMMAND(dyn_vegettest, "Plant test vegetable instances at the player position", "<shapeName> [count=20]")
 {
 	extern ULandscape *Landscape;
 	CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
@@ -568,17 +577,41 @@ NLMISC_COMMAND(dyn_vegettest, "Plant test vegetable instances at the player posi
 	return true;
 }
 
-NLMISC_COMMAND(dyn_renderveget, "Toggle render of stock microvegetation in dyn landscape (on by default since P3, issue #7)", "")
+NLMISC_COMMAND(dyn_renderveget, "Toggle render of stock microvegetation in dyn landscape", "")
 {
 	g_renderVegetables = !g_renderVegetables;
 	nlinfo("DYNVEGET: dyn_renderveget = %d", g_renderVegetables);
 	return true;
 }
 
-// P2 commit budget knob (issue #7 plan): per-frame cap of vegetable IG
+NLMISC_COMMAND(dyn_vegetseason, "Force the merged microveget atlas season variant: 0=spring 1=summer 2=autumn 3=winter, 255=base. Only swaps the veget atlas (tile colors etc. follow the session season)", "<season>")
+{
+	extern ULandscape *Landscape;
+	CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
+	if (dynLandscape == nullptr)
+	{
+		nlinfo("DYNVEGET: no dyn landscape (not in a dyn world session)");
+		return true;
+	}
+	if (args.empty())
+		return false;
+
+	uint season = 0;
+	fromString(args[0], season);
+	if (season > 3 && season != 0xFF)
+		return false;
+
+	if (dynLandscape->loadDynVegetableAtlas((uint8)season))
+		nlinfo("DYNVEGET: merged veget atlas switched to season %u", season);
+	else
+		nlwarning("DYNVEGET: merged veget atlas not available (stock fallback stays)");
+	return true;
+}
+
+// P2 commit budget knob: per-frame cap of vegetable IG
 // commits (initial plantings + ring band changes), declared in dyn_landscape.cpp.
 extern uint g_maxVegetCommit;
-NLMISC_COMMAND(dyn_vegetbudget, "Set the per-frame vegetable IG commit budget (P2, issue #7)", "<maxIgCommitsPerFrame>")
+NLMISC_COMMAND(dyn_vegetbudget, "Set the per-frame vegetable IG commit budget", "<maxIgCommitsPerFrame>")
 {
 	if (args.empty())
 		return false;
@@ -589,7 +622,7 @@ NLMISC_COMMAND(dyn_vegetbudget, "Set the per-frame vegetable IG commit budget (P
 	return true;
 }
 
-NLMISC_COMMAND(dyn_vegetstats, "Log microvegetation render state + last-frame face count (P0 probe, issue #7)", "")
+NLMISC_COMMAND(dyn_vegetstats, "Log microvegetation render state + last-frame face count", "")
 {
 	extern ULandscape *Landscape;
 	CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
@@ -602,25 +635,7 @@ NLMISC_COMMAND(dyn_vegetstats, "Log microvegetation render state + last-frame fa
 	return true;
 }
 
-// Fade-slope A/B knob (issue #7 fade investigation, §6.7): scales the slope of
-// the vegetable VP alpha formula. alpha = (blendDistMax - dist)/10 in stock
-// (scale 1). With scale 0 the alpha is constant (>= 1): NO distance fade at
-// all — every ZSort plant renders full alpha, pops should be maximized. With
-// scale 0.1 the fade window is stretched 10x (alpha reaches 0 at
-// blendDistMax*10): fades should become an obvious long gradient. If the
-// rendering does not change at all between these settings, the VP alpha path
-// is dead (driver-side) rather than the band logic.
-NLMISC_COMMAND(dyn_vegfade, "Set the vegetable alpha-fade slope scale (1=stock, 0=no fade, 0.1=10x longer fade)", "[scale=1]")
-{
-	float scale = 1.f;
-	if (!args.empty())
-		fromString(args[0], scale);
-	NL3D::NL3D_VegetFadeSlopeScale = scale;
-	nlinfo("DYNVEGET: NL3D_VegetFadeSlopeScale = %g (1=stock fade, 0=no fade)", scale);
-	return true;
-}
-
-// Vegetation on/off toggle (P5 debug command, issue #7). ULandscape has no
+// Vegetation on/off toggle. ULandscape has no
 // isVegetableActive() getter, so query the concrete model like the other
 // dyn_veget* commands. Disabling releases all vegetable blocks (frees the
 // vegetable VB space); re-enabling recreates them through the next structural
@@ -642,7 +657,7 @@ NLMISC_COMMAND(dyn_veget, "Toggle dynworld microvegetation on/off", "[0|1]")
 	return true;
 }
 
-// Vegetable density knob (P5 debug command, issue #7): percentage of the
+// Vegetable density knob: percentage of the
 // tile-bank density, same semantic as ClientCfg.MicroVegetDensity.
 NLMISC_COMMAND(dyn_vegetdensity, "Set microvegetation density (percentage, default from ClientCfg)", "<pct>")
 {
@@ -664,7 +679,7 @@ NLMISC_COMMAND(dyn_vegetdensity, "Set microvegetation density (percentage, defau
 	return true;
 }
 
-// Wireframe toggle (issue #7 fade investigation): REMOVED — driver-level
+// Wireframe toggle: REMOVED — driver-level
 // polygon-mode switching corrupts GL3 render state after the first frame
 // (terrain back to filled, big flora rendered without fog). Use the
 // "dyn_vegetdump" block list for LOD coverage questions instead.
@@ -890,7 +905,7 @@ void CDynLandscapeUser::refreshLodSectors(const CVector& pos, float radius, uint
 	// Check for finished generation deferred commands
 	updateGenerateMeshesCommands();
 
-	// P2 (issue #7): sync the vegetable blocks against m_regionsList and run
+	// P2: sync the vegetable blocks against m_regionsList and run
 	// the ring-band commits (create/release IGs) under the per-frame budget,
 	// inside the vegetable-manager lock window. NB: the viewCenter MUST be the
 	// same point the vegetable VP alpha uses, i.e. the landscape refine center
@@ -898,7 +913,7 @@ void CDynLandscapeUser::refreshLodSectors(const CVector& pos, float radius, uint
 	// CLandscape::refine()/render() use refineCenter for both the band walk
 	// and the alpha, and a camera-vs-player offset makes every ring-edge
 	// create land at alpha = camOffset/10 (pop-in while moving forward,
-	// disappear-while-visible when moving backward) — issue #7 §6.8.
+	// disappear-while-visible when moving backward) — plan doc §6.8.
 	landscape.updateVegetableBlocks(pos);
 
 	// .

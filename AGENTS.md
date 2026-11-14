@@ -85,3 +85,18 @@ Deployment-local (stay where they are, linked from here):
 ## Work methodology
 
 New tasks and features should be done into a branch of dev/dyn, which is the "main" branch for dynworld development.
+
+### Dynworld footprint discipline
+
+Dynworld changes must live in dynworld-owned files (`ryzom/client/src/dynworld/*`,
+`ryzom/common/src/game_share/dynworld/*`, dynworld test modules, `docs/`). Shared/stock
+engine code (`nel/*`, non-dynworld `ryzom/*`) may only be modified when no dynworld-side
+extension point exists. Before editing a shared file, look for one:
+
+- a virtual with a stock-safe default no-op (overridden ONLY by a dynworld child class),
+- a new pure-dynworld child class instead of editing a stock class,
+- a wrapper/dispatcher in dynworld code (or a dynworld-owned pointer) that absorbs the
+  call so shared dispatchers stay untouched.
+
+Any residual change in a shared file must be minimal, justified in the relevant plan or
+system doc, and marked strippable with the phase/validation that gates its removal.

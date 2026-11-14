@@ -22,6 +22,7 @@
 #include "game_share/dynworld/map_sector.h"
 #include "game_share/dynworld/map.h"
 #include "game_share/dynworld/map_deferred_command_manager.h"
+#include "game_share/dynworld/voxel.h"
 
 #include "dynworld/dyn_landscapeig_manager.h"
 
@@ -218,10 +219,10 @@ public:
 	/// Micro-Vegetation.
 	// @{
 	virtual	void		enableVegetable(bool enable);
-	/** Debug command support (issue #7 "dyn_veget"): disable also releases
+	/** Debug command support: disable also releases
 	 * the vegetable blocks, not just the stock enable flag. */
 	virtual void		setVegetableActive(bool enable);
-	/// Debug command support (issue #7): ULandscape has no active-state getter.
+	/// Debug command support: ULandscape has no active-state getter.
 	virtual bool		isVegetableActive() const;
 	virtual	void		loadVegetableTexture(const std::string &textureFileName);
 	virtual	void		setupVegetableLighting(const NLMISC::CRGBA &ambient, const NLMISC::CRGBA &diffuse, const NLMISC::CVector &directionalLight);
@@ -274,12 +275,21 @@ public:
 	}
 	// @}
 
-	/// Debug probe (P0, issue #7 plan): forwards to CDynLandscape::dumpVegetableData.
+	/// Debug probe: forwards to CDynLandscape::dumpVegetableData.
 	void dumpVegetableData() const;
-	/// Debug probe (P0, issue #7 plan): forwards to CDynLandscape::logVegetStats.
+	/// Debug probe: forwards to CDynLandscape::logVegetStats.
 	void logVegetStats() const;
-	/// Debug probe (P0, issue #7 plan): forwards to CDynLandscape::vegetTest.
-	void vegetTest(const NLMISC::CVector& pos, const NLMISC::CVector& normal, const std::string& shapeName, uint count);
+	/// Debug probe: forwards to CDynLandscape::vegetTest.
+	/// `biome` selects the merged-atlas quarter for the shape UV remap
+	/// (defaults to jungle).
+	void vegetTest(const NLMISC::CVector& pos, const NLMISC::CVector& normal, const std::string& shapeName, uint count,
+		Voxel::BiomeType biome = 1);
+
+	/// Merged per-biome microvegetation atlas: forwards
+	/// to CDynLandscape::loadDynVegetableAtlas. Call through a
+	/// dynamic_cast<CDynLandscapeUser*> of the Landscape global, not through
+	/// ULandscape (no shared-interface virtual for this dyn-only hook).
+	bool loadDynVegetableAtlas(uint8 season);
 
 	static const int LODCOUNT = 3;
 
