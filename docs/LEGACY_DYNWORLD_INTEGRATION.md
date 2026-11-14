@@ -35,6 +35,17 @@ squashed feature commits + 2 kept small non-feature commits):
   push; nobody had pulled the old pushes. The roadmap's commit-hash references elsewhere
   are unaffected (integration base and external checkouts only).
 
+
+## core4 sync into dev/dyn (2026-11-14)
+
+- `origin/core4` 2026-11-14 (synced with `ryzom/ryzomcore:core4`) merged into `dev/dyn` (merge `f541221f4`, 263 upstream commits over the integration base). Feature work keeps branching from `dev/dyn`; feature PRs stay squash-merged into `dev/dyn` on GitHub, and `core4` re-syncs into `dev/dyn` by merge.
+- Conflicts (4):
+  - `ryzom/client/src/cursor_functions.cpp` — upstream removed the WEBIG contextual action (declaration, `ContextCur.add` registration, `checkUnderCursor` branch, `contextWebIG` body); ours had renamed every context handler signature to `TMouseButton button`. Resolution: keep our `TMouseButton` signatures + `contextSetVoxel`, apply upstream's WEBIG removal.
+  - `ryzom/server/src/server_share/CMakeLists.txt` — kept the dynworld glob, took upstream's `LIST(REMOVE_ITEM SRC ${R2})` variable fix.
+  - `ryzom/tools/server/test_modules/game_share_test/CMakeLists.txt` — both sides appended test targets at the same anchor; kept all dynworld targets, appended upstream's `rt_scenario_check` + `object_serializer`.
+  - `ryzom/server/src/shard_unifier_service/ring_session_manager.cpp` — see `docs/ShardRuntimeOps.md` section 7 (joinSession permission-rows resolution).
+- NOT rebuilt/smoke-tested in this session; next build + shard bring-up must validate the merge before further shard-side work.
+
 ## Integration rules
 
 - Preserve the current C++17 and target-based CMake conventions.

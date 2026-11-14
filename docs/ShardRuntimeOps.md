@@ -156,6 +156,13 @@
   client-only (see `docs/DynClientRuntime.md`).
 - Phase-5 runtime milestone log (cold-start checklist, in-flight validation items):
   roadmap § 5 in `docs/LEGACY_DYNWORLD_INTEGRATION.md`.
+- core4 sync (2026-11-14): upstream's shard-access refactor
+  (`mayUseShard`/`shardLabel`/`permissionRows` from `shard_access.h`) was merged under
+  the U-S4 `switch (getSessionType().getValue())` structure in `joinSession`; all three
+  shard-access gates (ring `default:`, `st_mainland`, `st_dynworld`) now use
+  `mayUseShard(permissionRows, ...)` instead of the deleted
+  `checkAccessRight(userAccessPriv, ...)` / `userAccessPriv`. Details in the roadmap's
+  "core4 sync" section.
 
 ## 8. Kept-by-design instrumentation registry (shard side)
 
