@@ -96,11 +96,32 @@ void contextTalk		(TMouseButton button, bool dblClick);
 void contextExtractRM		(TMouseButton button, bool dblClick);
 void contextMission		(TMouseButton button, bool dblClick);
 void contextWebPage		(TMouseButton button, bool dblClick);
-void contextWebIG		(TMouseButton button, bool dblClick);
 void contextRingMission		(TMouseButton button, bool dblClick);
 void contextOutpost		(TMouseButton button, bool dblClick);
 void contextBuildTotem		(TMouseButton button, bool dblClick);
 void contextSetVoxel		(TMouseButton button, bool dblClick);
+void contextSelect			(bool rightClick, bool dblClick);
+void contextAttack			(bool rightClick, bool dblClick);
+void contextQuarter			(bool rightClick, bool dblClick);
+void contextLoot			(bool rightClick, bool dblClick);
+void contextPickUp			(bool rightClick, bool dblClick);
+void contextTradeItem		(bool rightClick, bool dblClick);
+void contextTradePhrase		(bool rightClick, bool dblClick);
+void contextDynamicMission	(bool rightClick, bool dblClick);
+void contextStaticMission	(bool rightClick, bool dblClick);
+void contextTradePact		(bool rightClick, bool dblClick);
+void contextCreateGuild		(bool rightClick, bool dblClick);
+void contextNews			(bool rightClick, bool dblClick);
+void contextTeleport		(bool rightClick, bool dblClick);
+void contextFaction 		(bool rightClick, bool dblClick);
+void contextCosmetic		(bool rightClick, bool dblClick);
+void contextTalk			(bool rightClick, bool dblClick);
+void contextExtractRM		(bool rightClick, bool dblClick);
+void contextMission			(bool rightClick, bool dblClick);
+void contextWebPage			(bool rightClick, bool dblClick);
+void contextRingMission		(bool rightClick, bool dblClick);
+void contextOutpost			(bool rightClick, bool dblClick);
+void contextBuildTotem		(bool rightClick, bool dblClick);
 //-----------------------------------------------
 // initContextualCursor :
 // Initialize Contextual Cursor.
@@ -135,7 +156,6 @@ void initContextualCursor()
 	ContextCur.add(true,	"EXTRACT_RM",		string("uimGcmExtractRM"),			0.0f,	checkUnderCursor,	contextExtractRM);
 	ContextCur.add(true,	"MISSION",			string(""),							0.0f,	checkUnderCursor,	contextMission);
 	ContextCur.add(true,	"WEB PAGE",			string(""),							0.0f,	checkUnderCursor,	contextWebPage);
-	ContextCur.add(true,	"WEBIG",			string(""),							0.0f,	checkUnderCursor,	contextWebIG);
 	ContextCur.add(true,	"OUTPOST",			string(""),							0.0f,	checkUnderCursor,	contextOutpost);
 	ContextCur.add(true,	"RING MISSION",		string(""),							0.0f,	checkUnderCursor,	contextRingMission);
 	ContextCur.add(true,	"BUILD_TOTEM",		string("uimGcmChooseBuilding"),		0.0f,	checkUnderCursor,	contextBuildTotem);
@@ -292,8 +312,9 @@ void checkUnderCursor()
 		entity= EntitiesMngr.getEntityUnderPos(cursX, cursY, ClientCfg.SelectionDist, isPlayerUnderCursor);
 
 		// If the mouse is over the player make the player transparent
-		CCDBNodeLeaf *pNL = s_UserCharFade ? &*s_UserCharFade
-			: &*(s_UserCharFade = NLGUI::CDBManager::getInstance()->getDbProp("UI:SAVE:USER_CHAR_FADE", false));
+		if (!s_UserCharFade)
+			s_UserCharFade = NLGUI::CDBManager::getInstance()->getDbProp("UI:SAVE:USER_CHAR_FADE", false);
+		CCDBNodeLeaf *pNL = s_UserCharFade;
 		if ((pNL != nullptr) && (pNL->getValue32() == 1) && UserEntity->selectable())
 		{
 			// If the nearest entity is the player, hide!
@@ -571,13 +592,6 @@ void checkUnderCursor()
 					
 					cursor->setCursor("r2ed_tool_select_move_over.tga");
 					InstanceId = instance_idx;
-				}
-				else
-				{
-					cursor->setCursor("curs_pick.tga");
-					string contextText = instref.ContextText;
-					if (ContextCur.context("WEBIG", 0.f, contextText))
-						return;
 				}
 			} else {
 				if (!selectedInstanceURL.empty()) {
@@ -919,36 +933,6 @@ void contextWebPage(TMouseButton button, bool dblClick)
 		return;
 	UserEntity->moveTo(SlotUnderCursor, 3.0, CUserEntity::WebPage);
 }// contextWebPage //
-
-//-----------------------------------------------
-// contextWebIG :
-//-----------------------------------------------
-void contextWebIG(TMouseButton button, bool dblClick)
-{
-	if(button == rightButton)
-		return;
-	CInterfaceManager *IM = CInterfaceManager::getInstance();
-	CInterfaceElement *pGC = CWidgetManager::getInstance()->getElementFromId("ui:interface:bot_chat_object");
-	CInterface3DShape *el= dynamic_cast<CInterface3DShape*>(CWidgetManager::getInstance()->getElementFromId("ui:interface:bot_chat_object:scene3d:object_1"));
-	if (el != nullptr)
-	{
-		//TODO: Fix that
-		//el->setName(selectedInstance.getShapeName());
-		el->setPosX(0.0f);
-	}
-	if (selectedInstanceURL.empty())
-	{
-		if (pGC != nullptr)
-			pGC->setActive(true);
-	}
-	else
-	{
-		if (pGC != nullptr)
-			pGC->setActive(false);
-		CAHManager::getInstance()->runActionHandler("browse", nullptr, "name=ui:interface:webig:content:html|url="+selectedInstanceURL);
-	}
-	
-}// contextWebIG //
 
 //-----------------------------------------------
 // contextOutpost

@@ -557,6 +557,7 @@ CCharacter::CCharacter():	CEntityBase(false),
 	_AdversaryParryModifier	= 0;
 
 	_IsInAComa				= false;
+	m_ComaStartDate			= 0;
 	_IntangibleEndDate		= 0;
 	uint64 NOT_TELEPORTING_FLAG= (((uint64)0x12345678)<<32)| (uint64)0x87654321;
 	_WhoSeesMeBeforeTP		= 	NOT_TELEPORTING_FLAG;
@@ -1132,6 +1133,11 @@ uint32 CCharacter::tickUpdate()
 	// test again as effects can kill the entity (dots...)
 	if (!isDead())
 	{
+		// a living character has no coma date: one loaded dead can come back to life without dying
+		// again (god mode, or hit points regenerated while a teleport is in progress)
+		if (currentHp() > 0)
+			m_ComaStartDate = 0;
+
 		{
 			H_AUTO(CharacterComputeMaxValue);
 			// Compute max values after apply modifier
@@ -1644,7 +1650,11 @@ void CCharacter::kill(TDataSetRow killerRowId)
 	removeAllSpells();
 	_ForbidPowerDates.clearConsumable();
 
-	_PhysScores._PhysicalScores[SCORES::hit_points].Current = -_PhysScores._PhysicalScores[SCORES::hit_points].Max / 2;
+	// A character saved while dead has kept the date its coma began: the coma goes on from there,
+	// the time spent logged out included, and does not start again at the login
+	if (m_ComaStartDate == 0)
+		m_ComaStartDate = CTime::getSecondsSince1970();
+	_PhysScores._PhysicalScores[SCORES::hit_points].Current = comaHitPoints();
 	setBars();
 
 	_TimeDeath = CTickEventHandler::getGameTime() + 5.0;
@@ -1815,7 +1825,10 @@ void CCharacter::deathOccurs( void )
 			{
 				float currentRegen = - _PhysScores._PhysicalScores[ i ].Max / (CommaDelayBeforeDeath * 0.2f );
 				_PhysScores._PhysicalScores[ i ].CurrentRegenerate = currentRegen;
-				_PhysScores._PhysicalScores[ i ].Current = - _PhysScores._PhysicalScores[ i ].Max / 2;
+				_PhysScores._PhysicalScores[ i ].Current = comaHitPoints();
+				// the value counts all the time up to now, the drain below goes on from this tick
+				_PhysScores._PhysicalScores[ i ].RegenerateTickUpdate = CTickEventHandler::getGameCycle();
+				_PhysScores._PhysicalScores[ i ].KeepRegenerateDecimal = 0;
 			}
 			else
 			{
@@ -1861,6 +1874,28 @@ void CCharacter::deathOccurs( void )
 	setBars();
 }
 
+
+//---------------------------------------------------
+// hit points of a dead character, from the date its coma began
+//
+//---------------------------------------------------
+sint32 CCharacter::comaHitPoints() const
+{
+	const sint32 maxHp = _PhysScores._PhysicalScores[SCORES::hit_points].Max;
+
+	// part of the coma delay that has passed, 0 to 1
+	double elapsedRatio = 0.0;
+	const uint32 now = CTime::getSecondsSince1970();
+	if (m_ComaStartDate != 0 && now > m_ComaStartDate)
+	{
+		const double comaDelay = (double)CommaDelayBeforeDeath.get() * CTickEventHandler::getGameTimeStep();
+		const double elapsed = (double)(now - m_ComaStartDate);
+		elapsedRatio = (comaDelay > 0.0 && elapsed < comaDelay) ? elapsed / comaDelay : 1.0;
+	}
+
+	const sint32 startHp = -maxHp / 2;
+	return startHp + (sint32)((double)(-maxHp - startHp) * elapsedRatio);
+}
 
 //---------------------------------------------------
 // player choose a re-spawn for his death character
@@ -1955,6 +1990,7 @@ void CCharacter::applyRespawnEffects()
 	_Behaviour = MBEHAV::IDLE;
 	_IsDead = false;
 	_IsInAComa = false;
+	m_ComaStartDate = 0;
 }
 
 //---------------------------------------------------
@@ -1967,6 +2003,7 @@ void CCharacter::resurrected()
 	_Behaviour = MBEHAV::IDLE;
 	_IsDead = false;
 	_IsInAComa = false;
+	m_ComaStartDate = 0;
 	resetNextDeathPenaltyFactor();
 
 	PROGRESSIONPVP::CCharacterProgressionPVP::getInstance()->playerResurrected(this);
@@ -1988,6 +2025,7 @@ void CCharacter::revive()
 	_Behaviour = MBEHAV::IDLE;
 	_IsDead = false;
 	_IsInAComa = false;
+	m_ComaStartDate = 0;
 	_RegionKilledInPvp = 0xffff;
 
 	_PhysScores._PhysicalScores[ SCORES::hit_points ].Current = _PhysScores._PhysicalScores[ SCORES::hit_points ].Base;
@@ -4569,31 +4607,9 @@ void CCharacter::removeKnownBrick( const CSheetId& brickId )
 			return;
 		}
 
-		_BrickFamilyBitField[brickForm->Family] |= ( (sint64)1 << (sint64)pos);
-//		_PropertyDatabase.setProp( _DataIndexReminder->KnownBricksFamilies[brickForm->Family], _BrickFamilyBitField[brickForm->Family]);
+		// clear the brick's bit, the client then no longer shows the brick as known
+		_BrickFamilyBitField[brickForm->Family] &= ~((sint64)1 << (sint64)pos);
 		CBankAccessor_PLR::getBRICK_FAMILY().getArray(brickForm->Family).setBRICKS(_PropertyDatabase, _BrickFamilyBitField[brickForm->Family]);
-
-		// unlock the relative interface if it's the first brick of this type
-		INTERFACE_FLAGS::TInterfaceFlag flag = INTERFACE_FLAGS::Unknown;
-		switch( BRICK_FAMILIES::brickType(brickForm->Family))
-		{
-		case BRICK_TYPE::COMBAT:
-			flag = INTERFACE_FLAGS::Combat;
-			break;
-		case BRICK_TYPE::MAGIC:
-			flag = INTERFACE_FLAGS::Magic;
-			break;
-		case BRICK_TYPE::COMMERCE:
-			flag = INTERFACE_FLAGS::Commerce;
-			break;
-		default:
-			flag = INTERFACE_FLAGS::Special;
-			break;
-		};
-
-		_InterfacesFlagsBitField |= SINT64_CONSTANT(1) << uint8(flag);
-//		_PropertyDatabase.setProp( "INTERFACES:FLAGS", _InterfacesFlagsBitField);
-		CBankAccessor_PLR::getINTERFACES().setFLAGS(_PropertyDatabase, _InterfacesFlagsBitField);
 	}
 	else
 	{
@@ -7154,6 +7170,16 @@ bool CCharacter::addCatalyserXpBonus( uint32& slot, SSkill * skill, double xpGai
 } // addCatalyserXpBonus
 
 
+//---------------------------------------------------
+// refillScoresOnLevelUp : a new level refills hit points, stamina, sap and focus
+//---------------------------------------------------
+static void refillScoresOnLevelUp(CPhysicalScores &scores)
+{
+	scores._PhysicalScores[SCORES::hit_points].Current = scores._PhysicalScores[SCORES::hit_points].Max;
+	scores._PhysicalScores[SCORES::stamina].Current = scores._PhysicalScores[SCORES::stamina].Max;
+	scores._PhysicalScores[SCORES::sap].Current = scores._PhysicalScores[SCORES::sap].Max;
+	scores._PhysicalScores[SCORES::focus].Current = scores._PhysicalScores[SCORES::focus].Max;
+}
 
 //---------------------------------------------------
 // addXpToSkillInternal : Add amount of xp gain to a skill
@@ -7548,20 +7574,19 @@ double CCharacter::addXpToSkillInternal( double XpGain, const std::string& ContS
 //			EGSPD::skillProgessed(_Id, skillName, skill->Base);
 			log_Character_LevelUp(_Id, skillName, skill->Base);
 			// resplenish the enrgies as player gets a new level
-			_PhysScores._PhysicalScores[ SCORES::hit_points ].Current = _PhysScores._PhysicalScores[ SCORES::hit_points ].Max;
-			_PhysScores._PhysicalScores[ SCORES::stamina ].Current = _PhysScores._PhysicalScores[ SCORES::stamina ].Max;
-			_PhysScores._PhysicalScores[ SCORES::sap ].Current = _PhysScores._PhysicalScores[ SCORES::sap ].Max;
-			_PhysScores._PhysicalScores[ SCORES::focus ].Current = _PhysScores._PhysicalScores[ SCORES::focus ].Max;
+			refillScoresOnLevelUp(_PhysScores);
 		}
 		else
 		{
 			//check if skill have children skill
 			if ( ! SkillsTree->SkillsTree[ skillEnum ].ChildSkills.empty() )
 			{
+				bool childUnlocked = false;
 				for( vector<SKILLS::ESkills>::const_iterator it = SkillsTree->SkillsTree[ skillEnum ].ChildSkills.begin(); it != SkillsTree->SkillsTree[ skillEnum ].ChildSkills.end(); ++it )
 				{
 					if( _Skills._Skills[ *it ].Base == 0 )
 					{
+						childUnlocked = true;
 						_Skills._Skills[ *it ].Base = skill->Base + 1;
 						if(_Skills._Skills[ *it ].MaxLvlReached < (skill->Base + 1))
 							_Skills._Skills[ *it ].MaxLvlReached = skill->Base + 1;
@@ -7610,6 +7635,9 @@ double CCharacter::addXpToSkillInternal( double XpGain, const std::string& ContS
 						processMissionEvent(event);
 					}
 				}
+				// the unlocked skills start one level above this one: a new level, as on the path above
+				if (childUnlocked)
+					refillScoresOnLevelUp(_PhysScores);
 				skill->Xp = stage->XpForPointSkill;
 			}
 			else
@@ -8629,7 +8657,9 @@ void CCharacter::setStartStatistics( const CCreateCharMsg& createCharMsg )
 	}
 	else
 	{
-		setWelcomeMissionDesc(mission, bot);
+		// a start point may have no welcome mission; an unknown mission name is reported when the start points are read
+		if (mission != CAIAliasTranslator::Invalid)
+			setWelcomeMissionDesc(mission, bot);
 		COfflineEntityState state;
 		zone->getRandomPoint( state.X,state.Y,state.Z,state.Heading );
 		setState( state );
@@ -17170,6 +17200,8 @@ void CCharacter::onDisconnection(bool bCrashed)
 	CBuildingManager::getInstance()->removePlayerFromRoom(this);
 	// TODO : check if it's not an exploit to disconnect the player from PVP now (not waiting the disconnection time)
 	CPVPManager2::getInstance()->playerDisconnects(this);
+	// the team invitations this character sent or waits on
+	TeamManager.playerDisconnects(this);
 
 	// Remove handledAIGroups for all missions of the player
 	despawnAllHandledAIGroup();
@@ -17597,10 +17629,8 @@ void CCharacter::sendCustomEmote( const NLMISC::CEntityId& id, MBEHAV::EBehaviou
 
 	string sEmoteCustomText = emoteCustomText.toUtf8();
 
-	if ((behaviour != MBEHAV::IDLE) || (sEmoteCustomText == "none"))
-	{
-		setAfkState(false);
-	}
+	// an emote is an action of the player, with or without an animation, as in sendEmote
+	setAfkState(false);
 
 	if( sEmoteCustomText == "none" )
 	{
@@ -18045,8 +18075,9 @@ void CCharacter::checkScoresValues( SCORES::TScores score, CHARACTERISTICS::TCha
 	sint32 base = (_PhysCharacs._PhysicalCharacteristics[ charac ].Base + PhysicalCharacteristicsBaseValue) * PhysicalCharacteristicsFactor + _ScorePermanentModifiers[ score ];
 	if(	_PhysScores._PhysicalScores[ score ].Base != base )
 	{
-		// TODO: What's this?
-		nlwarning("BADCHECK For player %s, for %s, player should have %u and he has %u !", _Id.toString().c_str(), SCORES::toString(score).c_str(), base, _PhysScores._PhysicalScores[ score ].Base);
+		// Expected for a character saved while a modifier was on the characteristic: computeMaxValue() derives the
+		// score from the current characteristic at every tick update, so the saved value does not last anyway
+		nldebug("Character %s was saved with a base %s of %d, its base characteristic gives %d (as when saved under a characteristic modifier; set again at the first tick update)", _Id.toString().c_str(), SCORES::toString(score).c_str(), _PhysScores._PhysicalScores[score].Base, base);
 //vl		_PhysScores._PhysicalScores[ score ].Base = base;
 	}
 
@@ -18057,8 +18088,8 @@ void CCharacter::checkScoresValues( SCORES::TScores score, CHARACTERISTICS::TCha
 	baseRegenerateAction += RegenOffset;
 	if(	fabs((_PhysScores._PhysicalScores[ score ].BaseRegenerateRepos * 100.0f) - (100.0f * baseRegenerateRepos)) > 0.001)
 	{
-		// TODO: What's this?
-		nlwarning("BADCHECK For player %s, for %s regen, player should have %f and he has %f !", _Id.toString().c_str(), SCORES::toString(score).c_str(), baseRegenerateRepos, _PhysScores._PhysicalScores[ score ].BaseRegenerateRepos);
+		// Expected as well, for the same reason
+		nldebug("Character %s was saved with a base %s regeneration of %f, its characteristic gives %f (as when saved under a characteristic modifier; set again at the first tick update)", _Id.toString().c_str(), SCORES::toString(score).c_str(), _PhysScores._PhysicalScores[score].BaseRegenerateRepos, baseRegenerateRepos);
 //vl		_PhysScores._PhysicalScores[ score ].BaseRegenerateRepos = baseRegenerateRepos;
 //vl		_PhysScores._PhysicalScores[ score ].BaseRegenerateAction = baseRegenerateAction;
 	}
@@ -18123,8 +18154,8 @@ void CCharacter::checkCharacAndScoresValues()
 		// compare
 		if (_PhysCharacs._PhysicalCharacteristics[charac].Base != tvalue)
 		{
-			// TODO: What's this?
-			nlwarning("BADCHECK For player %s, for charac %s, player should have %u and he has %u !", _Id.toString().c_str(), CHARACTERISTICS::toString(charac).c_str(), tvalue,_PhysCharacs._PhysicalCharacteristics[charac].Base);
+			// Diagnostic only, nothing is corrected: the base characteristic is not the one the bought upgrades give
+			nlwarning("BADCHECK: character %s has a base %s of %d, its starting value %d and its highest bought upgrade (level %u, %d per level) give %d; the value is kept", _Id.toString().c_str(), CHARACTERISTICS::toString(charac).c_str(), _PhysCharacs._PhysicalCharacteristics[charac].Base, (sint32)_StartingCharacteristicValues[charac], (uint)maxPhraseLvlValue[charac], (sint32)CharacteristicBrickStep, tvalue);
 
 //vl			_PhysCharacs._PhysicalCharacteristics[charac].Base = tvalue;
 //vl			_PhysCharacs._PhysicalCharacteristics[charac].Current = tvalue;
@@ -20210,6 +20241,10 @@ std::vector<SItemSpecialEffect> CCharacter::lookForSpecialItemEffects(ITEM_SPECI
 //-----------------------------------------------------------------------------
 bool CCharacter::canBelongToGuild( uint32 guildId, bool setToNone /*= false*/ )
 {
+	// what setToNone may reset below
+	const PVP_CLAN::TPVPClan oldCult = _DeclaredCult;
+	const PVP_CLAN::TPVPClan oldCiv = _DeclaredCiv;
+
 	// Allow changes to guild 0 (no guild)
 	if (guildId == 0)
 	{
@@ -20224,8 +20259,7 @@ bool CCharacter::canBelongToGuild( uint32 guildId, bool setToNone /*= false*/ )
 		// guildAllegiance is a pair; first element = cult, second element = civilization.
 		std::pair<PVP_CLAN::TPVPClan, PVP_CLAN::TPVPClan> guildAllegiance = theGuild->getAllegiance();
 
-		if (guildAllegiance.first != _DeclaredCult
-			&& _DeclaredCult != PVP_CLAN::None && _DeclaredCult != PVP_CLAN::Neutral)
+		if (!CGuild::isAllegianceCompatible(guildAllegiance.first, _DeclaredCult))
 		{
 			// Check parameter.  Used to correct players just logging on if guild changed
 			//   allegiance.  If we change it, we should return true.
@@ -20239,8 +20273,7 @@ bool CCharacter::canBelongToGuild( uint32 guildId, bool setToNone /*= false*/ )
 			}
 		}
 
-		if (guildAllegiance.second != _DeclaredCiv
-		    && _DeclaredCiv != PVP_CLAN::None && _DeclaredCiv != PVP_CLAN::Neutral)
+		if (!CGuild::isAllegianceCompatible(guildAllegiance.second, _DeclaredCiv))
 		{
 			// Check parameter.  Used to correct players just logging on if guild changed
 			//   allegiance.  If we change it, we should return true.
@@ -20252,6 +20285,23 @@ bool CCharacter::canBelongToGuild( uint32 guildId, bool setToNone /*= false*/ )
 			{
 				return false;
 			}
+		}
+
+		if (_DeclaredCult != oldCult || _DeclaredCiv != oldCiv)
+		{
+			// The allegiance was reset. setDeclaredCult and setDeclaredCiv are not used for it, as they check the
+			// guild again; what they tell the client and the shard unifier is done here. A character that has not
+			// entered the game yet gets its database and its fame caps when it does (finalizeClientReady).
+			if (getEnterFlag())
+			{
+				CBankAccessor_PLR::getFAME().setCULT_ALLEGIANCE(_PropertyDatabase, _DeclaredCult);
+				CBankAccessor_PLR::getFAME().setCIV_ALLEGIANCE(_PropertyDatabase, _DeclaredCiv);
+				resetFameDatabase();
+				// the faction channels follow the allegiance in a RYZOM_FORGE build
+				CPVPManager2::getInstance()->updateFactionChannel(this);
+			}
+			if (IShardUnifierEvent::getInstance() != NULL)
+				IShardUnifierEvent::getInstance()->onUpdateCharAllegiance(_Id, _DeclaredCult, _DeclaredCiv);
 		}
 
 		return true;

@@ -146,7 +146,9 @@ $ErrMsgs[3012]['en'] = "Account permissions updated, please log in again";
 $ErrMsgs[3012]['fr'] = "Permissions du compte mises à jour, veuillez vous reconnecter";
 $ErrMsgs[3012]['de'] = "Account-Rechte aktualisiert, bitte melde dich erneut an";
 
-$ErrMsgs[3013]['dbg'] = "(client application: %1 domain: %2 reqPriv: %3)";
+// The account has permission rows for the domain, but none of them holds the
+// access the domain status asks for (%3); %4 lists the rows.
+$ErrMsgs[3013]['dbg'] = "(client application: %1 domain: %2; the domain status asks for %3, the permission rows of the account hold: %4)";
 $ErrMsgs[3013]['en'] = "You don't have sufficient privilege to connect now, please try later";
 $ErrMsgs[3013]['fr'] = "Vous n'avez pas les privilèges nécessaires pour vous connecter maintenant, veuillez essayer plus tard";
 $ErrMsgs[3013]['de'] = 'Du hast nicht die nötigen Rechte um dich jetzt zu verbinden, bitte versuch es später nochmal';
@@ -159,6 +161,12 @@ $ErrMsgs[3014]['dbg'] = "Refused to auto-create login '%1': not a valid account 
 $ErrMsgs[3014]['en'] = "This account name cannot be used: letters, numbers and underscores only";
 $ErrMsgs[3014]['fr'] = "Ce nom de compte ne peut pas être utilisé : uniquement des lettres, des chiffres et des tirets bas";
 $ErrMsgs[3014]['de'] = "Dieser Accountname kann nicht verwendet werden: nur Buchstaben, Zahlen und Unterstriche";
+
+// The domain status maps to no member of permission.AccessPrivilege
+// (ds_close): nobody may enter, and no permission row is written.
+$ErrMsgs[3015]['dbg'] = "(domain: %1 status: %2)";
+$ErrMsgs[3015]['lnk'] = $msgGameServersClosed;
+$ErrMsgs[3015]['log'] = false;
 
 // Translated Ring Session Manager (joinSession) error messages
 define('BASE_TRANSLATED_RSM_ERROR_NUM', 4000);
@@ -201,8 +209,12 @@ $ErrMsgs[4011]['dbg'] = 'joinSession error %1: %2 for userId %3';
 $ErrMsgs[4011]['lnk'] = $msgJoinSessionFailed;
 $ErrMsgs[4012]['dbg'] = 'joinSession error %1: %2 for userId %3';
 $ErrMsgs[4012]['lnk'] = $msgJoinSessionFailed;
-$ErrMsgs[4013]['dbg'] = 'joinSession error %1: %2 for userId %3';
-$ErrMsgs[4013]['lnk'] = $msgJoinSessionFailed;
+// 13: the session manager found no permission row of the account for the
+// domain, the same reason as 3011 here. This script refuses such an account
+// before it asks the session manager, so the case is logged with its detail.
+$ErrMsgs[4013]['dbg'] = '(joinSession error %1: %2 for userId %3)';
+$ErrMsgs[4013]['lnk'] = $ErrMsgs[3011];
+$ErrMsgs[4013]['log'] = true;
 
 $ErrMsgs[4014]['dbg'] = '(joinSession error %1: %2 for userId %3)';
 $ErrMsgs[4014]['lnk'] = $msgGameServersClosed;

@@ -84,7 +84,6 @@
 //
 #include "gabarit.h"
 #include "hair_set.h"
-//#include "starting_roles.h"
 
 #include "init_main_loop.h"
 
@@ -560,8 +559,8 @@ void checkDriverVersion()
 				break;
 			}
 		}
-		if (i==sizeof (driversVersion)/sizeof(uint))
-			nlwarning ("Unknown video card : %s", deviceName.c_str());
+		if (i == sizeofarray(driversVersion))
+			nldebug("Unknown video card : %s", deviceName.c_str());
 	}
 	else
 		nlwarning ("Can't check video driver version");
@@ -891,6 +890,67 @@ void initLog()
 #endif
 }
 
+// The scale of the display, 1 at 96 dpi. On Windows this is the system dpi, the client being dpi aware
+// (dpiaware.manifest); elsewhere 1.
+static float getDisplayScale()
+{
+#ifdef NL_OS_WINDOWS
+	HDC hdc = GetDC(NULL);
+	if (hdc)
+	{
+		int dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+		ReleaseDC(NULL, hdc);
+		if (dpi > 0)
+			return (float)dpi / 96.f;
+	}
+#endif
+	return 1.f;
+}
+
+// The default window size (the client area), 1024x768 scaled for the display, shrunk to the room a window has:
+// on Windows the work area (the screen without the taskbar) less the frame the driver adds around the client area,
+// elsewhere the screen
+static void getDefaultWindowSize(UDriver *driver, uint16 &width, uint16 &height)
+{
+	float scale = getDisplayScale();
+	float w = 1024.f * scale;
+	float h = 768.f * scale;
+	float roomWidth = 0.f;
+	float roomHeight = 0.f;
+#ifdef NL_OS_WINDOWS
+	RECT workArea;
+	if (SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0))
+	{
+		// the frame of the window style of the driver (WS_OVERLAPPEDWINDOW), as it adds it in setWindowSize
+		RECT frame;
+		SetRect(&frame, 0, 0, 0, 0);
+		AdjustWindowRectEx(&frame, WS_OVERLAPPEDWINDOW, FALSE, 0);
+		roomWidth = (float)((workArea.right - workArea.left) - (frame.right - frame.left));
+		roomHeight = (float)((workArea.bottom - workArea.top) - (frame.bottom - frame.top));
+	}
+#endif
+	if (roomWidth <= 0.f || roomHeight <= 0.f)
+	{
+		UDriver::CMode screen;
+		if (driver->getCurrentScreenMode(screen) && screen.Width > 0 && screen.Height > 0)
+		{
+			roomWidth = (float)screen.Width;
+			roomHeight = (float)screen.Height;
+		}
+	}
+	if (roomWidth > 0.f && roomHeight > 0.f)
+	{
+		float fit = std::min(roomWidth / w, roomHeight / h);
+		if (fit < 1.f)
+		{
+			w *= fit;
+			h *= fit;
+		}
+	}
+	width = (uint16)(w + 0.5f);
+	height = (uint16)(h + 0.5f);
+}
+
 //---------------------------------------------------
 // prelogInit :
 // Initialize the application before login
@@ -1088,7 +1148,13 @@ void prelogInit()
 		// first run (no client.cfg)
 		if (ClientCfg.Width == 0  || ClientCfg.Height == 0)
 		{
-			if (Driver->getCurrentScreenMode(mode))
+			if (ClientCfg.Windowed)
+			{
+				// a configuration that asks for a window (FullScreen = 0, like the development client of the
+				// quick start) keeps it, at the default window size
+				getDefaultWindowSize(Driver, ClientCfg.Width, ClientCfg.Height);
+			}
+			else if (Driver->getCurrentScreenMode(mode))
 			{
 				// fullscreen, using monitor resolution
 				mode.Windowed = false;
@@ -1104,8 +1170,7 @@ void prelogInit()
 			{
 				// fallback
 				ClientCfg.Windowed = true;
-				ClientCfg.Width = 1024;
-				ClientCfg.Height = 768;
+				getDefaultWindowSize(Driver, ClientCfg.Width, ClientCfg.Height);
 			}
 
 			// update client.cfg with detected resolution
@@ -1121,15 +1186,14 @@ void prelogInit()
 
 			ClientCfg.ConfigFile.save();
 		}
-		else
-		{
-			mode.DisplayDevice = ClientCfg.MonitorName;
-			mode.Windowed = ClientCfg.Windowed;
-			mode.Width = ClientCfg.Width;
-			mode.Height = ClientCfg.Height;
-			mode.Depth = ClientCfg.Depth;
-			mode.Frequency = ClientCfg.Frequency;
-		}
+
+		// the mode of the configuration, as detected above on a first run
+		mode.DisplayDevice = ClientCfg.MonitorName;
+		mode.Windowed = ClientCfg.Windowed;
+		mode.Width = ClientCfg.Width;
+		mode.Height = ClientCfg.Height;
+		mode.Depth = ClientCfg.Depth;
+		mode.Frequency = ClientCfg.Frequency;
 
 		CLoginProgressPostThread::getInstance().step(CLoginStep(LoginStep_VideoModeSetup, "login_step_video_mode_setup"));
 
@@ -1579,7 +1643,8 @@ void postlogInit()
 			nmsg = "Initializing primitive classes...";
 			ProgressBar.newMessage ( ClientCfg.buildLoadingString(nmsg) );
 
-			if (!LigoConfig.readPrimitiveClass (ClientCfg.LigoPrimitiveClass.c_str(), false))
+			// Empty means no primitive classes: FINAL_VERSION does not read the variable (READ_STRING_DEV)
+			if (!ClientCfg.LigoPrimitiveClass.empty() && !LigoConfig.readPrimitiveClass(ClientCfg.LigoPrimitiveClass.c_str(), false))
 			{
 				nlwarning ("Can't load primitive class file %s", ClientCfg.LigoPrimitiveClass.c_str());
 			}

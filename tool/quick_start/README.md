@@ -10,9 +10,23 @@ Run the scripts in this order to configure the toolchains:
 - configure_pipeline.py
 - configure_launchers.py
 
+The configuration runs `0_setup.py -p`, which writes `.nel/buildsite_*.py` from the defaults. A root
+configured before a newer pipeline lacks the settings that its new projects read, so run the
+configuration again after updating. On a root that has already built its data, the configuration
+skips the build steps, so install a new project from `cmd_build_gamedata.bat` afterwards. The
+`common/examples` project, which installs the example scenarios and the NPC name lists of the Ring
+editor (`ryzom/client/examples`) into the `examples` folder of the client, reads `ExamplesDirectory`:
+`python 3_install.py -ipj common/examples`, then `python b1_client_dev.py` for the development client.
+
+Python, MariaDB, nginx, PHP, phpMyAdmin, Perl, rrdtool, Dependencies and the command line utilities come
+from the externals package (`Paths` in `config_default.json`, C:\2026q4_external_v143_x64 by default); the
+quick start and the build pipeline run under its Python 3. Nothing is written into the externals folder: the
+development web keeps its configuration, logs and phpMyAdmin copy in `pipeline/shard_dev/web`
+(`configure_web.py`), and its database in `pipeline/shard_dev/mysql`.
+
 The shard scripts (shard_mainland.bat and the others, web_on.bat) open servdash_gui from the tools
 build. Set `"Headless": true` in `.nel/config.json` to get servdash_cli in the console instead, for a
-box reached over SSH. The Win32 servdash of external/utils is the fallback when neither is built.
+box reached over SSH. One of them must be built, there is no fallback.
 `.mcp.json` in the root registers `_servdash_mcp.bat` with Claude Code: the Model Context Protocol
 server of the chosen dashboard tool, over every dashboard running for the user, so an agent can
 start a shard from its ini, watch the logs, run service commands and stop it again.

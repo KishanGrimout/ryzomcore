@@ -563,6 +563,16 @@ void impulseServerQuitOk(NLMISC::CBitMemStream &impulse)
 			game_exit= true;
 			ryzom_exit= true;
 		}
+		else
+		{
+			// Nobody asked to quit and no Far TP is leaving the shard: the EGS removed the active character on its
+			// own (the disconnectPlayer command, the three failures of cbClientReady, an exception late in
+			// cbSelectChar), and it does not ask the frontend to close the connection. Nothing more comes for
+			// this character, so end the connection here, as for ACTION_DISCONNECTION_CODE: the main loop shows
+			// the disconnection (uiDisconnected) and lets the player exit.
+			nlwarning("The server ended the game session without a quit request (CONNECTION:SERVER_QUIT_OK), disconnecting");
+			NetMngr.disconnect();
+		}
 	}
 }
 
@@ -1766,6 +1776,19 @@ void impulseTeamInvitation(NLMISC::CBitMemStream &impulse)
 
 	CLuaManager::getInstance().executeLuaScript("game:onTeamInvation("+toString(textID)+")", 0);
 }// impulseTeamInvitation //
+
+//-----------------------------------------------
+// impulseTeamCancelInvitation :
+// The invitation ended on the server (no answer in time, or the invitor left): close its window
+//-----------------------------------------------
+void impulseTeamCancelInvitation(NLMISC::CBitMemStream &impulse)
+{
+	if (PermanentlyBanned) return;
+
+	CGroupContainer *pGC = dynamic_cast<CGroupContainer *>(CWidgetManager::getInstance()->getElementFromId("ui:interface:join_team_proposal"));
+	if (pGC == nullptr) return;
+	pGC->setActive(false);
+}// impulseTeamCancelInvitation //
 
 //-----------------------------------------------
 // impulseTeamShareOpen
@@ -3656,6 +3679,7 @@ void initializeNetwork()
 
 	GenericMsgHeaderMngr.setCallback("CASTING:BEGIN",			impulseBeginCast);
 	GenericMsgHeaderMngr.setCallback("TEAM:INVITATION",			impulseTeamInvitation);
+	GenericMsgHeaderMngr.setCallback("TEAM:CANCEL_INVITATION",	impulseTeamCancelInvitation);
 	GenericMsgHeaderMngr.setCallback("TEAM:SHARE_OPEN",			impulseTeamShareOpen);
 	GenericMsgHeaderMngr.setCallback("TEAM:SHARE_INVALID",		impulseTeamShareInvalid);
 	GenericMsgHeaderMngr.setCallback("TEAM:SHARE_CLOSE",		impulseTeamShareClose);

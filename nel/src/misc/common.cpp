@@ -1127,35 +1127,26 @@ static bool createProcess(const std::string &programName, const std::string &arg
 		SetEnvironmentVariableA(SE_TRANSLATOR_IN_MAIN_MODULE, NULL);
 	}
 
-	wchar_t *sProgramName = NULL;
-	
-	std::string args;
+	// The first parameter of CreateProcess names one file and is not searched for. It is used for a
+	// program name with a directory, and for a bare name that names a file in the current directory.
+	// With the first parameter NULL, CreateProcess takes the program name from the command line: a bare
+	// name is searched for (application directory, current directory, system directories, PATH, as
+	// execvp searches PATH on Unix) and gets .exe when it has no extension, and a .bat file is run by
+	// the command interpreter.
+	bool useApplicationName = CFile::getExtension(programName) != "bat"
+	    && (!CFile::getPath(programName).empty() || CFile::fileExists(programName));
+	std::wstring wProgramName;
+	if (useApplicationName)
+		wProgramName = utf8ToWide(programName);
 
-	// a .bat file must have first parameter to NULL and use 2nd parameter to pass filename
-	if (CFile::getExtension(programName) == "bat")
-	{
-		args = "\"" + programName + "\" " + arguments;
-	}
-	else
-	{
-		ucstring ucProgramName;
-		ucProgramName.fromUtf8(programName);
+	// the program name is the first argument of the command line, quoted since it may contain spaces
+	std::string args = "\"" + programName + "\" " + arguments;
 
-		sProgramName = new wchar_t[MAX_PATH];
-		wcscpy(sProgramName, (wchar_t*)ucProgramName.c_str());
-
-		// important! we need to specify the executable full path as first argument
-		args = toString("\"%s\" ", programName.c_str()) + arguments;
-	}
+	// CreateProcess may modify the command line in place
+	std::wstring wArgs = utf8ToWide(args);
 
 	// or 0 for a window
-	BOOL res = CreateProcessW(sProgramName, (LPWSTR)nlUtf8ToWide(args), NULL, NULL, FALSE, CREATE_DEFAULT_ERROR_MODE | CREATE_NO_WINDOW, NULL, NULL /* current dir */, &si, &pi);
-
-	if (sProgramName)
-	{
-		delete [] sProgramName;
-		sProgramName = NULL;
-	}
+	BOOL res = CreateProcessW(useApplicationName ? wProgramName.c_str() : NULL, &wArgs[0], NULL, NULL, FALSE, CREATE_DEFAULT_ERROR_MODE | CREATE_NO_WINDOW, NULL, NULL /* current dir */, &si, &pi);
 
 	if (!res)
 	{
@@ -1165,8 +1156,7 @@ static bool createProcess(const std::string &programName, const std::string &arg
 			nlwarning("LAUNCH: Failed launched '%s' with arg '%s' err %d: '%s'", programName.c_str(), arguments.c_str(), lastError, formatErrorMessage(lastError).c_str());
 		}
 
-		CloseHandle( pi.hProcess );
-		CloseHandle( pi.hThread );
+		// no process was created, there are no handles to close
 
 		return false;
 	}
@@ -1421,6 +1411,13 @@ sint launchProgramAndWaitForResult(const std::string &programName, const std::st
 		}
 
 		nlwarning("LAUNCH: Failed launched '%s' with arg '%s' and error: %s", programName.c_str(), arguments.c_str(), error.c_str());
+	}
+
+	// the handles of a process whose wait failed are still open (closed after the error was read above)
+	if (ret != WAIT_OBJECT_0)
+	{
+		CloseHandle(pi.hProcess);
+		CloseHandle(pi.hThread);
 	}
 
 	return -1;
@@ -1701,55 +1698,22 @@ int	nlfseek64( FILE *stream, sint64 offset, int origin )
 {
 #ifdef NL_OS_WINDOWS
 
-	//
-	fpos_t pos64 = 0;
-	switch (origin)
-	{
-	case SEEK_CUR:
-		if (fgetpos(stream, &pos64) != 0)
-			return -1;
-	case SEEK_END:
-		pos64 = _filelengthi64(_fileno(stream));
-		if (pos64 == -1L)
-			return -1;
-	};
-
-	// Seek
-	pos64 += offset;
-
-	// Set the final position
-	return fsetpos (stream, &pos64);
+	// The stream knows its position and its end with what it has buffered: the length of the file on disk
+	// does not include what was written and not flushed yet. _fseeki64 exists since Visual C++ 2005, and
+	// in mingw-w64.
+	return _fseeki64(stream, offset, origin);
 
 #else // NL_OS_WINDOWS
-	// TODO: to fix for Linux and Mac OS X
 
-	// This code doesn't work under windows : fseek() implementation uses a signed 32 bits offset. What ever we do, it can't seek more than 2 Go.
-	// For the moment, i don't know if it works under linux for seek of more than 2 Go.
-
-	nlassert ((offset < SINT64_CONSTANT(2147483647)) && (offset > SINT64_CONSTANT(-2147483648)));
-
-	bool first = true;
-	do
+	// off_t is 64 bits wide on 64-bit systems, and on 32-bit systems when built with _FILE_OFFSET_BITS=64
+	if ((sint64)(off_t)offset != offset)
 	{
-		// Get the size of the next fseek
-		sint nextSeek;
-		if (offset > 0)
-			nextSeek = (sint)std::min ((sint64)SINT64_CONSTANT(2147483647), offset);
-		else
-			nextSeek = (sint)std::max ((sint64)-SINT64_CONSTANT(2147483648), offset);
-
-		// Make a seek
-		int result = fseek ( stream, nextSeek, first?origin:SEEK_CUR );
-		if (result != 0)
-			return result;
-
-		// Remaining
-		offset -= nextSeek;
-		first = false;
+		nlwarning("nlfseek64: offset %" NL_I64 "d does not fit in the %u bit off_t of this build, build with _FILE_OFFSET_BITS=64", offset, (uint)(sizeof(off_t) * 8));
+		errno = EOVERFLOW;
+		return -1;
 	}
-	while (offset);
 
-	return 0;
+	return fseeko(stream, (off_t)offset, origin);
 
 #endif // NL_OS_WINDOWS
 }
@@ -1764,11 +1728,8 @@ sint64 nlftell64(FILE *stream)
 	}
 	else return -1;
 #else
-	nlunreferenced(stream);
-
-	// TODO: implement for Linux and Mac OS X
-	nlerror("Not implemented");
-	return -1;
+	// see nlfseek64 for the width of off_t
+	return (sint64)ftello(stream);
 #endif
 }
 
@@ -1921,7 +1882,13 @@ static bool openDocWithExtension (const std::string &document, const std::string
 
 				// create process
 				PROCESS_INFORMATION pi;
-				return createProcess(program, document, false, pi);
+				if (!createProcess(program, document, false, pi))
+					return false;
+
+				// the program runs on its own, its handles are not needed
+				CloseHandle(pi.hProcess);
+				CloseHandle(pi.hThread);
+				return true;
 			}
 		}
 	}

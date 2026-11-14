@@ -17,6 +17,7 @@
 	include_once('login_translations.php');
 	include_once('../tools/nel_message.php');
 	include_once('../tools/domain_info.php');
+	include_once('../tools/shard_access.php');
 	include_once('login_service_itf.php');
 	include_once('../ring/join_shard.php');
 
@@ -366,8 +367,17 @@
 		// retreive the domain info
 		$domainInfo = getDomainInfo($domainId);
 
-		// convert the domain status enum into the privilege access set
-		$accessPriv = strtoupper(substr($domainInfo['status'], 3));
+		// the access privilege the domain status asks for, a member of the
+		// SET permission.AccessPrivilege. ds_close asks for none of them: a
+		// closed domain admits nobody, and the paths that write a permission
+		// row below must never try to store CLOSE.
+		$accessPriv = nel_access_privilege_of_status($domainInfo['status']);
+		if ($accessPriv === '')
+		{
+			$reason = errorMsg(3015, $domainName, $domainInfo['status']);
+			mysqli_close($link);
+			return false;
+		}
 
 		// now, retrieve the user infos
 		// keep the unescaped login: the account name rule below is about the
@@ -390,16 +400,14 @@
 			else if ($AcceptUnknownUser)
 			{
 				// login doesn't exist, create it
-				// FIXME: nel.user.Email is `UNIQUE NOT NULL DEFAULT ''`, so this
-				// insert succeeds exactly once per database: the second account
-				// created this way collides on the empty email. AMS always wrote
-				// a real address, which is why this never showed. Either give the
-				// row a unique placeholder here, or drop/relax EmailIndex, before
-				// relying on $AcceptUnknownUser for anything but a single dev
-				// account. The account tool (public_php/account) asks for a real
-				// email and is unaffected.
+				// nel.user.Email is `UNIQUE NOT NULL DEFAULT ''` and there is no
+				// address to write here, so the row gets a placeholder made from
+				// the login: left empty, only the first account created this way
+				// would insert. The account tool (public_php/account) refuses
+				// addresses in the placeholder domain, see tools/account_name.php.
 				$password = mysqli_real_escape_string($link, $password);
-				$query = "INSERT INTO user (Login, Password) VALUES ('$login', '$password')";
+				$email = mysqli_real_escape_string($link, nel_account_placeholder_email($rawLogin));
+				$query = "INSERT INTO user (Login, Password, Email) VALUES ('$login', '$password', '$email')";
 				$result = mysqli_query ($link, $query) or die (errorMsgBlock(3006, $query, 'main', $DBName, $DBHost, $DBUserName, mysqli_error($link)));
 
 				// get the user to have his UId
@@ -414,8 +422,8 @@
 					$priv = $row["Privilege"];
 					$extended = $row["ExtendedPrivilege"];
 
-					// add the default permission
-					$query = "INSERT INTO permission (UId, DomainId, AccessPrivilege) VALUES ('$id', '$domainId', '$accessPriv')";
+					// add the default permission, a row for all shards of the domain
+					$query = "INSERT INTO permission (UId, DomainId, ShardId, AccessPrivilege) VALUES ('$id', '$domainId', -1, '$accessPriv')";
 					$result = mysqli_query ($link, $query) or die (errorMsgBlock(3006, $query, 'main', $DBName, $DBHost, $DBUserName, mysqli_error($link)));
 
 					$res = false;
@@ -429,6 +437,7 @@
 			else
 			{
 				$reason = errorMsg(2001, $login, 'checkUserValidity');
+				$res = false;
 			}
 		}
 		else
@@ -467,9 +476,21 @@
 				// check if the user can use this application
 
 				$clientApplication = mysqli_real_escape_string($link, $clientApplication);
-				$query = "SELECT * FROM permission WHERE UId='".$row["UId"]."' AND DomainId='$domainId'";
+				// The access of the account on a shard is what its row for all
+				// shards (ShardId -1) holds together with what its row for that
+				// shard holds (tools/shard_access.php). The login passes when
+				// the row for all shards, or a row for one shard, holds the
+				// access the domain status asks for. Which shards are up, and
+				// what each asks for, is known to the shard unifier, which
+				// applies the same rule to every shard it sends the account to.
+				$query = "SELECT * FROM permission WHERE UId='".$row["UId"]."' AND DomainId='$domainId' ORDER BY ShardId";
 				$result = mysqli_query ($link, $query) or die (errorMsgBlock(3006, $query, 'main', $DBName, $DBHost, $DBUserName, mysqli_error($link)));
-				if (mysqli_num_rows ($result) == 0)
+				$permissionRows = array();
+				while ($permission = mysqli_fetch_assoc($result))
+				{
+					$permissionRows[] = $permission;
+				}
+				if (empty($permissionRows))
 				{
 					if ($AcceptUnknownUser)
 					{
@@ -491,16 +512,24 @@
 				}
 				else
 				{
-					// check that the access privilege for the domain
-					$permission = mysqli_fetch_assoc($result);
-
-					if (!strstr($permission['AccessPrivilege'], $accessPriv))
+					// check the access privilege for the domain
+					if (!nel_account_domain_access($permissionRows, $accessPriv))
 					{
 						// no right to connect
 						if ($AcceptUnknownUser)
 						{
-							// set an additionnal privilege for this player
-							$query = "UPDATE permission set AccessPrivilege='".$permission['AccessPrivilege'].",$accessPriv' WHERE PermissionId=".$permission['PermissionId'];
+							// set an additionnal privilege for this player, on
+							// the row for all shards (made when there is none):
+							// a row for one shard stays what the operator made
+							// it. The value is the list of members: appending
+							// to an empty SET wrote ",OPEN", an empty member,
+							// which strict mode refuses, so the row could never
+							// be repaired.
+							$grant = nel_account_all_shards_grant($permissionRows, $accessPriv);
+							if ($grant['row'] === null)
+								$query = "INSERT INTO permission (UId, DomainId, ShardId, AccessPrivilege) VALUES ('".$row["UId"]."', '$domainId', -1, '".$grant['value']."')";
+							else
+								$query = "UPDATE permission set AccessPrivilege='".$grant['value']."' WHERE PermissionId=".(int)$grant['row']['PermissionId'];
 							$result = mysqli_query ($link, $query) or die (errorMsgBlock(3006, $query, 'main', $DBName, $DBHost, $DBUserName, mysqli_error($link)));
 
 							$reason = errorMsg(3012, $accessPriv);
@@ -508,8 +537,8 @@
 						}
 						else
 						{
-							// no permission
-							$reason = errorMsg(3013, $clientApplication, $domainName, $accessPriv);
+							// no permission row that holds this access
+							$reason = errorMsg(3013, $clientApplication, $domainName, $accessPriv, nel_account_access_text($permissionRows));
 							$res = false;
 						}
 					}

@@ -226,7 +226,7 @@ bool		CIFile::open(const std::string &path, bool text)
 			std::string filePath;
 			if (CStreamedPackageManager::getInstance().getFile (filePath, path.substr(pos+1)))
 			{
-				_F = fopen (filePath.c_str(), mode);
+				_F = nlfopen(filePath, mode);
 				if (_F != nullptr)
 				{
 					_FileSize=CFile::getFileSize(_F);
@@ -691,6 +691,8 @@ void	COFile::internalClose(bool success)
 	if(_F)
 	{
 		fclose(_F);
+		// closed, whatever follows: a rename that fails throws, and the destructor must not close it again
+		_F = nullptr;
 
 		// Temporary filename ?
 		if (!_TempFileName.empty())
@@ -715,8 +717,6 @@ void	COFile::internalClose(bool success)
 			else
 				CFile::deleteFile (_TempFileName);
 		}
-
-		_F = nullptr;
 	}
 	resetPtrTable();
 }

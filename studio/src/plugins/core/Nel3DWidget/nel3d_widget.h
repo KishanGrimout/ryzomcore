@@ -24,23 +24,16 @@
 #include "nel/misc/types_nl.h"
 #include <string>
 
-#ifdef NEL3DWIDGET
-#undef NEL3DWIDGET
-#endif
-
+// moc does not see NL_OS_WINDOWS, so the base class is a typedef, which moc names as it is
 #ifdef NL_OS_WINDOWS
 #include <QWidget>
-#define NEL3DWIDGET QWidget
+typedef QWidget Nel3DWidgetBase;
 #else
 #include <QGLWidget>
-#define NEL3DWIDGET QGLWidget
+typedef QGLWidget Nel3DWidgetBase;
 #endif
 
 #include "../core_global.h"
-
-#ifdef NL_OS_UNIX
-#include <X11/Xlib.h>
-#endif
 
 namespace NL3D
 {
@@ -49,7 +42,7 @@ namespace NL3D
 }
 
 /// Nel 3D interface to Qt
-class CORE_EXPORT Nel3DWidget : public NEL3DWIDGET
+class CORE_EXPORT Nel3DWidget : public Nel3DWidgetBase
 {
 	Q_OBJECT
 public:
@@ -80,11 +73,7 @@ protected:
 	void resizeEvent( QResizeEvent *evnt );
 
 #if defined(NL_OS_WINDOWS)
-	bool winEvent( MSG *message, long *result );
-#elif defined(NL_OS_MAC)
-	bool macEvent( EventHandlerCallRef caller, EventRef event );
-#elif defined(NL_OS_UNIX)
-	bool x11Event( XEvent *event );
+	bool nativeEvent(const QByteArray &eventType, void *message, long *result) NL_OVERRIDE;
 #endif
 
 private:

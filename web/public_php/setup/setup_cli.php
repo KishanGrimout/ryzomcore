@@ -16,19 +16,17 @@
  *   --sql-pass=PASS           SQL password (default: empty)
  *   --nel-db=NAME             NeL database name (default: nel)
  *   --tool-db=NAME            NeL Tool database name (default: nel_tool)
- *   --ams-db=NAME             AMS database name (default: nel_ams)
- *   --ams-lib-db=NAME         AMS Library database name (default: nel_ams_lib)
  *   --domain-db=NAME          Ring domain database name (default: ring_dev or ring_HOSTNAME)
  *   --domain-name=NAME        Domain name (default: dev or HOSTNAME)
  *   --users-dir=PATH          Users directory for MFS (auto-detected)
  *   --setup-password=PASS     Setup password (required unless --dev)
  *   --admin-user=USER         Shard admin username (default: admin)
  *   --admin-pass=PASS         Shard admin password (required unless --dev)
+ *   --admin-login=LOGIN       Administrator account: the first game account, with the
+ *   --admin-password=PASS       :DEV: privilege. All three or none; without them no
+ *   --admin-email=ADDRESS       game account exists.
  *   --private-php=PATH        Private PHP directory (default: ../private_php/)
- *   --role-service            Enable service role (default: enabled)
- *   --role-domain             Enable domain role (default: enabled)
  *   --no-role-service         Disable service role
- *   --no-role-support         Disable support role
  *   --no-role-domain          Disable domain role
  */
 
@@ -62,24 +60,22 @@ if (empty($args)) {
 
 $command = array_shift($args);
 
-if ($command === 'help' || $command === '--help' || $command === '-h') {
-	print_usage();
-	exit(0);
+if ($command === '--help' || $command === '-h') {
+	$command = 'help';
 }
 
-if ($command !== 'install' && $command !== 'upgrade') {
+if ($command !== 'install' && $command !== 'upgrade' && $command !== 'help') {
 	cli_err("Unknown command: $command");
 	print_usage();
 	exit(1);
 }
 
 // Parse options
-$opts = array();
-foreach ($args as $arg) {
-	if (substr($arg, 0, 2) === '--') {
-		$parts = explode('=', substr($arg, 2), 2);
-		$opts[$parts[0]] = isset($parts[1]) ? $parts[1] : true;
-	}
+$opts = cli_parse_options($command, $args);
+
+if ($command === 'help') {
+	print_usage();
+	exit(0);
 }
 
 // Determine paths
@@ -95,7 +91,9 @@ chdir($publicPhpDir);
 // Define printalert for CLI mode (used by database.php and header.php functions)
 function printalert($type, $message)
 {
-	$message = strip_tags($message);
+	// the messages are written for the web page: take the markup out, then
+	// turn the entities back into the characters they stand for
+	$message = html_entity_decode(strip_tags($message), ENT_QUOTES, 'UTF-8');
 	switch ($type) {
 		case 'success': cli_ok($message); break;
 		case 'danger': cli_err($message); break;
@@ -108,6 +106,81 @@ if ($command === 'upgrade') {
 	run_upgrade();
 } else {
 	run_install($opts);
+}
+
+// The options each command accepts: name => true when the option takes a
+// value (--name=VALUE), false when it is a switch.
+function cli_known_options($command)
+{
+	if ($command !== 'install') {
+		return array(); // upgrade and help take none
+	}
+	return array(
+		'dev'              => false,
+		'sql-host'         => true,
+		'sql-port'         => true,
+		'sql-user'         => true,
+		'sql-pass'         => true,
+		'nel-db'           => true,
+		'tool-db'          => true,
+		'domain-db'        => true,
+		'domain-name'      => true,
+		'users-dir'        => true,
+		'setup-password'   => true,
+		'admin-user'       => true,
+		'admin-pass'       => true,
+		'admin-login'      => true,
+		'admin-password'   => true,
+		'admin-email'      => true,
+		'private-php'      => true,
+		'no-role-service'  => false,
+		'no-role-domain'   => false,
+	);
+}
+
+// Anything on the command line that the command does not know is refused.
+// It used to be ignored without a word: a mistyped option installed with the
+// default in its place, and "--sql-pass secret" set the password to "1".
+function cli_parse_options($command, $args)
+{
+	$known = cli_known_options($command);
+	// these went away with the AMS account management system
+	$removedWithAms = array('no-role-support', 'ams-db', 'ams-lib-db');
+	// these were listed in this file's header and never did anything: both
+	// roles are installed unless the --no-role- option says otherwise. They
+	// get their own message on install, the command they were listed for.
+	$neverDidAnything = array('role-service', 'role-domain');
+	$opts = array();
+	$errors = array();
+	foreach ($args as $arg) {
+		if (substr($arg, 0, 2) !== '--') {
+			$errors[] = "Unexpected argument: $arg";
+			continue;
+		}
+		$parts = explode('=', substr($arg, 2), 2);
+		$name = $parts[0];
+		if (in_array($name, $removedWithAms, true)) {
+			$errors[] = "Option --$name no longer exists: the AMS account management system was removed, and the support role and the AMS databases with it. Drop the option.";
+		} else if ($command === 'install' && in_array($name, $neverDidAnything, true)) {
+			$errors[] = "Option --$name does not exist: the role is installed by default, and --no-$name leaves it out. Drop the option.";
+		} else if (!array_key_exists($name, $known)) {
+			$errors[] = "Unknown option: --$name";
+		} else if ($known[$name] && !isset($parts[1])) {
+			$errors[] = "Option --$name needs a value: --$name=VALUE";
+		} else if (!$known[$name] && isset($parts[1])) {
+			$errors[] = "Option --$name does not take a value";
+		} else {
+			$opts[$name] = isset($parts[1]) ? $parts[1] : true;
+		}
+	}
+	if (!empty($errors)) {
+		foreach ($errors as $error) {
+			cli_err($error);
+		}
+		echo "Run 'php setup_cli.php help' for the options of each command.\n";
+		exit(1);
+	}
+	return $opts;
 }
 
 function print_usage()
@@ -128,17 +201,17 @@ Install options:
   --sql-pass=PASS           SQL password (default: empty)
   --nel-db=NAME             NeL database name (default: nel)
   --tool-db=NAME            NeL Tool database name (default: nel_tool)
-  --ams-db=NAME             AMS database name (default: nel_ams)
-  --ams-lib-db=NAME         AMS Library database name (default: nel_ams_lib)
   --domain-db=NAME          Ring domain database name
   --domain-name=NAME        Domain name
   --users-dir=PATH          Users directory for MFS
   --setup-password=PASS     Setup password (required unless --dev)
   --admin-user=USER         Shard admin username (default: admin)
   --admin-pass=PASS         Shard admin password (required unless --dev)
+  --admin-login=LOGIN       Administrator account: the first game account, with the
+  --admin-password=PASS       :DEV: privilege. All three or none; without them no
+  --admin-email=ADDRESS       game account exists.
   --private-php=PATH        Private PHP directory (default: ../private_php/)
   --no-role-service         Disable service role
-  --no-role-support         Disable support role
   --no-role-domain          Disable domain role
 
 USAGE;
@@ -154,7 +227,7 @@ function run_install($opts)
 	// a bare require makes them locals: the connects got nulls and every
 	// migration loop silently ran zero times.
 	global $cfg, $NEL_SETUP_VERSION;
-	global $db_nel, $db_nel_tool, $db_nel_ams, $db_nel_ams_lib, $db_ring_domain;
+	global $db_nel, $db_nel_tool, $db_ring_domain;
 	global $db, $tpl;
 	// set at the top of this script; the config paths that config.php
 	// assigns are read back by the migration helpers (global $PRIVATE_PHP_PATH)
@@ -171,8 +244,6 @@ function run_install($opts)
 	$sqlPass = isset($opts['sql-pass']) ? $opts['sql-pass'] : '';
 	$nelDb = isset($opts['nel-db']) ? $opts['nel-db'] : 'nel';
 	$toolDb = isset($opts['tool-db']) ? $opts['tool-db'] : 'nel_tool';
-	$amsDb = isset($opts['ams-db']) ? $opts['ams-db'] : 'nel_ams';
-	$amsLibDb = isset($opts['ams-lib-db']) ? $opts['ams-lib-db'] : 'nel_ams_lib';
 	$domainName = isset($opts['domain-name']) ? $opts['domain-name'] : ($isDev ? 'dev' : gethostname());
 	$domainDb = isset($opts['domain-db']) ? $opts['domain-db'] : 'ring_' . $domainName;
 	$setupPass = isset($opts['setup-password']) ? $opts['setup-password'] : 'admin';
@@ -184,20 +255,22 @@ function run_install($opts)
 	if (isset($opts['users-dir'])) {
 		$usersDir = $opts['users-dir'];
 	} else if ($isDev) {
-		$usersDir = str_replace('/code/web/public_php/setup', '/pipeline/shard_dev/www', dirname(__FILE__));
+		// forward slashes first: on Windows the path of this file has backslashes, and the replace
+		// below would not match, leaving the users directory on this setup folder
+		$usersDir = dirname(__FILE__);
 		if ($shardWin) {
 			$usersDir = str_replace('\\', '/', $usersDir);
 		}
+		$usersDir = str_replace('/code/web/public_php/setup', '/pipeline/shard_dev/www', $usersDir);
 	} else {
 		$usersDir = ($shardWin ? 'C:/nevrax/' : '/home/nevrax/') . $domainName . '/www';
 	}
 
 	$roleService = !isset($opts['no-role-service']);
-	$roleSupport = !isset($opts['no-role-support']);
 	$roleDomain = !isset($opts['no-role-domain']);
 	$configureShardDev = $isDev && $roleDomain;
 
-	if (!$roleService && !$roleSupport && !$roleDomain) {
+	if (!$roleService && !$roleDomain) {
 		cli_err("No server roles enabled. At least one role must be active.");
 		exit(1);
 	}
@@ -222,9 +295,56 @@ function run_install($opts)
 		cli_warn("Development install: setup and/or admin password left at 'admin'.");
 	}
 
+	// The development shard is configured by a script that names its
+	// databases itself. Other names used to fail in that script, after
+	// config.php was written; refuse them now.
+	if ($configureShardDev) {
+		require_once('setup/database.php');
+		$shardDevProblems = shard_dev_database_problems($nelDb, $toolDb, $domainDb);
+		if (!empty($shardDevProblems)) {
+			cli_err("--dev configures the development shard, and for that " . implode(', ', $shardDevProblems) . ".");
+			cli_err("Leave --nel-db, --tool-db, --domain-db and --domain-name (the default of --domain-db is made from it) at their defaults, or install without --dev or with --no-role-domain.");
+			exit(1);
+		}
+	}
+
+	// The administrator account, the first game account: all three options
+	// or none of them. Checked here, before anything is created, since the
+	// install cannot be run again once config.php is written. The password
+	// is not printed anywhere below.
+	$accountOptions = array('admin-login', 'admin-password', 'admin-email');
+	$accountMissing = array();
+	foreach ($accountOptions as $name) {
+		if (!isset($opts[$name]))
+			$accountMissing[] = '--' . $name;
+	}
+	$createAccount = empty($accountMissing);
+	if (!$createAccount && count($accountMissing) < count($accountOptions)) {
+		cli_err("The administrator account needs --admin-login, --admin-password and --admin-email together; missing: " . implode(', ', $accountMissing));
+		exit(1);
+	}
+	$accountLogin = $createAccount ? trim($opts['admin-login']) : '';
+	$accountEmail = $createAccount ? trim($opts['admin-email']) : '';
+	$accountPassword = $createAccount ? $opts['admin-password'] : '';
+	if ($createAccount) {
+		if (!$roleService) {
+			cli_err("The administrator account goes into the NeL database, which the service role installs: drop --no-role-service or the --admin-login, --admin-password and --admin-email options.");
+			exit(1);
+		}
+		require_once('setup/database.php');
+		$accountError = admin_account_error($accountLogin, $accountPassword, $accountEmail);
+		if ($accountError !== '') {
+			cli_err("Administrator account: " . $accountError);
+			exit(1);
+		}
+	}
+
 	// Check already installed
 	if (file_exists('config.php')) {
-		cli_err("Already installed. Use 'upgrade' to update, or remove config.php to reinstall.");
+		cli_err("Already installed. Use 'upgrade' to update.");
+		echo "       To install again from scratch, first drop the databases of the installation and\n";
+		echo "       delete config.php and the db_version_* and role_* files from the public PHP\n";
+		echo "       directory: $publicPhpDir\n";
 		exit(1);
 	}
 
@@ -249,10 +369,6 @@ function run_install($opts)
 		$continue = cli_validate_writable('admin/graphs_output/') && $continue;
 		$continue = cli_validate_writable('admin/templates/default_c/') && $continue;
 	}
-	if ($roleSupport) {
-		$continue = cli_validate_writable('ams/cache/') && $continue;
-		$continue = cli_validate_writable('ams/templates_c/') && $continue;
-	}
 	$continue = cli_validate_writable('./') && $continue;
 	if (!$continue) {
 		cli_err("Required directories are not writable. Fix permissions and retry.");
@@ -266,12 +382,11 @@ function run_install($opts)
 	echo "  SQL User:      $sqlUser\n";
 	echo "  Roles:         " . implode(', ', array_filter(array(
 		$roleService ? 'Service' : null,
-		$roleSupport ? 'Support' : null,
 		$roleDomain ? 'Domain' : null,
 	))) . "\n";
 	if ($roleService) echo "  NeL DB:        $nelDb\n  Tool DB:       $toolDb\n";
-	if ($roleSupport) echo "  AMS DB:        $amsDb\n  AMS Lib DB:    $amsLibDb\n";
 	if ($roleDomain) echo "  Domain:        $domainName\n  Domain DB:     $domainDb\n";
+	if ($roleService) echo "  Game account:  " . ($createAccount ? "$accountLogin <$accountEmail> (:DEV:)" : "none") . "\n";
 	echo "\n";
 
 	// Connect to MySQL
@@ -287,23 +402,26 @@ function run_install($opts)
 	}
 	cli_ok("Connected to MySQL server");
 
-	// Create databases
+	// Create databases. One that is there already is used as it is, and
+	// the install keeps track of which ones it made itself: after a failure
+	// only those may be named as safe to drop.
+	$createdDatabases = array();
+	$existingDatabases = array();
 	if ($roleService) {
-		$continue = cli_create_database($con, $nelDb) && $continue;
-		$continue = cli_create_database($con, $toolDb) && $continue;
+		$continue = cli_create_database($con, $nelDb, $createdDatabases, $existingDatabases) && $continue;
+		$continue = cli_create_database($con, $toolDb, $createdDatabases, $existingDatabases) && $continue;
 	}
 	if ($roleDomain) {
-		$continue = cli_create_database($con, $domainDb) && $continue;
-	}
-	if ($roleSupport) {
-		$continue = cli_create_database($con, $amsDb) && $continue;
-		$continue = cli_create_database($con, $amsLibDb) && $continue;
+		$continue = cli_create_database($con, $domainDb, $createdDatabases, $existingDatabases) && $continue;
 	}
 
 	mysqli_close($con);
 
 	if (!$continue) {
 		cli_err("Database creation failed.");
+		if (!empty($createdDatabases)) {
+			echo "       This run created " . implode(', ', $createdDatabases) . " before it stopped; the next run uses them as they are.\n";
+		}
 		exit(1);
 	}
 
@@ -325,8 +443,6 @@ function run_install($opts)
 			'nelSqlPassword'      => $sqlPass,
 			'nelDatabase'         => $nelDb,
 			'toolDatabase'        => $toolDb,
-			'amsDatabase'         => $amsDb,
-			'amsLibDatabase'      => $amsLibDb,
 			'nelSetupPassword'    => $setupPass,
 			'domainDatabase'      => $domainDb,
 			'domainUsersDir'      => $usersDir,
@@ -343,6 +459,7 @@ function run_install($opts)
 		cli_err("Cannot write config.php");
 		exit(1);
 	}
+	forget_cached_script('config.php');
 	cli_ok("Generated config.php");
 
 	// Copy config_user.php
@@ -358,9 +475,6 @@ function run_install($opts)
 	require_once('setup/database.php');
 
 	// Run database migrations
-	if ($roleSupport) {
-		$continue = upgrade_support_databases($continue);
-	}
 	if ($roleService) {
 		$continue = upgrade_service_databases($continue);
 	}
@@ -404,16 +518,43 @@ function run_install($opts)
 		$continue = configure_shard_dev($continue);
 	}
 
+	// Create the administrator account, after the development shard so that
+	// its domain is there to get a permission row
+	if ($continue && $createAccount) {
+		$continue = create_admin_account($continue, $accountLogin, $accountPassword, $accountEmail);
+	}
+
 	// Write role flags
 	if ($continue && $roleService) file_put_contents('role_service', '1');
-	if ($continue && $roleSupport) file_put_contents('role_support', '1');
 	if ($continue && $roleDomain) file_put_contents('role_domain', '1');
 
 	echo "\n";
 	if ($continue) {
 		cli_ok("Installation complete!");
+		if ($createAccount) {
+			cli_ok("Game account '$accountLogin' <$accountEmail> is the administrator, with the :DEV: privilege.");
+			$accountNotes = admin_account_notes($accountLogin, $nelDb);
+			$accountStatement = array_pop($accountNotes); // kept on one line, to copy
+			foreach ($accountNotes as $line) {
+				echo "       " . str_replace("\n", "\n       ", wordwrap($line, 88, "\n", false)) . "\n";
+			}
+			echo "         $accountStatement\n";
+		} else if ($roleService) {
+			cli_warn("No game account exists: --admin-login, --admin-password and --admin-email were not given.");
+			echo "       Registration is closed by default, and only an account with the :DEV: privilege\n";
+			echo "       can open it. An install that passes the three options creates that account. On\n";
+			echo "       this one, make it by hand in the '$nelDb' database:\n";
+			echo "         1. UPDATE setting SET value = '1' WHERE setting = 'registration_open';\n";
+			echo "         2. register in the account tool (account/?page=register)\n";
+			echo "         3. UPDATE user SET Privilege = ':DEV:' WHERE Login = '<the login you registered>';\n";
+			echo "         4. close the registration again on the Dev page of the account tool, unless\n";
+			echo "            it is meant to stay open\n";
+		}
 	} else {
 		cli_err("Installation completed with errors.");
+		// config.php is on disk by now: the install cannot simply be run again
+		echo "       " . str_replace("\n", "\n       ", wordwrap(failed_install_notes($createdDatabases, $existingDatabases), 88, "\n", false)) . "\n";
+		echo "       Public PHP directory: $publicPhpDir\n";
 		exit(1);
 	}
 }
@@ -423,9 +564,9 @@ function run_upgrade()
 	// Same scope story as run_install(): the required files' top-level
 	// assignments must land in the globals their functions read back.
 	global $cfg, $NEL_SETUP_VERSION, $NEL_SETUP_VERSION_CONFIGURED;
-	global $db_nel, $db_nel_tool, $db_nel_ams, $db_nel_ams_lib, $db_ring_domain;
+	global $db_nel, $db_nel_tool, $db_ring_domain;
 	global $PRIVATE_PHP_PATH, $PUBLIC_PHP_PATH, $NEL_SETUP_PASSWORD;
-	global $NEL_DOMAIN_NAME, $SUPPORT_GROUP_IMAP_CRYPTKEY, $USERS_DIR;
+	global $NEL_DOMAIN_NAME, $USERS_DIR;
 
 	if (!file_exists('config.php')) {
 		cli_err("Not installed. Run 'install' first.");
@@ -451,14 +592,24 @@ function run_upgrade()
 
 	$continue = true;
 
-	if (file_exists('role_support')) {
-		$continue = upgrade_support_databases($continue);
-	}
 	if (file_exists('role_service')) {
 		$continue = upgrade_service_databases($continue);
 	}
 	if (file_exists('role_domain')) {
 		$continue = upgrade_domain_databases($continue);
+	}
+	if (file_exists('role_service') && $NEL_SETUP_VERSION_CONFIGURED < 14 && $NEL_DOMAIN_NAME === 'dev') {
+		$continue = upgrade_shard_dev_localhost($continue);
+	}
+
+	// A development install on Windows took this setup folder for the shard web storage (its detection replaced
+	// the path before converting the backslashes); the storage is the www folder of the development shard.
+	$setupTail = '/code/web/public_php/setup';
+	$usersDirSlashes = str_replace('\\', '/', $USERS_DIR);
+	if ($NEL_DOMAIN_NAME === 'dev' && substr($usersDirSlashes, -strlen($setupTail)) === $setupTail) {
+		$fixedUsersDir = substr($usersDirSlashes, 0, -strlen($setupTail)) . '/pipeline/shard_dev/www';
+		cli_info("Shard web storage moved from $USERS_DIR to $fixedUsersDir");
+		$USERS_DIR = $fixedUsersDir;
 	}
 
 	// Rewrite config.php with updated version
@@ -468,7 +619,6 @@ function run_upgrade()
 			$PRIVATE_PHP_PATH . '/setup/config/config.php',
 			$cfg, $PRIVATE_PHP_PATH, $PUBLIC_PHP_PATH,
 			$NEL_SETUP_PASSWORD, $NEL_DOMAIN_NAME, $NEL_SETUP_VERSION,
-			$cfg['crypt']['key'], $SUPPORT_GROUP_IMAP_CRYPTKEY,
 			$cfg['db']['ring']['name'], $USERS_DIR,
 			$NEL_SETUP_VERSION_CONFIGURED
 		);
@@ -477,6 +627,7 @@ function run_upgrade()
 			$continue = false;
 		} else {
 			if (file_put_contents('config.php', $config)) {
+				forget_cached_script('config.php');
 				cli_ok("Updated config.php to version $NEL_SETUP_VERSION");
 			} else {
 				cli_err("Cannot write config.php");
@@ -497,6 +648,10 @@ function run_upgrade()
 	echo "\n";
 	if ($continue) {
 		cli_ok("Upgrade complete!");
+		// this process cannot reach the opcode cache of the web server
+		echo "       If the site still answers that an upgrade is pending, the web server is serving\n";
+		echo "       the previous config.php from its opcode cache: it picks the new one up after its\n";
+		echo "       revalidation interval, or after a reload when it does not check timestamps.\n";
 	} else {
 		cli_err("Upgrade completed with errors.");
 		exit(1);
@@ -522,13 +677,28 @@ function cli_validate_writable($path)
 	return true;
 }
 
-function cli_create_database($con, $name)
+// Makes sure the database is there. The name goes into $createdDatabases
+// when this call created it and into $existingDatabases when it was there
+// already, in which case it is used as it is.
+function cli_create_database($con, $name, &$createdDatabases, &$existingDatabases)
 {
 	$escaped = mysqli_real_escape_string($con, $name);
-	// Try to create, ignore if already exists
-	$sql = "CREATE DATABASE IF NOT EXISTS `$escaped` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
+	$result = mysqli_query($con, "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = '$escaped'");
+	if (!$result) {
+		cli_err("Error looking for database '$name': " . mysqli_error($con));
+		return false;
+	}
+	$exists = mysqli_num_rows($result) > 0;
+	mysqli_free_result($result);
+	if ($exists) {
+		$existingDatabases[] = $name;
+		cli_ok("Database '$name' exists already, using it as it is");
+		return true;
+	}
+	$sql = "CREATE DATABASE `$escaped` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
 	if (mysqli_query($con, $sql)) {
-		cli_ok("Database '$name' ready");
+		$createdDatabases[] = $name;
+		cli_ok("Database '$name' created");
 		return true;
 	} else {
 		cli_err("Error creating database '$name': " . mysqli_error($con));

@@ -131,6 +131,7 @@ void setOupostMode_ss_(CStateInstance* entity, CScriptStack& stack)
 {
 	std::string sideStr = stack.top(); stack.pop();
 	std::string aliasStr = stack.top();
+	stack.pop();
 	CGroupNpc* const npcGroup = dynamic_cast<CGroupNpc*>(entity->getGroup());
 	if ( ! npcGroup)
 	{
@@ -149,11 +150,22 @@ void setOupostMode_ss_(CStateInstance* entity, CScriptStack& stack)
 	}
 	else
 	{
-		nlwarning("setOutpostMode: invalid side");
+		nlwarning("setOutpostMode: invalid side '%s' for outpost '%s' on group '%s', nothing is changed (the side is 'attacker' or 'owner')",
+		    sideStr.c_str(), aliasStr.c_str(), npcGroup->getName().c_str());
+		return;
 	}
 	
+	// The factions and the bots take the same outpost alias, in the form the players' side
+	// of the faction test is built with
+	const TAIAlias outpostAlias = LigoConfig.aliasFromString(aliasStr);
+	if (outpostAlias == 0)
+	{
+		nlwarning("setOutpostMode: '%s' is not the alias of an outpost (an alias reads '(A:<static part>:<dynamic part>)') on group '%s', nothing is changed",
+		    aliasStr.c_str(), npcGroup->getName().c_str());
+		return;
+	}
 	npcGroup->setOutpostSide(side);
-	npcGroup->setOutpostFactions(side);
+	npcGroup->setOutpostFactions(LigoConfig.aliasToString(outpostAlias), side);
 	FOREACH(botIt, CCont<CBot>, npcGroup->bots())
 	{
 		CBot* bot = *botIt;
@@ -164,7 +176,7 @@ void setOupostMode_ss_(CStateInstance* entity, CScriptStack& stack)
 			if (spawnBotNpc)
 			{
 				spawnBotNpc->setOutpostSide(side);
-				spawnBotNpc->setOutpostAlias(LigoConfig.aliasFromString(aliasStr));
+				spawnBotNpc->setOutpostAlias(outpostAlias);
 			}
 		}
 	}
@@ -985,10 +997,18 @@ Arguments:  f(alias), ->
 // CGroup
 void despawnBotByAlias_s_(CStateInstance* entity, CScriptStack& stack)
 {
-	uint32 alias =  LigoConfig.aliasFromString((string)stack.top()); stack.pop();
+	string aliasStr = (string)stack.top(); stack.pop();
+	uint32 alias = LigoConfig.aliasFromString(aliasStr);
 	CGroup* group = entity->getGroup();
 	CGroupNpc* npcGroup = NLMISC::safe_cast<CGroupNpc*>(group);
-	
+
+	// 0 is the alias of the bots that have none: a string that is no alias must not select them
+	if (alias == 0)
+	{
+		nlwarning("despawnBotByAlias: '%s' is not an alias, in group '%s'", aliasStr.c_str(), group->getName().c_str());
+		return;
+	}
+
 	FOREACH(botIt, CCont<CBot>,	group->bots())
 	{
 

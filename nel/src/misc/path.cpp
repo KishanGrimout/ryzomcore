@@ -42,6 +42,7 @@
 #   include <sys/types.h>
 #   include <sys/stat.h>
 #	include <dirent.h>
+#	include <fcntl.h>
 #   include <unistd.h>
 #	include <cstdio>
 #   include <cerrno>
@@ -2794,6 +2795,55 @@ bool CFile::createDirectoryTree(const std::string &filename)
 	return lastResult;
 }
 
+bool CFile::isDirectoryWritable(const std::string &dirname)
+{
+	if (!isDirectory(dirname))
+		return false;
+
+	// The probe is created as a new file: a file that exists is never opened, its name is skipped.
+	// The process id keeps two processes that test the same directory apart.
+#ifdef NL_OS_WINDOWS
+	const uint processId = (uint)GetCurrentProcessId();
+#else
+	const uint processId = (uint)getpid();
+#endif
+	const std::string directory = CPath::standardizePath(dirname);
+	const uint maxTries = 8;
+	for (uint i = 0; i < maxTries; ++i)
+	{
+		const std::string probe = directory + toString("nl_wtest_%u_%u.tmp", processId, i);
+#ifdef NL_OS_WINDOWS
+		// The system deletes the file when the handle is closed, whatever happens to the process in between
+		HANDLE h = CreateFileW(nlUtf8ToWide(probe), GENERIC_WRITE | DELETE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, NULL);
+		if (h != INVALID_HANDLE_VALUE)
+		{
+			CloseHandle(h);
+			return true;
+		}
+		if (GetLastError() != ERROR_FILE_EXISTS)
+			return false;
+#else
+		int fd = open(probe.c_str(), O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR);
+		if (fd != -1)
+		{
+			close(fd);
+			if (unlink(probe.c_str()) == -1)
+			{
+				// a directory that keeps what is written to it is not one to work in
+				nlwarning("PATH: Can't delete the write test file '%s': (errno %d) %s", probe.c_str(), errno, strerror(errno));
+				return false;
+			}
+			return true;
+		}
+		if (errno != EEXIST)
+			return false;
+#endif
+	}
+
+	nlwarning("PATH: Can't test if '%s' is writable, the %u write test file names of this process are in use", dirname.c_str(), maxTries);
+	return false;
+}
+
 bool CPath::makePathRelative (const std::string &basePath, std::string &relativePath)
 {
 	// Standard path with final slash
@@ -2976,11 +3026,11 @@ bool CFile::setRWAccess(const std::string &filename)
 #ifdef NL_OS_WINDOWS
 	std::wstring wideFile = NLMISC::utf8ToWide(filename);
 
-	// if the file exists and there's no write access
-	if (_waccess (wideFile.c_str(), 00) == 0 && _waccess (wideFile.c_str(), 06) == -1)
+	// if the file exists (the else below is for a file that does not exist, as on the other systems)
+	if (_waccess (wideFile.c_str(), 00) == 0)
 	{
-		// try to set the read/write access
-		if (_wchmod (wideFile.c_str(), _S_IREAD | _S_IWRITE) == -1)
+		// and there's no write access, try to set the read/write access
+		if (_waccess (wideFile.c_str(), 06) == -1 && _wchmod (wideFile.c_str(), _S_IREAD | _S_IWRITE) == -1)
 		{
 			if (INelContext::getInstance().getAlreadyCreateSharedAmongThreads())
 			{

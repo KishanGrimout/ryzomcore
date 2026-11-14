@@ -299,6 +299,9 @@ namespace R2
 		/////////////////////////////////////////////////////
 		CEditionSession* getSession(TSessionId sessionId) const;
 		TSessionId getSessionIdByCharId(TCharId charId) const NL_OVERRIDE;
+		// connect a character to the map of a session with the role given (implementation of onMapConnectionAsked,
+		// also used for the connections that the server decides itself)
+		void onMapConnectionAskedImpl(NLNET::IModuleProxy *clientEditionProxy, TSessionId sessionId, bool updateHighLevel, bool mustTp, TUserRole role);
 		// implement private task CTaskConnectPlayer
 		void connectChar(TSessionId sessionId, TCharId charId, TUserRole userRole, const std::string& ringAccess, bool newcomer);
 		// implement private task CTaskTryConnectPlayer
@@ -315,6 +318,9 @@ namespace R2
 
 		// wakeUp a session
 		void wakeUpSessionImpl(CEditionSession* session);
+		// The file of a session could not be loaded: the session starts as when it has no file. With 'refuseSave'
+		// the file is there, could not be read and could not be copied: the session is not saved over it.
+		void wakeUpSessionFailed(TSessionId sessionId, bool refuseSave);
 
 		void getStartParams(uint32 charId, TSessionId lastStoredSessionId) NL_OVERRIDE;
 		void getStartParamsImpl(uint32 charId, TSessionId lastStoredSessionId);
@@ -416,8 +422,11 @@ namespace R2
 
 	// privates methodes
 	private:
-		// Check if a scenario is ok (not to much element)
-		bool checkScenario(CObject* scenario);
+		// Check the run time scenario a client uploaded and the act it is to start in (rt_scenario_check.h), with
+		// the limits of this service: the quotas MaxNpcs and MaxStaticObjects and the aliases of the ligo configuration
+		virtual bool checkRtScenario(CObject *rtScenario, uint32 startingAct, std::string &error, bool *overQuota = nullptr) const NL_OVERRIDE;
+		// The animation module could not start the scenario of the session after its start was answered
+		virtual void animationSessionStartFailed(TSessionId sessionId, uint32 startingAct, const std::string &errorReason) NL_OVERRIDE;
 
 		// Backup current Secenarios (obsolete)
 		void saveToDb();
@@ -475,6 +484,19 @@ namespace R2
 		CScenario* getScenarioById(TSessionId sessionId) const NL_OVERRIDE;
 		// get the current session (available from the moment when the client module is connected)
 		TUserRole getRoleByCharId(TCharId charId) const;
+		// true if the character is an animator or the outland owner of the session it is connected to, or an editor
+		// of an edition session (sessionId and role receive that session and the role of the character in it)
+		virtual bool isCharAnimator(TCharId charId, TSessionId &sessionId, TUserRole &role) const NL_OVERRIDE;
+		// true if the character may use the animator and DM functions (isCharAnimator) of the session that its
+		// requests act on; if not, logs the refusal of the operation named
+		bool isAnimator(TCharId charId, const char *operation) const;
+		// true if the character may change, start and stop the scenario of the session that its requests act on: the
+		// characters isCharAnimator accepts, and the owner of an animation session, who uploads its scenario and starts
+		// it whatever its role; if not, logs the refusal of the operation named
+		bool isAuthor(TCharId charId, const char *operation) const;
+		// true if the sender may send the parts of a multi-part message for the character: a client only sends its
+		// own; if not, logs the refusal of the operation named
+		bool isMultiPartSender(NLNET::IModuleProxy *sender, TCharId charId, const char *operation) const;
 
 		// get the session that is about to be joined by a client, or NULL if not found
 		TPioneersSessionsAllowed * getSessionAllowedForChar(TCharId charId) const NL_OVERRIDE;

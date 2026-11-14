@@ -31,6 +31,12 @@ $editUid = isset($_GET['uid']) ? (int)$_GET['uid'] : 0;
 
 $editCanManage = false;
 
+// The members of the SET column permission.AccessPrivilege, in its order. A
+// row may hold several: the login script admits the account when its rows give
+// it, on a shard of the domain, the one that matches the domain status (OPEN
+// for ds_open, and so on; the rule is in tools/shard_access.php).
+$accessPrivilegeMembers = nel_access_privilege_members();
+
 try {
 	$db = getNelDatabase();
 
@@ -119,14 +125,24 @@ try {
 			} else {
 			$domainId = (int)$_POST['domain_id'];
 			$shardId = (int)$_POST['shard_id'];
-			$accessPriv = isset($_POST['access_privilege']) ? trim($_POST['access_privilege']) : '';
-			$validAccess = array('OPEN', 'DEV', 'RESTRICTED');
-			if (!in_array($accessPriv, $validAccess, true)) {
-				$accessPriv = 'OPEN';
+			// One or more members, each a known one: an unknown value is
+			// refused, not dropped or replaced.
+			$submittedAccess = isset($_POST['access_privilege']) ? $_POST['access_privilege'] : array();
+			if (!is_array($submittedAccess)) {
+				$submittedAccess = array($submittedAccess);
 			}
-			// Domain must exist; shard 0 means all shards, otherwise it must
-			// exist (and preferably belong to the domain — still enforced as
-			// "known shard id" so we never invent orphan references).
+			$accessOk = !empty($submittedAccess);
+			foreach ($submittedAccess as $member) {
+				if (!is_string($member) || !in_array($member, $accessPrivilegeMembers, true)) {
+					$accessOk = false;
+				}
+			}
+			// each member once, in the order of the SET
+			$accessPriv = $accessOk ? implode(',', array_values(array_intersect($accessPrivilegeMembers, $submittedAccess))) : '';
+			// Domain must exist. "All Shards" is a row that names no shard
+			// (-1, and the 0 this form used to send); a shard must exist and
+			// be a shard of that domain. An id below -1 is neither: the row
+			// of such an id can only be removed.
 			$domainOk = false;
 			foreach ($domains as $d) {
 				if ((int)$d['domain_id'] === $domainId) {
@@ -134,17 +150,24 @@ try {
 					break;
 				}
 			}
-			$shardOk = ($shardId === 0);
+			$allShards = nel_permission_is_all_shards($shardId);
+			$shardOk = $allShards;
 			if (!$shardOk) {
 				foreach ($shards as $s) {
-					if ((int)$s['ShardId'] === $shardId) {
+					if ((int)$s['ShardId'] === $shardId && (int)$s['domain_id'] === $domainId) {
 						$shardOk = true;
 						break;
 					}
 				}
 			}
-			if (!$domainOk || !$shardOk) {
-				$error = 'Unknown domain or shard.';
+			if (!$accessOk) {
+				$error = 'Choose one or more of ' . implode(', ', $accessPrivilegeMembers) . ' for the access.';
+			} elseif (!$domainOk || !$shardOk) {
+				$error = 'Unknown domain or shard, or the shard is not one of that domain.';
+			} elseif ($allShards) {
+				// one row per domain, with ShardId -1, whatever was there
+				setDomainPermission($db, $targetUid, $domainId, $accessPriv);
+				$success = 'Permission saved.';
 			} else {
 				// Check if permission already exists
 				$stmt = $db->prepare('SELECT COUNT(*) as cnt FROM permission WHERE UId = :uid AND DomainId = :did AND ShardId = :sid');
@@ -157,7 +180,7 @@ try {
 					$stmt = $db->prepare('INSERT INTO permission (UId, DomainId, ShardId, AccessPrivilege) VALUES (:uid, :did, :sid, :priv)');
 					$stmt->execute(array(':uid' => $targetUid, ':did' => $domainId, ':sid' => $shardId, ':priv' => $accessPriv));
 				}
-				$success = 'Permission added.';
+				$success = 'Permission saved.';
 			}
 			}
 			$editUid = $targetUid;
@@ -173,8 +196,15 @@ try {
 			} else {
 			$domainId = (int)$_POST['domain_id'];
 			$shardId = (int)$_POST['shard_id'];
-			$stmt = $db->prepare('DELETE FROM permission WHERE UId = :uid AND DomainId = :did AND ShardId = :sid');
-			$stmt->execute(array(':uid' => $targetUid, ':did' => $domainId, ':sid' => $shardId));
+			if (nel_permission_is_all_shards($shardId)) {
+				// "All Shards": the -1 row, and a 0 row an earlier version
+				// of this page may have left beside it
+				removeDomainPermission($db, $targetUid, $domainId);
+			} else {
+				// the row of one shard, or a row whose id names no shard
+				$stmt = $db->prepare('DELETE FROM permission WHERE UId = :uid AND DomainId = :did AND ShardId = :sid');
+				$stmt->execute(array(':uid' => $targetUid, ':did' => $domainId, ':sid' => $shardId));
+			}
 			$success = 'Permission removed.';
 			}
 			$editUid = $targetUid;
@@ -196,9 +226,7 @@ try {
 				$editUser = null;
 				$editUid = 0;
 			} else {
-				$stmt = $db->prepare('SELECT perm.DomainId, perm.ShardId, perm.AccessPrivilege, d.domain_name FROM permission perm LEFT JOIN domain d ON perm.DomainId = d.domain_id WHERE perm.UId = :uid');
-				$stmt->execute(array(':uid' => $editUid));
-				$editPerms = $stmt->fetchAll();
+				$editPerms = loadAccountPermissions($db, $editUid);
 			}
 		}
 	}
@@ -326,11 +354,32 @@ ob_start();
 								}
 							?>
 								<span style="color:#ecf0f1;"><?php echo h($shardName ?: '#' . $perm['ShardId']); ?></span>
-							<?php else: ?>
+							<?php elseif (nel_permission_is_all_shards($perm['ShardId'])): ?>
 								<span class="badge badge-gray">All Shards</span>
+							<?php else: ?>
+								<span class="badge badge-red">unknown shard id <?php echo (int)$perm['ShardId']; ?></span>
 							<?php endif; ?>
 						</td>
-						<td><span class="badge badge-green"><?php echo h($perm['AccessPrivilege']); ?></span></td>
+						<td>
+							<?php if ($perm['ShardId'] <= 0 && !nel_permission_is_all_shards($perm['ShardId'])): ?>
+							<span style="color:#8899a6; font-size:0.85rem;"><?php echo h($perm['AccessPrivilege']); ?> (this row names no shard and gives no access: remove it)</span>
+							<?php elseif ($editCanManage):
+								$permMembers = explode(',', (string)$perm['AccessPrivilege']);
+							?>
+							<form method="post" action="index.php?page=admin&amp;uid=<?php echo (int)$editUser['UId']; ?>" style="display:inline-flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+								<?php echo csrfField(); ?>
+								<input type="hidden" name="target_uid" value="<?php echo (int)$editUser['UId']; ?>">
+								<input type="hidden" name="domain_id" value="<?php echo (int)$perm['DomainId']; ?>">
+								<input type="hidden" name="shard_id" value="<?php echo (int)$perm['ShardId']; ?>">
+								<?php foreach ($accessPrivilegeMembers as $member): ?>
+									<label style="display:inline-flex; align-items:center; gap:0.25rem; color:#ecf0f1; font-size:0.85rem;"><input type="checkbox" name="access_privilege[]" value="<?php echo h($member); ?>"<?php echo in_array($member, $permMembers, true) ? ' checked' : ''; ?>> <?php echo h($member); ?></label>
+								<?php endforeach; ?>
+								<button type="submit" name="add_permission" class="btn btn-secondary btn-sm">Save</button>
+							</form>
+							<?php else: ?>
+							<span class="badge badge-green"><?php echo h($perm['AccessPrivilege']); ?></span>
+							<?php endif; ?>
+						</td>
 						<?php if ($editCanManage): ?>
 						<td>
 							<form method="post" action="index.php?page=admin&amp;uid=<?php echo (int)$editUser['UId']; ?>" style="display:inline;">
@@ -353,38 +402,64 @@ ob_start();
 		<?php if ($editCanManage): ?>
 		<div style="margin-top:1rem; padding-top:1rem; border-top:1px solid #2c3e50;">
 			<h3 style="font-size:0.9rem; color:#ecf0f1; margin-bottom:0.5rem;">Add Permission</h3>
+			<p style="font-size:0.85rem; color:#8899a6; margin-bottom:0.75rem;">
+				The login needs the access that matches the domain status: OPEN while it is open, DEV while it is in development, RESTRICTED while it is restricted.
+				A row can hold several. Adding a row for a domain and shard that already have one replaces its access.
+				On a shard, an account has what its row for all shards holds together with what its row for that shard holds: either row can give the access, and a row for one shard gives nothing on the other shards.
+				Each shard asks for the access that matches its own level, so an account with rows for single shards only is never sent to another shard, and a shard for a team is kept to it by giving the shard a level that the other accounts do not hold on it.
+				An account meant for a restricted shard of an open domain needs both in the row of that shard: OPEN for the login, RESTRICTED for the shard.
+			</p>
 			<form method="post" action="index.php?page=admin&amp;uid=<?php echo (int)$editUser['UId']; ?>">
 				<?php echo csrfField(); ?>
 				<input type="hidden" name="target_uid" value="<?php echo (int)$editUser['UId']; ?>">
 				<div class="form-inline">
 					<div class="form-group">
 						<label>Domain</label>
-						<select name="domain_id">
+						<select name="domain_id" id="permission_domain">
 							<?php foreach ($domains as $d): ?>
 								<option value="<?php echo (int)$d['domain_id']; ?>"><?php echo h($d['domain_name']); ?></option>
 							<?php endforeach; ?>
 						</select>
 					</div>
 					<div class="form-group">
-						<label>Shard (0 = all)</label>
-						<select name="shard_id">
-							<option value="0">All Shards</option>
+						<label>Shard</label>
+						<select name="shard_id" id="permission_shard">
+							<option value="-1">All Shards</option>
 							<?php foreach ($shards as $s): ?>
-								<option value="<?php echo (int)$s['ShardId']; ?>"><?php echo h($s['Name']); ?></option>
+								<option value="<?php echo (int)$s['ShardId']; ?>" data-domain="<?php echo (int)$s['domain_id']; ?>"><?php echo h($s['Name']); ?></option>
 							<?php endforeach; ?>
 						</select>
 					</div>
 					<div class="form-group">
 						<label>Access</label>
-						<select name="access_privilege">
-							<option value="OPEN">OPEN</option>
-							<option value="DEV">DEV</option>
-							<option value="RESTRICTED">RESTRICTED</option>
-						</select>
+						<div style="display:flex; gap:0.75rem; padding:0.5rem 0;">
+							<?php foreach ($accessPrivilegeMembers as $member): ?>
+								<label style="display:inline-flex; align-items:center; gap:0.25rem; margin-bottom:0; color:#ecf0f1;"><input type="checkbox" name="access_privilege[]" value="<?php echo h($member); ?>"<?php echo $member === 'OPEN' ? ' checked' : ''; ?>> <?php echo h($member); ?></label>
+							<?php endforeach; ?>
+						</div>
 					</div>
 					<button type="submit" name="add_permission" class="btn btn-primary btn-sm">Add</button>
 				</div>
 			</form>
+			<script>
+			// offer the shards of the chosen domain only; the server checks it again
+			(function () {
+				var domain = document.getElementById('permission_domain');
+				var shard = document.getElementById('permission_shard');
+				if (!domain || !shard) return;
+				function showShardsOfDomain() {
+					for (var i = 0; i < shard.options.length; i++) {
+						var option = shard.options[i];
+						var show = !option.hasAttribute('data-domain') || option.getAttribute('data-domain') === domain.value;
+						option.hidden = !show;
+						option.disabled = !show;
+					}
+					if (shard.options[shard.selectedIndex].disabled) shard.selectedIndex = 0;
+				}
+				domain.addEventListener('change', showShardsOfDomain);
+				showShardsOfDomain();
+			})();
+			</script>
 		</div>
 		<?php endif; ?>
 	</div>

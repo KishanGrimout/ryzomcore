@@ -61,8 +61,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 				$error = 'Too many password attempts. Please wait a few minutes and try again.';
 			} elseif ($newEmail === '' || $password === '') {
 				$error = 'Email and password are required.';
-			} elseif (!filter_var($newEmail, FILTER_VALIDATE_EMAIL) || strlen($newEmail) > 255) {
-				$error = 'Please enter a valid email address.';
+			} elseif (accountEmailError($newEmail) !== '') {
+				// not a valid address, or one in the placeholder domain
+				$error = accountEmailError($newEmail);
 			} else {
 				// Verify password
 				$stmt = $db->prepare('SELECT Password FROM user WHERE UId = :uid');

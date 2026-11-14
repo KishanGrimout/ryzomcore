@@ -6,6 +6,12 @@
 require_once(dirname(dirname(__FILE__)) . '/config.php');
 // the shared account name rule, enforced wherever an account is created
 require_once(dirname(dirname(__FILE__)) . '/tools/account_name.php');
+// the database connection, the password functions and the account creation
+// that the setup shares with this tool
+require_once(dirname(dirname(__FILE__)) . '/tools/account_common.php');
+// what the permission rows of an account give it on a shard, the rule the
+// login script goes by
+require_once(dirname(dirname(__FILE__)) . '/tools/shard_access.php');
 
 // NEL shard database (contains `user`, `domain`, `shard`, `permission` tables)
 $nel_db_host = $cfg['db']['shard']['host'];
@@ -20,24 +26,6 @@ $ring_db_port = $cfg['db']['ring']['port'];
 $ring_db_user = $cfg['db']['ring']['user'];
 $ring_db_pass = $cfg['db']['ring']['pass'];
 $ring_db_name = $cfg['db']['ring']['name'];
-
-/**
- * Get a PDO connection to a database.
- */
-function getDatabase($host, $port, $user, $pass, $name)
-{
-	static $connections = array();
-	$key = $host . ':' . $port . '/' . $name;
-	if (!isset($connections[$key])) {
-		$dsn = "mysql:host=$host;port=$port;dbname=$name;charset=utf8mb4";
-		$connections[$key] = new PDO($dsn, $user, $pass, array(
-			PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-			PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-			PDO::ATTR_EMULATE_PREPARES => false,
-		));
-	}
-	return $connections[$key];
-}
 
 /**
  * Get a PDO connection to the NEL shard database.
@@ -145,84 +133,6 @@ function connectToRSM($sessionManagerAddress)
 		return false;
 	}
 	return $rsm;
-}
-
-/**
- * Generate a crypt-compatible salt.
- */
-function generateSalt()
-{
-	$chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789./';
-	$salt = '$6$';
-	for ($i = 0; $i < 16; $i++) {
-		$salt .= $chars[random_int(0, strlen($chars) - 1)];
-	}
-	$salt .= '$';
-	return $salt;
-}
-
-/** Minimum accepted password length for this tool. */
-function accountPasswordMinLength()
-{
-	return 8;
-}
-
-/** Cap password length to bound crypt()/DoS cost. */
-function accountPasswordMaxLength()
-{
-	return 256;
-}
-
-/**
- * True when a candidate password meets length policy (not complexity).
- */
-function accountPasswordAcceptable($password)
-{
-	if (!is_string($password)) {
-		return false;
-	}
-	$len = strlen($password);
-	return $len >= accountPasswordMinLength() && $len <= accountPasswordMaxLength();
-}
-
-/**
- * Hash a password using crypt().
- */
-function hashPassword($password)
-{
-	return crypt($password, generateSalt());
-}
-
-/**
- * Verify a password against a crypt hash.
- */
-function verifyPassword($password, $hash)
-{
-	$password = (string)$password;
-	$hash = (string)$hash;
-	// An account row with no password must never authenticate, and indexing
-	// an empty string is an error on php 8.
-	if (strlen($hash) < 2) {
-		return false;
-	}
-	// Bound work even on failure paths with absurdly long inputs.
-	if (strlen($password) > accountPasswordMaxLength()) {
-		return false;
-	}
-	if ($hash[0] === '$') {
-		// Modern crypt hash (SHA-256 or SHA-512)
-		$last = strrpos($hash, '$');
-		if ($last === false || $last < 1) {
-			return false;
-		}
-		$salt = substr($hash, 0, $last + 1);
-	} else {
-		// Legacy DES-based crypt
-		$salt = substr($hash, 0, 2);
-	}
-	// Constant time, like the login service does: a plain comparison leaks
-	// where the two values stop matching.
-	return hash_equals($hash, (string)crypt($password, $salt));
 }
 
 /**
@@ -587,6 +497,94 @@ function setSetting($key, $value)
 	} catch (PDOException $e) {
 		// Setting save failed silently; caller should handle via getSetting fallback
 	}
+}
+
+/*
+ * Permission rows that name no shard.
+ *
+ * A permission row gives an account access to a domain. When it names no
+ * shard, ShardId is -1, the default of the column: that is what the setup,
+ * the registration and the login script write. Earlier versions of the admin
+ * page wrote 0 for the same thing, and an account can have both rows for one
+ * domain. The functions below treat a 0 row as a -1 row everywhere, and the
+ * admin page leaves exactly one row, with -1, whenever it touches one.
+ *
+ * Only -1 and 0 name all shards (nel_permission_is_all_shards). A row with a
+ * ShardId below -1 names no shard and gives no access: the pages list it as
+ * what it is, and it can only be removed.
+ */
+
+/**
+ * The permission rows of an account for the pages that list them, in the
+ * order the login script reads them. Where a domain has a 0 row beside its -1
+ * row, the two are listed as the one row for all shards they amount to, with
+ * what both hold; a 0 row on its own is listed as -1.
+ */
+function loadAccountPermissions($db, $uid)
+{
+	$stmt = $db->prepare('SELECT perm.DomainId, perm.ShardId, perm.AccessPrivilege, d.domain_name FROM permission perm LEFT JOIN domain d ON perm.DomainId = d.domain_id WHERE perm.UId = :uid ORDER BY perm.DomainId, perm.ShardId');
+	$stmt->execute(array(':uid' => $uid));
+	$perms = array();
+	$domainsListed = array();
+	foreach ($stmt->fetchAll() as $perm) {
+		if (nel_permission_is_all_shards($perm['ShardId'])) {
+			if (isset($domainsListed[$perm['DomainId']])) {
+				$listed = $domainsListed[$perm['DomainId']];
+				$perms[$listed]['AccessPrivilege'] = implode(',', nel_access_privilege_set($perms[$listed]['AccessPrivilege'] . ',' . $perm['AccessPrivilege']));
+				continue;
+			}
+			$domainsListed[$perm['DomainId']] = count($perms);
+			$perm['ShardId'] = -1;
+		}
+		$perms[] = $perm;
+	}
+	return $perms;
+}
+
+/**
+ * Give an account the permission row of a domain that names no shard, or
+ * change its access privilege. Afterwards the account has exactly one such
+ * row for the domain, with ShardId -1: a 0 row on its own is turned into it,
+ * a 0 row beside a -1 row is deleted. One transaction.
+ */
+function setDomainPermission($db, $uid, $domainId, $accessPriv)
+{
+	$key = array(':uid' => $uid, ':did' => $domainId);
+	$db->beginTransaction();
+	try {
+		$stmt = $db->prepare('SELECT ShardId FROM permission WHERE UId = :uid AND DomainId = :did AND ShardId IN (-1, 0) FOR UPDATE');
+		$stmt->execute($key);
+		$found = array();
+		foreach ($stmt->fetchAll() as $row) {
+			$found[] = (int)$row['ShardId'];
+		}
+		if (in_array(-1, $found, true)) {
+			$stmt = $db->prepare('DELETE FROM permission WHERE UId = :uid AND DomainId = :did AND ShardId = 0');
+			$stmt->execute($key);
+			$stmt = $db->prepare('UPDATE permission SET AccessPrivilege = :priv WHERE UId = :uid AND DomainId = :did AND ShardId = -1');
+			$stmt->execute($key + array(':priv' => $accessPriv));
+		} elseif (in_array(0, $found, true)) {
+			$stmt = $db->prepare('UPDATE permission SET ShardId = -1, AccessPrivilege = :priv WHERE UId = :uid AND DomainId = :did AND ShardId = 0');
+			$stmt->execute($key + array(':priv' => $accessPriv));
+		} else {
+			$stmt = $db->prepare('INSERT INTO permission (UId, DomainId, ShardId, AccessPrivilege) VALUES (:uid, :did, -1, :priv)');
+			$stmt->execute($key + array(':priv' => $accessPriv));
+		}
+		$db->commit();
+	} catch (PDOException $e) {
+		$db->rollBack();
+		throw $e;
+	}
+}
+
+/**
+ * Take away the permission row of a domain that names no shard: the -1 row,
+ * and a 0 row if there is one.
+ */
+function removeDomainPermission($db, $uid, $domainId)
+{
+	$stmt = $db->prepare('DELETE FROM permission WHERE UId = :uid AND DomainId = :did AND ShardId IN (-1, 0)');
+	$stmt->execute(array(':uid' => $uid, ':did' => $domainId));
 }
 
 /**

@@ -340,9 +340,9 @@ CClientConfig::CClientConfig()
 	TexturesLoginInterface.push_back("texture_interfaces_v3_login");
 
 	DisplayAccountButtons = true;
-	CreateAccountURL	= RYZOM_CLIENT_CREATE_ACCOUNT_URL;	// "https://open.ryzom.dev/ams/";
-	EditAccountURL		= RYZOM_CLIENT_EDIT_ACCOUNT_URL;	// "https://open.ryzom.dev/ams/";
-	ForgetPwdURL		= RYZOM_CLIENT_FORGET_PASSWORD_URL;	// "https://open.ryzom.dev/ams/";
+	CreateAccountURL	= RYZOM_CLIENT_CREATE_ACCOUNT_URL;	// "https://core.ryzom.dev/account/?page=register";
+	EditAccountURL		= RYZOM_CLIENT_EDIT_ACCOUNT_URL;	// "https://core.ryzom.dev/account/?page=settings";
+	ForgetPwdURL		= RYZOM_CLIENT_FORGET_PASSWORD_URL;	// "https://core.ryzom.dev/account/";
 	Position			= CVector(0.f, 0.f, 0.f);	// Default Position.
 	Heading				= CVector(0.f, 1.f, 0.f);	// Default Heading.
 	EyesHeight			= 1.5f;						// Default User Eyes Height.
@@ -2083,7 +2083,8 @@ void CClientConfig::init(const string &configFileName)
 		FILE *fp = nlfopen(configFileName, "w");
 
 		if (fp == nullptr)
-			nlerror("CFG::init: Can't create config file '%s'", configFileName.c_str());
+			nlerror("CFG::init: Can't create config file '%s' in directory '%s'. The client keeps its files (client.cfg, logs, saves) in the directory it is started from when that directory holds client_default.cfg: make that directory writable, or start the client with the option --profile to keep them in the per-user directory",
+			    configFileName.c_str(), CPath::getCurrentPath().c_str());
 		else
 			nlwarning("CFG::init: creating '%s' with default values", configFileName.c_str ());
 

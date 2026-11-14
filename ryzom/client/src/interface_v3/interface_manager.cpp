@@ -480,6 +480,11 @@ CInterfaceManager::CInterfaceManager()
 	for (size_t i = 0; i < ClientCfg.UiFeatureFlags.size(); ++i)
 		parser->addFeatureFlag(ClientCfg.UiFeatureFlags[i]);
 
+	// build options that the interface depends on, so that it only uses what this client has
+#ifdef RYZOM_BG_DOWNLOADER
+	parser->addFeatureFlag("bg_downloader");
+#endif
+
 	parser->setSetupOptionsCallback( this );
 	parser->addModule( "scene3d", new CIF3DSceneParser() );
 	parser->addModule( "ddx", new CIFDDXParser() );
@@ -1292,6 +1297,12 @@ void CInterfaceManager::configureQuitDialogBox()
 				eltQuitNow->setActive(false);
 			}
 		}
+	}
+	else
+	{
+		// The interface XML that declares the dialog is missing or failed to load
+		nlwarning("Interface element '%s' not found, the quit dialog box is not configured", quitDialogStr.c_str());
+		return;
 	}
 
 	// Make all controls have the same size

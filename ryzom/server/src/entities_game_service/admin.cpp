@@ -47,7 +47,9 @@
 #include "nel/net/admin.h"
 #include "nel/net/service.h"
 
+#ifdef RYZOM_FORGE
 #include "nel/web/http_post_task.h"
+#endif
 
 #include "game_share/scores.h"
 #include "game_share/send_chat.h"
@@ -137,7 +139,9 @@ extern NLMISC::CVariable<uint32> FixedSessionId;
 
 using namespace NLMISC;
 using namespace NLNET;
+#ifdef RYZOM_FORGE
 using namespace NLWEB;
+#endif
 using namespace std;
 
 extern CVariable<string>	BannerPriv;
@@ -587,6 +591,8 @@ static void loadCommandsPrivileges(const string & fileName, bool init)
 	for (uint i = 0; i < nbCommands; i++)
 	{
 		AdminCommands[i].Priv = DefaultPriv;
+		AdminCommands[i].ForwardToservice.clear();
+		AdminCommands[i].Audit = false;
 	}
 
 	// load file content
@@ -1692,69 +1698,117 @@ NLMISC_COMMAND(createNamedItemInBag, "create a named item in bag", "<eId> <item>
 	return true;
 }
 
-NLMISC_COMMAND (createFullArmorSet, "Create and equip player with chosen full armor set","<eid> <race (fyros/matis/zorai/tryker)> <type (light/medium/heavy)> <quality>")
+NLMISC_COMMAND(createFullArmorSet, "Create a full armor set in the bag of a player", "<eid> <race (fyros/matis/zorai/tryker)> <type (light/medium/heavy)> <quality> [<variant (1/2/3)>]")
 {
-	static string armors[]=
-	{
-		"boots",
-		"gloves",
-		"pants",
-		"sleeves",
-		"vest",
-	};
-	static string heavyArmors[]=
-	{
-		"boots",
-		"gloves",
-		"helmet",
-		"pants",
-		"sleeves",
-		"vest",
-	};
+	// The craftable armor sheets are named ic<race>a<type><piece>[_2|_3].sitem, _2 and _3 being the
+	// medium and high quality variants of a piece. The origin and item type of a sheet are the same
+	// for the three variants (and for the caster pants), so the name selects the sheet and the
+	// origin and item type confirm it. Only heavy armor has a helmet.
+	static const char *const s_PieceNames[] = { "boots", "gloves", "pants", "sleeves", "vest", "helmet" };
+	static const char s_PieceLetters[] = { 'b', 'g', 'p', 's', 'v', 'h' };
+	static const ITEM_TYPE::TItemType s_LightPieces[] = { ITEM_TYPE::LIGHT_BOOTS, ITEM_TYPE::LIGHT_GLOVES, ITEM_TYPE::LIGHT_PANTS, ITEM_TYPE::LIGHT_SLEEVES, ITEM_TYPE::LIGHT_VEST };
+	static const ITEM_TYPE::TItemType s_MediumPieces[] = { ITEM_TYPE::MEDIUM_BOOTS, ITEM_TYPE::MEDIUM_GLOVES, ITEM_TYPE::MEDIUM_PANTS, ITEM_TYPE::MEDIUM_SLEEVES, ITEM_TYPE::MEDIUM_VEST };
+	static const ITEM_TYPE::TItemType s_HeavyPieces[] = { ITEM_TYPE::HEAVY_BOOTS, ITEM_TYPE::HEAVY_GLOVES, ITEM_TYPE::HEAVY_PANTS, ITEM_TYPE::HEAVY_SLEEVES, ITEM_TYPE::HEAVY_VEST, ITEM_TYPE::HEAVY_HELMET };
 
-	if (args.size () != 4) return false;
+	if (args.size() != 4 && args.size() != 5) return false;
 	GET_CHARACTER
 
-	const string &race = args[1];
-	const string &type = args[2];
+	const ITEM_ORIGIN::EItemOrigin origin = ITEM_ORIGIN::stringToEnum(args[1]);
+	char raceLetter = 0;
+	switch (origin)
+	{
+	case ITEM_ORIGIN::FYROS: raceLetter = 'f'; break;
+	case ITEM_ORIGIN::MATIS: raceLetter = 'm'; break;
+	case ITEM_ORIGIN::TRYKER: raceLetter = 't'; break;
+	case ITEM_ORIGIN::ZORAI: raceLetter = 'z'; break;
+	default:
+		log.displayNL("Unknown race '%s', expected fyros, matis, tryker or zorai", args[1].c_str());
+		return false;
+	}
+
+	char typeLetter = 0;
+	const ITEM_TYPE::TItemType *pieceTypes = NULL;
+	uint nbPieces = 0;
+	switch (ARMORTYPE::toArmorType(args[2]))
+	{
+	case ARMORTYPE::LIGHT:
+		typeLetter = 'l';
+		pieceTypes = s_LightPieces;
+		nbPieces = sizeof(s_LightPieces) / sizeof(s_LightPieces[0]);
+		break;
+	case ARMORTYPE::MEDIUM:
+		typeLetter = 'm';
+		pieceTypes = s_MediumPieces;
+		nbPieces = sizeof(s_MediumPieces) / sizeof(s_MediumPieces[0]);
+		break;
+	case ARMORTYPE::HEAVY:
+		typeLetter = 'h';
+		pieceTypes = s_HeavyPieces;
+		nbPieces = sizeof(s_HeavyPieces) / sizeof(s_HeavyPieces[0]);
+		break;
+	default:
+		log.displayNL("Unknown armor type '%s', expected light, medium or heavy", args[2].c_str());
+		return false;
+	}
+
 	uint16 quality;
-	NLMISC::fromString(args[3], quality);
-
-	const uint16 min = quality - (quality-1)%5;
-	const string minStr = (min < 10) ? string("0") + toString(min) : toString(min);
-	const uint16 max = min+4;
-	const string maxStr = (max < 10) ? string("0") + toString(max) : toString(max);
-
-	const string endName = string("_") + minStr + string("_") + maxStr + string(".item");
-
-	// create the armor pieces
-	if (type == "heavy")
+	if (!NLMISC::fromString(args[3], quality))
 	{
-		for ( int i = 0 ; i < sizeof(heavyArmors)/sizeof(heavyArmors[0]) ; ++i)
-		{
-			const string sheetName = race + string("_") + type + string("_") + heavyArmors[i] + endName;
-			CSheetId sheetId(sheetName);
+		log.displayNL("Quality '%s' is not a number from 1 to 65535", args[3].c_str());
+		return false;
+	}
+	if (quality < 1)
+	{
+		log.displayNL("Quality must be > 0");
+		return false;
+	}
 
-			if ( !c->createItemInInventory(INVENTORIES::bag, quality, 1, sheetId, eid) )
-			{
-				log.displayNL ("For entity %s Failed to create item %s", eid.toString().c_str(), sheetName.c_str() );
-			}
+	const char *variantSuffix = "";
+	if (args.size() == 5)
+	{
+		if (args[4] == "2")
+			variantSuffix = "_2";
+		else if (args[4] == "3")
+			variantSuffix = "_3";
+		else if (args[4] != "1")
+		{
+			log.displayNL("Unknown variant '%s', expected 1, 2 or 3", args[4].c_str());
+			return false;
 		}
 	}
-	else
-	{
-		for ( int i = 0 ; i < sizeof(armors)/sizeof(armors[0]) ; ++i)
-		{
-			const string sheetName = race + string("_") + type + string("_") + armors[i] + endName;
-			CSheetId sheetId(sheetName);
 
-			if ( !c->createItemInInventory(INVENTORIES::bag, quality, 1, sheetId, eid) )
-			{
-				log.displayNL ("For entity %s Failed to create item %s", eid.toString().c_str(), sheetName.c_str() );
-			}
+	// create the armor pieces, and say which ones could not be created and why
+	uint nbCreated = 0;
+	for (uint i = 0; i < nbPieces; ++i)
+	{
+		const string sheetName = toString("ic%ca%c%c%s.sitem", raceLetter, typeLetter, s_PieceLetters[i], variantSuffix);
+		CSheetId sheetId;
+		const CStaticItem *form = sheetId.buildSheetId(sheetName) ? CSheets::getForm(sheetId) : NULL;
+		if (form == NULL)
+		{
+			log.displayNL("%s not created: there is no item sheet '%s'", s_PieceNames[i], sheetName.c_str());
+			continue;
 		}
+		if (form->Family != ITEMFAMILY::ARMOR || form->Origin != origin || form->Type != pieceTypes[i])
+		{
+			log.displayNL("%s not created: the item sheet '%s' has family %s, origin %s and item type %s, expected %s, %s and %s",
+			    s_PieceNames[i], sheetName.c_str(),
+			    ITEMFAMILY::toString(form->Family).c_str(), ITEM_ORIGIN::enumToString(form->Origin).c_str(), ITEM_TYPE::toString(form->Type).c_str(),
+			    ITEMFAMILY::toString(ITEMFAMILY::ARMOR).c_str(), ITEM_ORIGIN::enumToString(origin).c_str(), ITEM_TYPE::toString(pieceTypes[i]).c_str());
+			continue;
+		}
+		if (!c->createItemInInventory(INVENTORIES::bag, quality, 1, sheetId, eid))
+		{
+			log.displayNL("%s not created: the item '%s' could not be created or does not fit in the bag of the player %s", s_PieceNames[i], sheetName.c_str(), eid.toString().c_str());
+			continue;
+		}
+		++nbCreated;
 	}
-	return true;
+
+	log.displayNL("%u of the %u pieces of the %s %s armor set created at quality %u in the bag of the player %s", nbCreated, nbPieces, args[1].c_str(), args[2].c_str(), (uint)quality, eid.toString().c_str());
+
+	// as createItemInBag: the command failed when nothing was created
+	return nbCreated != 0;
 }
 
 NLMISC_COMMAND (displayInfosOnTarget, "display info on entity target", "<eid>")
@@ -3007,9 +3061,56 @@ NLMISC_DYNVARIABLE (uint32, RyzomDate, "Current ryzom date")
 //
 //
 //
+// Posting a record of each audited admin command to a web page, only with RYZOM_FORGE. Without it the
+// commands are written to the service log, where the ones flagged 'audit' in the privileges file are marked.
+#ifdef RYZOM_FORGE
+
+// One audit record on its way to the audit page: the thread that posts it and its task
+struct CAuditPost
+{
+	NLMISC::IThread *Thread;
+	NLWEB::CHttpPostTask *Task;
+};
+
+// the audit records being posted
+static std::vector<CAuditPost> s_AuditPosts;
+
+// the longest raw command kept in an audit record, in bytes
+static const uint s_AuditMaxRawLength = 512;
+
+// how many audit records may be on their way at once, more are dropped with a warning
+static const uint s_AuditMaxPosts = 16;
+
+// Deletes the threads and tasks of the audit records that have been posted
+static void reapAuditPosts(bool waitForAll)
+{
+	for (uint i = 0; i < s_AuditPosts.size();)
+	{
+		if (waitForAll)
+			s_AuditPosts[i].Thread->wait();
+
+		if (s_AuditPosts[i].Thread->isRunning())
+		{
+			++i;
+			continue;
+		}
+
+		delete s_AuditPosts[i].Thread;
+		delete s_AuditPosts[i].Task;
+		s_AuditPosts[i] = s_AuditPosts.back();
+		s_AuditPosts.pop_back();
+	}
+}
+
+void releaseAdmin()
+{
+	reapAuditPosts(true);
+}
+
 void audit(const CAdminCommand *cmd, const string &rawCommand, const CEntityId &eid, const string &name, const string &targetName)
 {
-	if (cmd == NULL)
+	// only the commands flagged 'audit' in the privileges file
+	if (cmd == NULL || !cmd->Audit)
 		return;
 
 	CConfigFile::CVar *varHost = IService::getInstance()->ConfigFile.getVarPtr("AdminCommandAuditHost");
@@ -3024,12 +3125,37 @@ void audit(const CAdminCommand *cmd, const string &rawCommand, const CEntityId &
 	if (host.empty() || page.empty())
 		return;
 
-	char params[1024];
-	sprintf(params, "action=audit&cmd=%s&raw=%s&name=(%s,%s)&target=%s", cmd->Name.c_str(), rawCommand.c_str(), eid.toString().c_str(), name.c_str(), targetName.c_str());
+	reapAuditPosts(false);
+	if (s_AuditPosts.size() >= s_AuditMaxPosts)
+	{
+		nlwarning("ADMIN: audit of command '%s' by %s dropped, %u records are still being posted to '%s'", cmd->Name.c_str(), eid.toString().c_str(), (uint)s_AuditPosts.size(), host.c_str());
+		return;
+	}
 
-	IThread *thread = IThread::create(new CHttpPostTask(host, page, params));
-	thread->start();
+	// the raw command comes from the client: keep a bounded part, cut between two UTF-8 characters
+	string raw = rawCommand;
+	if (raw.size() > s_AuditMaxRawLength)
+	{
+		string::size_type cut = s_AuditMaxRawLength;
+		while (cut > 0 && ((uint8)raw[cut] & 0xC0) == 0x80)
+			--cut;
+		raw.resize(cut);
+		raw += " [cut]";
+	}
+
+	string params = "action=audit&cmd=" + encodeURIComponent(cmd->Name)
+	    + "&raw=" + encodeURIComponent(raw)
+	    + "&name=" + encodeURIComponent("(" + eid.toString() + "," + name + ")")
+	    + "&target=" + encodeURIComponent(targetName);
+
+	CAuditPost post;
+	post.Task = new NLWEB::CHttpPostTask(host, page, params);
+	post.Thread = IThread::create(post.Task);
+	post.Thread->start();
+	s_AuditPosts.push_back(post);
 }
+
+#endif // RYZOM_FORGE
 
 // Number of commands NLMISC::ICommand::execute() would run for this line, following its parser: a ';' outside
 // quotes separates two commands, '\' escapes the next character and a '"' only opens a quoted argument at the
@@ -3180,6 +3306,15 @@ void cbClientAdmin (NLNET::CMessage& msgin, const std::string &serviceName, NLNE
 		// we need to forward the command to another service
 		if (IClientCommandForwader::getInstance())
 		{
+			std::string forwardTargetName = "implicite";
+			if (onTarget)
+				forwardTargetName = NLMISC::toString("(%s,%s)", c->getTarget().toString().c_str(), CEntityIdTranslator::getInstance()->getByEntity(c->getTarget()).toString().c_str());
+			std::string forwardName = CEntityIdTranslator::getInstance()->getByEntity(eid).toString();
+			nlinfo("ADMIN: Player (%s,%s) forwards client admin command '%s %s' to '%s' on target %s%s", eid.toString().c_str(), forwardName.c_str(), cmdName.c_str(), arg.c_str(), cmd->ForwardToservice.c_str(), forwardTargetName.c_str(), cmd->Audit ? " [audit]" : "");
+#ifdef RYZOM_FORGE
+			audit(cmd, cmdName + " " + arg, eid, forwardName, forwardTargetName);
+#endif
+
 			IClientCommandForwader::getInstance()->sendCommand(cmd->ForwardToservice, cmdName, eid, onTarget, onTarget ? c->getTarget() : CEntityId::Unknown, arg);
 		}
 	}
@@ -3237,9 +3372,11 @@ void cbClientAdmin (NLNET::CMessage& msgin, const std::string &serviceName, NLNE
 			strFindReplace(res, "#target", c->getTarget().toString().c_str());
 			strFindReplace(res, "#gtarget", string("#"+c->getTarget().toString()).c_str());
 		}
-		nlinfo ("ADMIN: Player (%s,%s) will execute client admin command '%s' on target %s", eid.toString().c_str(), csName.c_str(), res.c_str(), targetName.c_str());
+		nlinfo ("ADMIN: Player (%s,%s) will execute client admin command '%s' on target %s%s", eid.toString().c_str(), csName.c_str(), res.c_str(), targetName.c_str(), cmd->Audit ? " [audit]" : "");
 
+#ifdef RYZOM_FORGE
 		audit(cmd, res, eid, csName, targetName);
+#endif
 
 		CLightMemDisplayer *CmdDisplayer = new CLightMemDisplayer("CmdDisplayer");
 		CLog *CmdLogger = new CLog( CLog::LOG_NO );
@@ -5877,7 +6014,7 @@ NLMISC_COMMAND (webExecCommand, "Execute a web command", "<user id> <web_app_url
 		if (command_args.size () != 3) return false;
 		string arg = command_args[1]+" "+command_args[2];
 		const CAdminCommand * cmd = findAdminCommand("renamePlayer");
-		if (!cmd->ForwardToservice.empty())
+		if (cmd != NULL && !cmd->ForwardToservice.empty())
 		{
 			// we need to forward the command to another service
 			if (IClientCommandForwader::getInstance())
@@ -8197,7 +8334,7 @@ NLMISC_COMMAND(eventCreateNpcGroup, "create an event npc group", "<player eid> <
 //----------------------------------------------------------------------------
 NLMISC_COMMAND(eventNpcGroupScript, "executes a script on an event npc group", "<bot eid> <script>")
 {
-	if (args.size () < 1) return false;
+	if (args.size() < 2) return false;
 	GET_ENTITY
 
 	uint32 instanceNumber = e->getInstanceNumber();

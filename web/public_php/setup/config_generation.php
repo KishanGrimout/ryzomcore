@@ -8,10 +8,24 @@
  */
 
 /**
- * Generate a random key suitable for use as a crypt key.
+ * Drop a script from PHP's opcode cache, for a file that was just written.
+ *
+ * The cache can go on serving the compiled copy of the previous file: for
+ * its revalidation interval, or until the server is restarted when timestamp
+ * validation is off. With config.php that means the old setup version, so a
+ * site that was just upgraded still answers "maintenance pending". This only
+ * reaches the cache of the server that runs it: a command line run has a
+ * cache of its own and cannot clear the web server's.
+ *
+ * @param string $path   Path of the file that was written.
  */
-function generate_crypt_key($length = 16) {
-	return substr(str_replace(array('+', '/', '='), '', base64_encode(random_bytes($length * 2))), 0, $length);
+function forget_cached_script($path) {
+	if (function_exists('opcache_invalidate')) {
+		$resolved = realpath($path);
+		// answers false, with a warning, when opcache.restrict_api keeps
+		// this script away from the cache: nothing more can be done from here
+		@opcache_invalidate($resolved !== false ? $resolved : $path, true);
+	}
 }
 
 /**
@@ -39,8 +53,8 @@ function apply_config_values($template, $values) {
  * @param array  $params           Associative array with install parameters:
  *   'privatePhpDirectory', 'publicPhpDirectory', 'nelSqlHostname', 'nelSqlPort',
  *   'nelSqlUsername', 'nelSqlPassword', 'nelDatabase', 'toolDatabase',
- *   'amsDatabase', 'amsLibDatabase', 'nelSetupPassword', 'domainDatabase',
- *   'domainUsersDir', 'nelDomainName', 'nelSetupVersion'
+ *   'nelSetupPassword', 'domainDatabase', 'domainUsersDir', 'nelDomainName',
+ *   'nelSetupVersion'
  * @return string|false            The generated config content, or false on failure.
  */
 function generate_install_config($templatePath, $params) {
@@ -58,15 +72,11 @@ function generate_install_config($templatePath, $params) {
 		'nelSqlPassword'      => $params['nelSqlPassword'],
 		'nelDatabase'         => $params['nelDatabase'],
 		'toolDatabase'        => $params['toolDatabase'],
-		'amsDatabase'         => $params['amsDatabase'],
-		'amsLibDatabase'      => $params['amsLibDatabase'],
 		'nelSetupPassword'    => $params['nelSetupPassword'],
 		'domainDatabase'      => $params['domainDatabase'],
 		'domainUsersDir'      => $params['domainUsersDir'],
 		'nelDomainName'       => $params['nelDomainName'],
 		'nelSetupVersion'     => $params['nelSetupVersion'],
-		'cryptKey'            => isset($params['cryptKey']) ? $params['cryptKey'] : generate_crypt_key(),
-		'cryptKeyIMAP'        => isset($params['cryptKeyIMAP']) ? $params['cryptKeyIMAP'] : generate_crypt_key(),
 	);
 
 	return apply_config_values($template, $values);
@@ -82,15 +92,13 @@ function generate_install_config($templatePath, $params) {
  * @param string $setupPassword               The $NEL_SETUP_PASSWORD value.
  * @param string $domainName                  The $NEL_DOMAIN_NAME value.
  * @param string $setupVersion                The new $NEL_SETUP_VERSION value.
- * @param string $cryptKey                    The existing crypt key.
- * @param string $cryptKeyIMAP                The existing IMAP crypt key.
  * @param string $domainDatabase              The ring database name.
  * @param string $usersDir                    The users directory.
  * @param int    $previousVersion             The previously configured version (for migration logic).
  * @return string|false                       The generated config content, or false on failure.
  */
 function generate_upgrade_config($templatePath, $cfg, $privatePhpPath, $publicPhpPath,
-	$setupPassword, $domainName, $setupVersion, $cryptKey, $cryptKeyIMAP,
+	$setupPassword, $domainName, $setupVersion,
 	$domainDatabase, $usersDir, $previousVersion) {
 
 	$template = file_get_contents($templatePath);
@@ -117,15 +125,11 @@ function generate_upgrade_config($templatePath, $cfg, $privatePhpPath, $publicPh
 		'nelSqlPassword'      => $cfg['db']['shard']['pass'],
 		'nelDatabase'         => $cfg['db']['shard']['name'],
 		'toolDatabase'        => $cfg['db']['tool']['name'],
-		'amsDatabase'         => $cfg['db']['web']['name'],
-		'amsLibDatabase'      => $cfg['db']['lib']['name'],
 		'nelSetupPassword'    => $setupPassword,
 		'domainDatabase'      => $domainDatabase,
 		'domainUsersDir'      => $usersDir,
 		'nelDomainName'       => $domainName,
 		'nelSetupVersion'     => $setupVersion,
-		'cryptKey'            => $cryptKey,
-		'cryptKeyIMAP'        => $cryptKeyIMAP,
 	);
 
 	return apply_config_values($template, $values);

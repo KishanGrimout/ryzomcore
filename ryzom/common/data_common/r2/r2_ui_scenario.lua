@@ -183,13 +183,16 @@ function r2.ScenarioWindow:updateLeftQuota()
 
 			self.LeftQuota, self.LeftStaticQuota = act:getLeftQuota() 
 
-			quotaViewText.hardtext = string.format("(%d)", self.LeftQuota)
-			quotaTooltip.tooltip = i18n.get("uiR2EDScene") .. " (" .. self.LeftQuota .. ")"
-			quotaMacroViewText.hardtext = string.format("(%d)", self.LeftQuota)
-			quotaMacroTooltip.tooltip = i18n.get("uiR2EDMacroComponents") .. " (" .. self.LeftQuota .. ")"
-			quotaViewTextMisc.hardtext = string.format("(%d)", self.LeftStaticQuota)
-			quotaViewTextMisc2.hardtext = string.format("(%d)", self.LeftStaticQuota)
-			quotaMiscTooltip.tooltip = i18n.get("uiR2EDbotObjects") .. " (" .. self.LeftStaticQuota .. ")"
+			-- whole counts, but floats from Lua 5.3 on: 287, not 287.0
+			local leftQuota = math.floor(self.LeftQuota)
+			local leftStaticQuota = math.floor(self.LeftStaticQuota)
+			quotaViewText.hardtext = string.format("(%d)", leftQuota)
+			quotaTooltip.tooltip = string.format("%s (%d)", i18n.get("uiR2EDScene"), leftQuota)
+			quotaMacroViewText.hardtext = string.format("(%d)", leftQuota)
+			quotaMacroTooltip.tooltip = string.format("%s (%d)", i18n.get("uiR2EDMacroComponents"), leftQuota)
+			quotaViewTextMisc.hardtext = string.format("(%d)", leftStaticQuota)
+			quotaViewTextMisc2.hardtext = string.format("(%d)", leftStaticQuota)
+			quotaMiscTooltip.tooltip = string.format("%s (%d)", i18n.get("uiR2EDbotObjects"), leftStaticQuota)
 			
 			quotaViewText.color_rgba = select(self.LeftQuota >= 0, CRGBA(255, 255, 255), CRGBA(255, 0, 0))
 			quotaViewTextMisc.color_rgba = select(self.LeftStaticQuota >= 0, CRGBA(255, 255, 255), CRGBA(255, 0, 0))
@@ -590,8 +593,13 @@ function r2.ScenarioWindow:updateActProperties()
 	local season = actGr:find("season_name")
 	assert(season)
 	local seasonStr = seasons[location.Season]
-	local uc_season = i18n.get(seasonStr)
-	season.text = uc_season
+	-- a location without a season of its own has none to show
+	if seasonStr then
+		local uc_season = i18n.get(seasonStr)
+		season.text = uc_season
+	else
+		season.text = ""
+	end
 
 	-- manual weather
 	local weatherGr = actGr:find("weather")

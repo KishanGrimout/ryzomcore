@@ -367,6 +367,8 @@ function r2:initTypeUI(instance)
 
 		-- parent palette element in palette UI (type node)
 		local typePalette = r2.PaletteIdToType[instance.Base]
+		-- a creature the palette does not offer has no place in its tree, and no other type to take
+		if typePalette == nil then typePalette = {} end
 		r2.sheetTypeCB = {}
 		
 		-- for each element of this type, check if must be added in combo box (only if also showed in palette UI)
@@ -978,7 +980,10 @@ end
 
 function r2:loadRaceSexNamesImpl(race, sex)
 	local fileName = fileLookup(race.."_" .. sex .. ".txt")
-	if fileName == "" then return end
+	if fileName == "" then
+		debugWarning("ASSET ERROR: the NPC name list '" .. string.lower(race .. "_" .. sex) .. ".txt' is not in the search paths; it is installed with the examples of the client")
+		return
+	end
 	local resultT = {}
 	local count = 1
 	for line in io.lines(fileName) do 
