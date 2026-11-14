@@ -32,6 +32,7 @@ SET(SRC_DYNWORLD
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/dyn_retriever_bank.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/dyn_move_container.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/dyn_global_retriever.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/vegetation_placement.cpp
 )
 
 # Seven zip wrapper for LZMA compression
@@ -66,6 +67,7 @@ SET(PRIV_DYNWORLD_H
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/dyn_retriever_bank.h
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/dyn_move_container.h
 	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/dyn_global_retriever.h
+	${CMAKE_CURRENT_SOURCE_DIR}/dynworld/vegetation_placement.h
 )
 
 # Seven zip wrapper headers

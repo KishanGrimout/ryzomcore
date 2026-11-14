@@ -252,7 +252,7 @@ bool CMapClient::prepareExtraction(const TRegion& regionToEmerge)
 
 bool g_checkIsLoaded = false;
 bool g_useCubicExtractor = false;
-void CMapClient::extractMesh(TGenericSectorId sectorId, IRegionMesh& outputMesh, MarchingCubesController& controller, uint sectorLod, uint meshLod)
+void CMapClient::extractMesh(TGenericSectorId sectorId, IRegionMesh& outputMesh, MarchingCubesController& controller, uint sectorLod, uint meshLod, TDecodedMesh* outDecodedMesh)
 {
 	TRegion regionToEmerge;
 	CSectorLod::getRegion(sectorLod, sectorId, regionToEmerge);
@@ -339,6 +339,9 @@ void CMapClient::extractMesh(TGenericSectorId sectorId, IRegionMesh& outputMesh,
 			decodedMesh = PolyVox::decodeMesh(mesh);
 		}
 	}
+
+	if (outDecodedMesh != nullptr)
+		*outDecodedMesh = decodedMesh;
 
 	outputMesh.initMesh(decodedMesh);
 }

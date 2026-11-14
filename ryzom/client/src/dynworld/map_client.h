@@ -18,6 +18,7 @@
 #define MAP_CLIENT_HEADER
 
 #include "game_share/dynworld/map.h"
+#include "game_share/dynworld/polyvox_defs.h"
 #include "nel/misc/vector.h"
 #include "nel/3d/vertex_buffer.h"
 #include "nel/3d/index_buffer.h"
@@ -51,7 +52,10 @@ public:
 
 	// return false if not needed to generate
 	bool prepareExtraction(const TRegion& regionToEmerge);
-	void extractMesh(TGenericSectorId sectorId, IRegionMesh& mesh, MarchingCubesController& controller, uint sectorLod, uint meshLod);
+	/// Extract the marching-cubes surface of a sector into outputMesh.
+	/// \param outDecodedMesh optional sink for the decoded mesh (microvegetation
+	/// placement walks it worker-side, P1); nullptr skips the copy.
+	void extractMesh(TGenericSectorId sectorId, IRegionMesh& mesh, MarchingCubesController& controller, uint sectorLod, uint meshLod, TDecodedMesh* outDecodedMesh = nullptr);
 
 	virtual void regionPagedIn(const TRegion& region, TVolume::Chunk* pChunk, const SectorMetadata& infos) override;
 	virtual void regionPagedOut(const TRegion& region, TVolume::Chunk* pChunk, SectorMetadata& outInfos) override;

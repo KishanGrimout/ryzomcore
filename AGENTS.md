@@ -51,6 +51,7 @@ System/reference docs (CamelCase):
 | `docs/TestEnvironmentNotes.md` | test runner & validation environment: `0xC0000135` ctest DLL quirk, direct-exe convention, Release-validation config, debugging process rules |
 | `docs/UnitTesting.md` | how to add and run unit tests: the two test homes (NeL `ut_*`, ryzom `test_modules`), `add_test_executable` checklist, build/run commands, pitfalls |
 | `docs/LegacyAssetInventory.md` | survey of the legacy tree `D:\Programmation\ryzomcore_old` (client run dir, data repos, Mercurial access recipe, external ANL/PolyVox checkouts) |
+| `docs/DynMicroVegetation.md` | client-side microvegetation on soft soil (stock NeL vegetable system reuse, placement engine, block/band lifecycle, commit budgets, debug command catalog) |
 
 Plan/handoff docs:
 
@@ -60,6 +61,7 @@ Plan/handoff docs:
 | `docs/PLAYER_WALL_CLIFF_COLLISION_PLAN.md` | GitHub issue #2 — player blocking on walls/cliffs (phases B0–B6, acceptance criteria) |
 | `docs/SET_VOXEL_ROUND_TRIP_VALIDATION.md` | GitHub issue #6 — paused SET_VOXEL round-trip investigation (suspects, resume protocol, instrumentation inventory) |
 | `docs/DYNLANDSCAPE_GLSL_MIGRATION_PLAN.md` | dyn landscape shaders vp1/arbfp1 assembly → hand-authored GLSL via the GL3 driver (assessment, phases 0–5) |
+| `docs/DYNWORLD_MICROVEGETATION_PLAN.md` | GitHub issue #7 — reuse the stock NeL microvegetation system, planted client-side from extracted meshes on soft soil (audit, decisions D1–D4, phases P0–P5) |
 
 Deployment-local (stay where they are, linked from here):
 
@@ -79,3 +81,22 @@ Deployment-local (stay where they are, linked from here):
   - collision side (`MVNAN`, `MVDBG2/3/4`): `docs/VoxelTerrainCollision.md` § 5.
 - msg.xml: never leave a message branch with a single child (see
   `docs/VoxelMessageChain.md` § 2).
+
+## Work methodology
+
+New tasks and features should be done into a branch of dev/dyn, which is the "main" branch for dynworld development.
+
+### Dynworld footprint discipline
+
+Dynworld changes must live in dynworld-owned files (`ryzom/client/src/dynworld/*`,
+`ryzom/common/src/game_share/dynworld/*`, dynworld test modules, `docs/`). Shared/stock
+engine code (`nel/*`, non-dynworld `ryzom/*`) may only be modified when no dynworld-side
+extension point exists. Before editing a shared file, look for one:
+
+- a virtual with a stock-safe default no-op (overridden ONLY by a dynworld child class),
+- a new pure-dynworld child class instead of editing a stock class,
+- a wrapper/dispatcher in dynworld code (or a dynworld-owned pointer) that absorbs the
+  call so shared dispatchers stay untouched.
+
+Any residual change in a shared file must be minimal, justified in the relevant plan or
+system doc, and marked strippable with the phase/validation that gates its removal.

@@ -73,6 +73,7 @@
 
 // Dynworld
 #include "dynworld/map_client.h"
+#include "dynworld/dyn_landscape_user.h"
 
 // Game Share
 #include "game_share/georges_helper.h"
@@ -212,10 +213,18 @@ void CDynContinent::select(const CVectorD &pos, NLMISC::IProgressCallback &progr
 						// If continent is an indoor, hide the landscape
 						if (!Indoor)
 						{
-							// Change the MicroVeget Texture.
-							string microVegetSeason = MicroVeget;
-							SeasonPostfixTextureFilename (microVegetSeason, Season);
-							Landscape->loadVegetableTexture (microVegetSeason);
+							// Change the MicroVeget Texture. Merged per-biome
+							// atlas first. Dispatch through the dynworld user
+							// (no ULandscape virtual for this dyn-only hook);
+							// Fallback: the stock sheet-driven single-atlas
+							// load (season-postfixed).
+							CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
+							if (dynLandscape == nullptr || !dynLandscape->loadDynVegetableAtlas((uint8)Season))
+							{
+								string microVegetSeason = MicroVeget;
+								SeasonPostfixTextureFilename (microVegetSeason, Season);
+								Landscape->loadVegetableTexture (microVegetSeason);
+							}
 
 							// Change the Material for static and dynamic PointLights
 							Landscape->setPointLightDiffuseMaterial(LandscapePointLightMaterial);

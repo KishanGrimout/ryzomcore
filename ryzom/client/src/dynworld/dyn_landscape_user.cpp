@@ -26,6 +26,8 @@
 #include "game_share/dynworld/marching_controller.h"
 #include "game_share/dynworld/material_library.h"
 #include "game_share/dynworld/map_deferred_command_manager.h"
+#include "game_share/dynworld/map_sector.h"
+#include "game_share/dynworld/vegetation_placement.h"
 
 #include "nel/misc/common.h"
 #include "nel/misc/file.h"
@@ -34,6 +36,7 @@
 #include "nel/misc/progress_callback.h"
 
 #include "nel/3d/scene_user.h"
+#include "nel/3d/vegetable_manager.h"
 
 using namespace NLMISC;
 using namespace NL3D;
@@ -47,6 +50,7 @@ H_AUTO_DECL( NL3D_Load_Landscape )
 #define	NL3D_HAUTO_LOAD_LANDSCAPE					H_AUTO_USE( NL3D_Load_Landscape )
 
 extern UCamera MainCam;
+extern bool g_renderVegetables; // dyn_landscape.cpp — P0 probe render toggle
 
 uint g_baselod = 0;
 uint g_maxlod = CDynLandscapeUser::LODCOUNT - 1;
@@ -58,6 +62,34 @@ float g_updateTransitionSpeed = .1f;
 bool g_forUsePlayerPosPriority = false;
 
 float g_camPosOffset = 16.f;
+
+// Microvegetation placement hook: compute the placement
+// geometry of an extracted mesh into regMesh->m_vegetPlacements. Only
+// LOD0/LOD1 meshes host vegetables; LOD2 (far 350 m box) never plants.
+// soilIds is the per-biome soft-soil table (see DYNWORLD::buildSoftSoilTable,
+// main-thread only — capture it there when calling from a worker command).
+static void vegetPlacementsFromMesh(TGenericSectorId sectorId, uint lod,
+	const uint8 (&soilIds)[DYNWORLD::VegetMaxBiomeCount], const TDecodedMesh& decodedMesh, CRegionMesh* regMesh)
+{
+	if (regMesh == nullptr || lod >= CDynLandscapeUser::LODCOUNT)
+		return;
+	regMesh->m_vegetPlacements.clear();
+	if (lod >= 2)
+		return;
+
+	// same transform as CDynLandscape::renderRegions: world =
+	// sectorOrigin + scale * meshLocal, with sectorOrigin = idPos * sideSize
+	// and scale = voxelSize(lod) * 2^lod (the extracted mesh carries
+	// sector-local resampled-voxel units)
+	NLMISC::CVectorI sectorPosI;
+	CSectorLod::idToPos(lod, sectorId, sectorPosI);
+	const float sideSize = CSectorLod::getSideSize(lod);
+	NLMISC::CVector worldOrigin(float(sectorPosI.x) * sideSize, float(sectorPosI.y) * sideSize, float(sectorPosI.z) * sideSize);
+	const float scale = CSectorLod::getVoxelSize(lod) * pow(2.f, float(lod));
+
+	DYNWORLD::computeVegetPlacements(decodedMesh, soilIds, worldOrigin, scale, regMesh->m_vegetPlacements);
+}
+
 float getPriorityToPlayer(const CVectorI& sectorPosI)
 {
 	if (MainCam.getObjectPtr() == nullptr)
@@ -105,6 +137,10 @@ public:
 		, m_outMesh(nullptr)
 		, m_prefetchDone(false)
 	{
+		// MAIN THREAD (ctor): capture the per-biome soft-soil table before the
+		// worker runs (CMaterialLibrary is main-thread-owned).
+		DYNWORLD::buildSoftSoilTable(m_soilIds);
+
 		TRegion regionToEmerge;
 		CSectorLod::getRegion(m_lod, m_sectorId, regionToEmerge);
 
@@ -162,7 +198,14 @@ private:
 		//NLMISC-PIX-STRIPPED NL_PROF_F("GenerateMesh%d(%p)", m_lod, m_sectorId);
 		MarchingCubesController controller(g_densityThreshold);
 		CRegionMesh* regMesh = new CRegionMesh;
-		m_map->extractMesh(m_sectorId, *regMesh, controller, m_lod, m_lod);
+		TDecodedMesh decodedMesh;
+		m_map->extractMesh(m_sectorId, *regMesh, controller, m_lod, m_lod, &decodedMesh);
+
+		// P1 microvegetation placement: worker-side pure-data
+		// clustering of the plantable soft-soil surface, stored on the mesh
+		// result; committed by the landscape when the mesh becomes visible (P2).
+		vegetPlacementsFromMesh(m_sectorId, m_lod, m_soilIds, decodedMesh, regMesh);
+
 		m_outMesh = regMesh;
 	}
 
@@ -194,6 +237,7 @@ private:
 
 	TSectorsList m_loadingSectors;
 	bool m_prefetchDone;
+	uint8 m_soilIds[DYNWORLD::VegetMaxBiomeCount];
 };
 
 // ***************************************************************************
@@ -268,6 +312,12 @@ void	CDynLandscapeUser::flushTiles (NLMISC::IProgressCallback &progress)
 	}
 
 	CMaterialLibrary::getInstance().bindMaterials(_Landscape->getLandscape().TileBank);
+
+	// Per-biome vegetable side banks: the main TileBank only holds
+	// the jungle ecosystem (the dyn continent reuses the newbieland sheet);
+	// desert/lakes/roots surface groups resolve their vegetable descs from
+	// their own ecosystem banks.
+	static_cast<CDynLandscape&>(_Landscape->getLandscape()).loadVegetSideBanks();
 }
 
 // ****************************************************************************
@@ -399,7 +449,14 @@ IRegionMesh* CDynLandscapeUser::generateMesh(TGenericSectorId sectorId, uint lod
 {
 	MarchingCubesController controller(g_densityThreshold);
 	CRegionMesh* regMesh = new CRegionMesh;
-	m_map->extractMesh(sectorId, *regMesh, controller, lod, lod);
+	TDecodedMesh decodedMesh;
+	m_map->extractMesh(sectorId, *regMesh, controller, lod, lod, &decodedMesh);
+
+	// P1 microvegetation placement: main-thread path, the soil
+	// table can be built directly here.
+	uint8 soilIds[DYNWORLD::VegetMaxBiomeCount];
+	DYNWORLD::buildSoftSoilTable(soilIds);
+	vegetPlacementsFromMesh(sectorId, lod, soilIds, decodedMesh, regMesh);
 
 	bindRegionMeshTexture(regMesh);
 
@@ -441,6 +498,191 @@ void CDynLandscapeUser::bindRegionMeshTexture(CRegionMesh* mesh)
 		}
 	}
 }
+
+// ****************************************************************************
+void CDynLandscapeUser::dumpVegetableData() const
+{
+	// The model's landscape is a CDynLandscape in dyn sessions, which owns the
+	// vegetable-manager access needed by the dump.
+	CDynLandscape* dynLandscape = static_cast<CDynLandscape*>(&_Landscape->getLandscape());
+	dynLandscape->dumpVegetableData();
+}
+
+// ****************************************************************************
+void CDynLandscapeUser::logVegetStats() const
+{
+	CDynLandscape* dynLandscape = static_cast<CDynLandscape*>(&_Landscape->getLandscape());
+	dynLandscape->logVegetStats();
+}
+
+// P0 probe commands — registered from here to avoid pulling
+// the dynworld headers into commands.cpp (they drag nel/3d/animation.h, which
+// collides with the client's own CAnimation there).
+NLMISC_COMMAND(dyn_vegetdump, "Dump dyn landscape vegetable data", "")
+{
+	extern ULandscape *Landscape;
+	CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
+	if (dynLandscape == nullptr)
+	{
+		nlinfo("DYNVEGET: no dyn landscape (not in a dyn world session)");
+		return true;
+	}
+	dynLandscape->dumpVegetableData();
+	return true;
+}
+
+// ****************************************************************************
+void CDynLandscapeUser::vegetTest(const NLMISC::CVector& pos, const NLMISC::CVector& normal, const std::string& shapeName, uint count,
+	Voxel::BiomeType biome)
+{
+	CDynLandscape* dynLandscape = static_cast<CDynLandscape*>(&_Landscape->getLandscape());
+	dynLandscape->vegetTest(pos, normal, shapeName, count, biome);
+}
+
+// ****************************************************************************
+bool CDynLandscapeUser::loadDynVegetableAtlas(uint8 season)
+{
+	CDynLandscape* dynLandscape = static_cast<CDynLandscape*>(&_Landscape->getLandscape());
+	return dynLandscape->loadDynVegetableAtlas(season);
+}
+
+NLMISC_COMMAND(dyn_vegettest, "Plant test vegetable instances at the player position", "<shapeName> [count=20]")
+{
+	extern ULandscape *Landscape;
+	CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
+	if (dynLandscape == nullptr)
+	{
+		nlinfo("DYNVEGET: no dyn landscape (not in a dyn world session)");
+		return true;
+	}
+	if (args.empty())
+		return false;
+
+	uint count = 20;
+	if (args.size() > 1)
+		fromString(args[1], count);
+
+	// Shape names are registered with their extension (e.g. "Ju_FleurA.veget");
+	// accept a bare name.
+	const std::string &arg = args[0];
+	std::string shapeName = (arg.find('.') == std::string::npos) ? arg + ".veget" : arg;
+
+	if (UserEntity == nullptr)
+	{
+		nlinfo("DYNVEGET: no user entity");
+		return true;
+	}
+
+	dynLandscape->vegetTest(UserEntity->pos(), CVector(0.f, 0.f, 1.f), shapeName, count);
+	return true;
+}
+
+NLMISC_COMMAND(dyn_renderveget, "Toggle render of stock microvegetation in dyn landscape", "")
+{
+	g_renderVegetables = !g_renderVegetables;
+	nlinfo("DYNVEGET: dyn_renderveget = %d", g_renderVegetables);
+	return true;
+}
+
+NLMISC_COMMAND(dyn_vegetseason, "Force the merged microveget atlas season variant: 0=spring 1=summer 2=autumn 3=winter, 255=base. Only swaps the veget atlas (tile colors etc. follow the session season)", "<season>")
+{
+	extern ULandscape *Landscape;
+	CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
+	if (dynLandscape == nullptr)
+	{
+		nlinfo("DYNVEGET: no dyn landscape (not in a dyn world session)");
+		return true;
+	}
+	if (args.empty())
+		return false;
+
+	uint season = 0;
+	fromString(args[0], season);
+	if (season > 3 && season != 0xFF)
+		return false;
+
+	if (dynLandscape->loadDynVegetableAtlas((uint8)season))
+		nlinfo("DYNVEGET: merged veget atlas switched to season %u", season);
+	else
+		nlwarning("DYNVEGET: merged veget atlas not available (stock fallback stays)");
+	return true;
+}
+
+// P2 commit budget knob: per-frame cap of vegetable IG
+// commits (initial plantings + ring band changes), declared in dyn_landscape.cpp.
+extern uint g_maxVegetCommit;
+NLMISC_COMMAND(dyn_vegetbudget, "Set the per-frame vegetable IG commit budget", "<maxIgCommitsPerFrame>")
+{
+	if (args.empty())
+		return false;
+	uint budget = 0;
+	fromString(args[0], budget);
+	g_maxVegetCommit = budget;
+	nlinfo("DYNVEGET: g_maxVegetCommit = %u", g_maxVegetCommit);
+	return true;
+}
+
+NLMISC_COMMAND(dyn_vegetstats, "Log microvegetation render state + last-frame face count", "")
+{
+	extern ULandscape *Landscape;
+	CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
+	if (dynLandscape == nullptr)
+	{
+		nlinfo("DYNVEGET: no dyn landscape (not in a dyn world session)");
+		return true;
+	}
+	dynLandscape->logVegetStats();
+	return true;
+}
+
+// Vegetation on/off toggle. ULandscape has no
+// isVegetableActive() getter, so query the concrete model like the other
+// dyn_veget* commands. Disabling releases all vegetable blocks (frees the
+// vegetable VB space); re-enabling recreates them through the next structural
+// sync in updateVegetableBlocks.
+NLMISC_COMMAND(dyn_veget, "Toggle dynworld microvegetation on/off", "[0|1]")
+{
+	extern ULandscape *Landscape;
+	CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
+	if (dynLandscape == nullptr)
+	{
+		nlinfo("DYNVEGET: no dyn landscape (not in a dyn world session)");
+		return true;
+	}
+	bool enable = !dynLandscape->isVegetableActive();
+	if (!args.empty())
+		fromString(args[0], enable);
+	dynLandscape->setVegetableActive(enable);
+	nlinfo("DYNVEGET: microvegetation %s", enable ? "enabled" : "disabled");
+	return true;
+}
+
+// Vegetable density knob: percentage of the
+// tile-bank density, same semantic as ClientCfg.MicroVegetDensity.
+NLMISC_COMMAND(dyn_vegetdensity, "Set microvegetation density (percentage, default from ClientCfg)", "<pct>")
+{
+	extern ULandscape *Landscape;
+	CDynLandscapeUser* dynLandscape = dynamic_cast<CDynLandscapeUser*>(Landscape);
+	if (dynLandscape == nullptr)
+	{
+		nlinfo("DYNVEGET: no dyn landscape (not in a dyn world session)");
+		return true;
+	}
+	float pct = 0.f;
+	if (args.empty() || !fromString(args[0], pct))
+	{
+		nlinfo("DYNVEGET: usage: dyn_vegetdensity <pct> (current: %.0f%%)", dynLandscape->getVegetableDensity() * 100.f);
+		return true;
+	}
+	dynLandscape->setVegetableDensity(pct / 100.f);
+	nlinfo("DYNVEGET: vegetable density = %.0f%%", pct);
+	return true;
+}
+
+// Wireframe toggle: REMOVED — driver-level
+// polygon-mode switching corrupts GL3 render state after the first frame
+// (terrain back to filled, big flora rendered without fog). Use the
+// "dyn_vegetdump" block list for LOD coverage questions instead.
 
 // ****************************************************************************
 void CDynLandscapeUser::removeMeshes(const TSectorsList& sectorsToRemove, uint lod)
@@ -662,6 +904,17 @@ void CDynLandscapeUser::refreshLodSectors(const CVector& pos, float radius, uint
 
 	// Check for finished generation deferred commands
 	updateGenerateMeshesCommands();
+
+	// P2: sync the vegetable blocks against m_regionsList and run
+	// the ring-band commits (create/release IGs) under the per-frame budget,
+	// inside the vegetable-manager lock window. NB: the viewCenter MUST be the
+	// same point the vegetable VP alpha uses, i.e. the landscape refine center
+	// (View.refinePos(), = the player in 3rd person), NOT the camera: stock
+	// CLandscape::refine()/render() use refineCenter for both the band walk
+	// and the alpha, and a camera-vs-player offset makes every ring-edge
+	// create land at alpha = camOffset/10 (pop-in while moving forward,
+	// disappear-while-visible when moving backward) — plan doc §6.8.
+	landscape.updateVegetableBlocks(pos);
 
 	// .
 	updateTransitionMeshes();
@@ -1320,10 +1573,25 @@ void		CDynLandscapeUser::setHeightField(const CHeightMap &hf)
 
 
 // ****************************************************************************
-void		CDynLandscapeUser::enableVegetable(bool enable)
+void	CDynLandscapeUser::enableVegetable(bool enable)
 {
 	NL3D_HAUTO_UI_LANDSCAPE;
 	_Landscape->getLandscape().enableVegetable(enable);
+}
+
+// ****************************************************************************
+void	CDynLandscapeUser::setVegetableActive(bool enable)
+{
+	NL3D_HAUTO_UI_LANDSCAPE;
+	CDynLandscape* dynLandscape = static_cast<CDynLandscape*>(&_Landscape->getLandscape());
+	dynLandscape->setVegetableActive(enable);
+}
+
+// ****************************************************************************
+bool	CDynLandscapeUser::isVegetableActive() const
+{
+	NL3D_HAUTO_UI_LANDSCAPE;
+	return _Landscape->getLandscape().isVegetableActive();
 }
 
 // ****************************************************************************
