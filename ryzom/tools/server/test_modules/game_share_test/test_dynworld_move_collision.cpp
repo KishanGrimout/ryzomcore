@@ -352,6 +352,79 @@ TEST(DynworldMoveCollisionTest, GentleOneVoxelDownslopeIsNotPhantomBlocked)
 		}
 	};
 
+	// fixture: the sheet-on-rise geometry of the live client failure, seen
+	// from a sector with a NONZERO z origin (sector (21,-22,1): world origin
+	// (672,-704,32) m). The estimation and the grounds are sector-local (the
+	// slab top sits exactly on the sector bottom plane: stand z = 0.0 local),
+	// while traceSegment returns hit voxels in GLOBAL voxel coords
+	// (z = 64 + local). East of the start columns the ground rises one voxel
+	// and the risen surface carries a partial-density Raw sheet (d33) at the
+	// first body span height, like the generated surface band. Pre-fix,
+	// hitTop was computed from the global voxel z — inflated by the whole
+	// sector z origin (32 m) — and the sheet was misclassified as a wall:
+	// phantom block on a gentle climb in every sector with z != 0 (found live
+	// at sector (661,-1063,1), 2026-11-15). The overhang variant replaces the
+	// sheet with a full body-height voxel to pin that real walls above the
+	// auto-step zone still block in the fixed frame.
+	struct CShiftedSectorMap
+	{
+		CDummyPager pager;
+		CMapBase map;
+		CDynGlobalRetriever retriever;
+
+		static const sint32 SectorX = 21, SectorY = -22, SectorZ = 1;
+		static const sint32 Ox = SectorX * TLoadingSector::SideSizeInVoxels; // 1344
+		static const sint32 Oy = SectorY * TLoadingSector::SideSizeInVoxels; // -1408
+		static const sint32 Oz = SectorZ * TLoadingSector::SideSizeInVoxels; // 64
+		static const sint32 RiseRelX = 2; // first risen column, relative to Ox
+
+		CShiftedSectorMap(bool overhang)
+			: pager()
+			, map()
+			, retriever(nullptr, &map)
+		{
+			map.initMap(&pager, 64ull * 1024 * 1024);
+
+			for (sint32 x = Ox; x < Ox + RiseRelX + 8; ++x)
+				for (sint32 y = Oy; y < Oy + 4; ++y)
+				{
+					// common slab: its top face lands exactly on the sector
+					// bottom plane (stand z = 0.0 local)
+					for (sint32 z = Oz - 2; z < Oz; ++z)
+						map.setVoxelAt(TVoxelPos(x, y, z), fullSolid());
+
+					if (x < Ox + RiseRelX)
+						continue;
+
+					if (overhang)
+					{
+						// air gap, then a full voxel at the first body span
+						// height: a real wall above the auto-step zone
+						map.setVoxelAt(TVoxelPos(x, y, Oz), Voxel());
+						map.setVoxelAt(TVoxelPos(x, y, Oz + 1), fullSolid());
+					}
+					else
+					{
+						// one-voxel rise topped by the partial surface sheet
+						map.setVoxelAt(TVoxelPos(x, y, Oz), fullSolid());
+						Voxel sheet = fullSolid();
+						sheet.setDensity(33);
+						map.setVoxelAt(TVoxelPos(x, y, Oz + 1), sheet);
+					}
+				}
+		}
+
+		static NLPACS::UGlobalPosition posAt(float x, float y, float z)
+		{
+			// the estimation is sector-local, like the runtime keeps it
+			NLPACS::UGlobalPosition pos;
+			pos.InstanceId = TLoadingSector::s_posToId(SectorX, SectorY, SectorZ);
+			pos.LocalPosition.Surface = -1;
+			pos.LocalPosition.Estimation = NLMISC::CVector(x, y, z);
+			return pos;
+		}
+	};
+
 TEST(DynworldMoveCollisionTest, PartialSurfaceSheetDoesNotPhantomBlock)
 {
 	CPartialSheetMap testMap;
@@ -534,5 +607,60 @@ TEST(DynworldMoveCollisionTest, LiquidCurtainSolidBehindStillBlocks)
 	// contact at the far Raw wall face: world x = 20.0 m, t = (20 - 14)/9
 	ASSERT_EQ(1, descs->size());
 	EXPECT_NEAR(6.f / 9.f, descs->begin()->ContactTime, 1e-5);
+}
+
+TEST(DynworldMoveCollisionTest, OneVoxelRiseSheetInZShiftedSectorIsAutoStepped)
+{
+	CShiftedSectorMap testMap(false);
+
+	// the ground reads agree within one frame: the start stand sits on the
+	// sector bottom plane (0.0 local) and the risen column stops on the d33
+	// sheet, one voxel up (0.5 local)
+	NLPACS::UGlobalPosition startPos = CShiftedSectorMap::posAt(0.f, 0.f, 0.f);
+	NLPACS::UGlobalPosition endPos(startPos);
+	endPos.LocalPosition.Estimation.x += 1.2f;
+	EXPECT_FLOAT_EQ(0.f, testMap.retriever.getMeanHeight(startPos));
+	EXPECT_FLOAT_EQ(0.5f, testMap.retriever.getMeanHeight(endPos));
+
+	// the gentle climb is accepted: the body sweep crosses the sheet at span
+	// 1 and its top (1.0 local = endGround 0.5 + one auto-step) is inside the
+	// auto-step zone. Pre-fix the hitTop was read in the global frame
+	// (33.0 m) and this move phantom-blocked.
+	NLPACS::CCollisionSurfaceTemp cst;
+	const NLPACS::TCollisionSurfaceDescVector *descs = testMap.retriever.testCylinderMove(
+		startPos,
+		NLMISC::CVector(1.2f, 0.f, 0.f),
+		0.4f,
+		cst);
+
+	EXPECT_EQ(&cst.CollisionDescs, descs);
+	ASSERT_TRUE(descs->empty());
+}
+
+TEST(DynworldMoveCollisionTest, BodyHeightWallInZShiftedSectorStillBlocks)
+{
+	CShiftedSectorMap testMap(true);
+
+	// a full voxel at the first body span height with its top 1.0 local above
+	// a 0.0 local ground is beyond the auto-step zone: still a wall once the
+	// hit is translated back into the sector frame (guards the fix against an
+	// over-correction that would mute wall detection in shifted sectors)
+	NLPACS::CCollisionSurfaceTemp cst;
+	const NLPACS::TCollisionSurfaceDescVector *descs = testMap.retriever.testCylinderMove(
+		CShiftedSectorMap::posAt(0.f, 0.f, 0.f),
+		NLMISC::CVector(1.2f, 0.f, 0.f),
+		0.4f,
+		cst);
+
+	ASSERT_EQ(1, descs->size());
+	const NLPACS::CCollisionSurfaceDesc &desc = firstDesc(cst);
+
+	// the DDA enters the wall column at world x = 673.0 m: t = 1.0 / 1.2
+	EXPECT_NEAR(1.f / 1.2f, desc.ContactTime, 1e-5);
+	EXPECT_NEAR(-1.0, desc.ContactNormal.x, 1e-5);
+	EXPECT_NEAR(0.0, desc.ContactNormal.y, 1e-5);
+	EXPECT_NEAR(0.0, desc.ContactNormal.z, 1e-9);
+	EXPECT_EQ(-1, desc.ContactSurface.RetrieverInstanceId);
+	EXPECT_EQ(-1, desc.ContactSurface.SurfaceId);
 }
 

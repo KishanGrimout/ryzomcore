@@ -710,6 +710,20 @@ const TCollisionSurfaceDescVector* CDynGlobalRetriever::testCylinderMove(const U
 		return &cst.CollisionDescs;
 	}
 
+	// the hit voxels come back from traceSegment in GLOBAL voxel coords while
+	// the grounds and the feet cell are sector-local: decode the sector origin
+	// once so the sweep comparisons stay in one frame. InvalidId positions
+	// (the test worlds) have no sector origin — the conversions short-circuit
+	// to identity — so the offset stays zero (s_unpackId asserts on InvalidId
+	// and would decode garbage in release).
+	sint sectorOx = 0, sectorOy = 0, sectorOz = 0;
+	sint sectorOriginVoxelZ = 0;
+	if (startPos.InstanceId != TLoadingSector::InvalidId)
+	{
+		TLoadingSector::s_idToPos(startPos.InstanceId, sectorOx, sectorOy, sectorOz);
+		sectorOriginVoxelZ = sectorOz * TLoadingSector::SideSizeInVoxels;
+	}
+
 	// MVDBG (temporary, strip with the MVNAN set at B6/B5): identifies the
 	// sector-id <-> estimation frame mismatch that lands the body sweep on a
 	// mirrored/doubled column for nonzero sector ids (embedded t=0 hits on
@@ -717,11 +731,9 @@ const TCollisionSurfaceDescVector* CDynGlobalRetriever::testCylinderMove(const U
 	// sector decodes negated against the true sector, and the converter
 	// scales the origin by SideSizeInVoxels instead of SideSize)
 	{
-		sint dbgSx, dbgSy, dbgSz;
-		TLoadingSector::s_idToPos(startPos.InstanceId, dbgSx, dbgSy, dbgSz);
 		const CVectorD dbgGlobal = m_map->getDoubleGlobalPosition(startPos.InstanceId, start);
 		nlwarning("MVDBG: id=%" NL_I64 "u sector=(%d,%d,%d) est=(%.3f,%.3f,%.3f) global=(%.3f,%.3f,%.3f)",
-			(sint64)startPos.InstanceId, dbgSx, dbgSy, dbgSz,
+			(sint64)startPos.InstanceId, sectorOx, sectorOy, sectorOz,
 			start.x, start.y, start.z, dbgGlobal.x, dbgGlobal.y, dbgGlobal.z);
 	}
 
@@ -772,7 +784,12 @@ const TCollisionSurfaceDescVector* CDynGlobalRetriever::testCylinderMove(const U
 			const CVector sweepEnd(start.x + move.x, start.y + move.y, sweepZ);
 			if (m_map->traceSegment(startPos.InstanceId, CVector(start.x, start.y, sweepZ), sweepEnd, hit))
 			{
-				const float hitTop = (float(hit.m_voxelPos.z) + 1.f) * TLoadingSector::VoxelSize;
+				// translate the hit back into the sector-local frame before
+				// comparing with the (local) grounds: a global-frame hitTop
+				// is inflated by the sector z origin and turns every rising
+				// surface sheet into a phantom wall in any sector with z != 0
+				// (found live at sector z=1: hitTop=33.0 against endGround=0.5)
+				const float hitTop = (float(hit.m_voxelPos.z - sectorOriginVoxelZ) + 1.f) * TLoadingSector::VoxelSize;
 
 				// MVDBG3 (temporary): is the hit voxel a real terrain lip at
 				// our own column, or a mirrored-volume sample? prints the

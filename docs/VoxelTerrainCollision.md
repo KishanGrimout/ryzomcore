@@ -23,7 +23,7 @@ based while the visual mesh is a marching-cubes level set — see §8.
 | `CDynGlobalRetriever` | `ryzom/common/src/game_share/dynworld/dyn_global_retriever.cpp` | `getMeanHeight` (z provider), `testCylinderMove` (move test), `doMove` |
 | Dyn PACS plug-in points | client `ryzom/client/src/pacs_client.cpp:96-103`; server `ryzom/server/src/server_share/dynworld/dyn_continent_container.cpp:57-98` | both sides construct `CDynRetrieverBank` / `CDynGlobalRetriever` / `CDynMoveContainer` |
 | Server validation | gpm2 `CWorldPositionManager::movePlayer` (`ryzom/server/src/gpm2_service/world_position_manager.cpp:2111-2318`) | speed clamp; `> 1 m` divergence ⇒ mirror-correct + `TP:CORRECT`; client rollback via `CUserEntity::checkPos()` (`user_entity.cpp:1769-1879`) |
-| Tests | `ryzom/tools/server/test_modules/game_share_test/test_dynworld_map_collision.cpp` (11 tests, `ryzom_dynworld_map_collision_test`), `test_dynworld_move_collision.cpp` (12 tests, `ryzom_dynworld_move_collision_test`, links `NeL::pacs` which `Ryzom::gameshare` does NOT propagate) | |
+| Tests | `ryzom/tools/server/test_modules/game_share_test/test_dynworld_map_collision.cpp` (11 tests, `ryzom_dynworld_map_collision_test`), `test_dynworld_move_collision.cpp` (14 tests, `ryzom_dynworld_move_collision_test`, links `NeL::pacs` which `Ryzom::gameshare` does NOT propagate) | |
 
 Design property: the move test is implemented **inside `CDynGlobalRetriever`**, not in
 gpm2 service code — one implementation serves client prediction, GPMS server simulation,
@@ -43,6 +43,9 @@ dyn IG prims are deliberately non-collisionable (`ig_callback.cpp:219`).
   feet cell**; hits whose voxel top is within one voxel of the destination ground are
   treated as terrain rise (**auto-step zone**), real walls return the face normal + hit
   `t`. NOTE: the auto-step zone is anchored on the **end** ground — see invariant 3 below.
+  The hit comes back in GLOBAL voxel coords while the grounds/feet cell are sector-local:
+  `hitTop` must translate the hit back into the sector frame first (finding §6.6 — the
+  untranslated comparison phantom-blocked every rising surface in sectors with `z != 0`).
 - **Ground-block rejection** — the blocked desc opposes the move **head-on** (destination
   ground gradient flattened to horizontal, flipped to oppose movement), contact at the
   start of the move.
@@ -165,6 +168,22 @@ harmless for movement; left as-is (visible in
 5. **PACS reaction push-back explosion** (§2 contact-time invariant) — first client walk
    into blocking terrain died in `CVectorI::checkedComponent` with NaN `_DeltaPosition`;
    fixed by reporting ground-block contact at time 0.
+6. **Global/local frame mismatch in the sweep's `hitTop`** (found live 2026-11-15,
+   client session at sector `(661,-1063,1)`): `traceSegment` returns the hit voxel in
+   GLOBAL voxel coords, but `testCylinderMove` compared `hitTop = (voxelZ+1)·VoxelSize`
+   against the sector-LOCAL `endGroundZ` (from `getMeanHeight`, which works on
+   `LocalPosition.Estimation`). In any sector with `z != 0` the hitTop is inflated by
+   the sector z origin (32 m at z=1) ⇒ every rising-surface sheet hit outruns the
+   auto-step zone ⇒ invisible phantom walls on gentle climbs. Live signature
+   (MVDBG2/MVDBG3/4): `endGround=0.500` against `hitTop=33.000`, hit voxel the partial
+   surface sheet (`Raw, d33`/`d6`) of the destination column. Why nothing caught it
+   earlier: all prior sessions and the whole suite ran at sector `z=0` or with
+   `InvalidId` (no translation) — same lesson as invariant 4: NEVER validate
+   frame-dependent code only at zero sector origins. Fix: translate the hit back into
+   the sector-local frame (`m_voxelPos.z − sectorZ·SideSizeInVoxels`) before the
+   comparison, with the InvalidId short-circuit (no origin). Regression tests:
+   `OneVoxelRiseSheetInZShiftedSectorIsAutoStepped`,
+   `BodyHeightWallInZShiftedSectorStillBlocks` (14/14; full dynworld set green).
 
 100%-static-rule reminders: pack collision constants where they evolve (plan B6); when
 changing ground semantics, re-run the full dynworld exe set green before considering the
@@ -175,11 +194,13 @@ change landed (list + runner pitfalls in `docs/TestEnvironmentNotes.md`).
 - `ryzom_dynworld_map_collision_test` — 11 tests: rule matrix, air sweep, wall face +
   `t`/normal, embedded start, liquid pass-through with solid behind, vertical-sweep
   axis, flat-ground normal, step-edge 45° normal, bounded miss, water-top stop.
-- `ryzom_dynworld_move_collision_test` — 12 tests (M1): flat free, wall face contact
+- `ryzom_dynworld_move_collision_test` — 14 tests: flat free, wall face contact
   `t`/normal, 1-voxel auto-step accepted, 1 m face blocked at tick distance, cliff foot
   blocked, ledge edge no-fall, liquid free wade, liquid pass-through blocking at the
-  solid behind, plus the `Gentle*Downslope*` regressions and the M1 converter/invariant
-  regressions.
+  solid behind, the `Gentle*Downslope*` regressions, the M1 converter/invariant
+  regressions, and the z-shifted-sector frame regressions
+  (`OneVoxelRiseSheetInZShiftedSectorIsAutoStepped`,
+  `BodyHeightWallInZShiftedSectorStillBlocks`, finding §6.6).
 - Validation convention (Release, exes run directly from `build\bin\Release`; the full
   dynworld exe set must be green after every change): `docs/TestEnvironmentNotes.md`.
 

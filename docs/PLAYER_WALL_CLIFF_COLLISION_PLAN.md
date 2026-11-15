@@ -225,6 +225,22 @@ Keep `getMeanHeight` as the z provider; collision decides the accepted (x,y).
       anchored on the end ground. Density is `+=` and the quantization is
       back; `g_AutoStep` stays 1 voxel (plan §4.2). New regression
       `GentleFullVoxelDownslopeIsNotPhantomBlocked` (10/10; set green).
+      Follow-up 3 (2026-11-15, live client session at sector `(661,-1063,1)`):
+      invisible walls on gentle UPHILLS in any sector with `z != 0` — the
+      sweep's `hitTop` was computed from the GLOBAL hit voxel z and compared
+      against the sector-LOCAL `endGroundZ`, so in a z=1 sector every rising
+      surface sheet (partial-density Raw, d33/d6 in the live log) outran the
+      auto-step zone and wall-blocked. Fixed by translating the hit back into
+      the sector frame (`m_voxelPos.z − sectorZ·SideSizeInVoxels`, InvalidId
+      short-circuits to no origin). Regressions
+      `OneVoxelRiseSheetInZShiftedSectorIsAutoStepped` +
+      `BodyHeightWallInZShiftedSectorStillBlocks` (14/14; full dynworld set
+      green, `ryzom_dynworld_vegetation_test` included — needs the redist dirs
+      on PATH, see `docs/TestEnvironmentNotes.md` § 1). Details in
+      `docs/VoxelTerrainCollision.md` § 6 (finding 6). Earlier same-day
+      suspicion of flora/Object voxels as the blocker was disproved by the
+      live MVDBG3/4 profiles (the hit voxels were the surface sheet, not
+      `Object` billboards).
 - [ ] **B3 — `doMove` respects blocking.** Stop at the first collision event, clamp
       the accepted segment, z = `getMeanHeight(accepted)`; keep the code path minimal
       and shared.
