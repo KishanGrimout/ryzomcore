@@ -36,6 +36,21 @@ public:
 	uint getDefaultSoilId() const { return m_defaultSoilId; }
 	void setDefaultSoilId(uint id) { m_defaultSoilId = id; }
 
+	/// \name Client-side microvegetation data references (dyn landscape).
+	/// Optional: empty/-1 when the cfg declares none, and the environment
+	/// then plants nothing.
+	// @{
+	/// Ecosystem tile bank carrying the vegetable descs (e.g. "jungle.smallbank").
+	const char* getVegetBankFile() const { return m_vegetBankFile.c_str(); }
+	/// Base microveget atlas texture of the merged 2x2 atlas quarter
+	/// (e.g. "microveget_jungle.dds"; season variants get the postfix inserted).
+	const char* getVegetAtlasName() const { return m_vegetAtlasName.c_str(); }
+	/// Quarter index in the merged 2x2 atlas (0=top-left, 1=top-right,
+	/// 2=bottom-left, 3=bottom-right; -1 = none). Two environments may share
+	/// a quarter (forest and jungle both use the jungle atlas).
+	sint getVegetAtlasQuarter() const { return m_vegetAtlasQuarter; }
+	// @}
+
 	const CMapgenParams& getMapgenParams() const { return m_mapgenParams; }
 
 	float getMinGroundHeight() const;
@@ -51,6 +66,10 @@ private:
 	uint m_id;
 	std::string m_defaultSoilName;
 	uint m_defaultSoilId;
+
+	std::string m_vegetBankFile;
+	std::string m_vegetAtlasName;
+	sint m_vegetAtlasQuarter = -1;
 
 	CMapgenParams m_mapgenParams;
 

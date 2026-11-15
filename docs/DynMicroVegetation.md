@@ -4,8 +4,7 @@ Client-side microvegetation (small flora: grass tufts, flowers, twigs) planted
 on **soft soil** surfaces of the dynworld voxel terrain. Reuses the **stock NeL 3D
 vegetable system** (`CVegetableManager` + tile-bank `.veget` data) unchanged;
 the dynworld-specific work is the placement engine, the sector-block lifecycle,
-and the commit-budget policy. Plan/decision record:
-`docs/DYNWORLD_MICROVEGETATION_PLAN.md` (GitHub issue #7, P0–P5 complete).
+and the commit-budget policy.
 
 ## What it is
 
@@ -31,7 +30,7 @@ voxel edit / sector (re)extraction
   └─ main thread, per frame: CDynLandscape::updateVegetableBlocks(refineCenter)
        structural sync vs m_regionsList (lod 0/1 only) → create/erase CDynVegetableBlock
        band walk (4 dist bands × 10 m) → CVegetableManager IG create/delete
-       commit budgets: shared g_maxVegetCommit=256, near pool 2×256 (§6.9)
+       commit budgets: shared g_maxVegetCommit=256, near pool 2×256
   └─ CDynLandscape::render → stock CVegetableManager render (VP pyramid,
        ZSort blend layers)
 ```
@@ -51,34 +50,45 @@ A facet is plantable **iff** all three corners are `Raw`, share one
 forest/jungle/prime_roots → `Humus`, desert/lakes → `SawDust`. Everything else
 (rock, sand-top, water tops, mixed-facet boundaries) stays bare.
 
-### Vegetable data source per biome (side banks)
+### Vegetable data source per biome (environment-cfg banks)
 
-The tile→desc resolution is **per-biome, two-stage**
+The tile→desc resolution is **per-biome and uniform** — every biome resolves
+through the same pipeline, jungle included
 (`CDynLandscape::resolveVegetDescForGroup`, `dyn_landscape.cpp`):
 
-1. Main `TileBank` (stock path): the `bindMaterials` tile id for the
-   `(biome, material)` → its tileset's desc.
-2. If empty: the **biome's side bank** — a dedicated `CTileBank` per
-   ecosystem, loaded by `CDynLandscape::loadVegetSideBanks()` (called from
-   `flushTiles`): desert → `desert.smallbank`, lakes →
-   `lacustre.smallbank`, roots → `primes_racines.smallbank`. Tile match in
-   the side bank reuses the `bindSet` name-prefix rule against the
-   material's texture base names (same case-sensitivity; first tileset with
-   a non-empty desc wins). Side banks are desc-only: no texture is ever
-   loaded from them, and the season postfix is not applied (the base
-   `.vegetset` files exist for all three ecosystems — seasonal lists would
-   need postfix plumbing if ever wanted).
+1. The **biome's ecosystem bank** — a dedicated `CTileBank` per environment,
+   loaded by `CDynLandscape::loadVegetSideBanks()` (called from `flushTiles`)
+   from the file the environment cfg declares in `VegetBank`
+   (`code\ryzom\common\data_leveldesign\dynworld\environments\*.cfg`):
+   forest → `jungle.smallbank` (no dedicated forest bank in the shipped
+   data), jungle → `jungle.smallbank`, desert → `desert.smallbank`, lakes →
+   `lacustre.smallbank`, roots → `primes_racines.smallbank`. Tile match
+   reuses the `bindSet` name-prefix rule against the material's texture base
+   names (same case-sensitivity; first tileset with a non-empty desc wins).
+   The banks are desc-only: no texture is ever loaded from them (the main
+   `TileBank` — the newbieland sheet the dyn continent reuses — stays the
+   only texture source). Season support: the session postfix recorded by
+   `CDynLandscapeUser::postfixTileVegetableDesc` (applied to the main bank
+   by the continent selection just before `flushTiles`) is applied per
+   tileset via `applyVegetSeasonPostfix` — the postfixed `.vegetset` is used
+   only when it resolves on the search paths, the base file is kept
+   otherwise (a missing file would yield an empty desc and silently unplant
+   the tileset).
+2. No fallback to the main bank: a group with no non-empty desc in its
+   biome's bank plants nothing (`CDynVegetableBlock::init` skips it).
 
-Why side banks exist: the dyn continent reuses the **newbieland sheet,
+Why dedicated banks exist: the dyn continent reuses the **newbieland sheet,
 whose ecosystem is jungle** — the main bank holds only jungle tilesets, so
 desert/lakes (and roots, whose `Humus` binds `PR-mousse*`) resolved to tiles
 with no vegetable desc there and `CDynVegetableBlock::init` skipped their
-whole groups (2026-11-14 root cause of "only jungle has veget"). Data
+whole groups (2026-11-14 root cause of "only jungle has veget"). The
+uniform per-biome pipeline (jungle declaring its own bank) replaced the
+earlier main-bank-first special case (2026-11-15). Data
 sources: `desert_bank.bnp`/`desert_vegetables.bnp`/`desert_vegetable_sets.bnp`
 and lacustre equivalents (already in the sandbox data dir); prime roots has
 **no BNP** — it mounts from `pipeline/install/primes_racines_{bank,
 vegetables,vegetable_sets}` (added to `PreDataPath` in
-`pipeline/client_dev/local/client.cfg`). Side banks live in `CDynLandscape`
+`pipeline/client_dev/local/client.cfg`). Banks live in `CDynLandscape`
 (`m_vegetSideBanks`, keyed by biome id) and must outlive the vegetable
 blocks (entries store desc pointers into them); reload releases the blocks
 first.
@@ -100,12 +110,14 @@ the shapes themselves are fine, the UV→texture pairing was wrong).
 Fix (two halves, both dyn-side, no NeL core change):
 
 1. **Composite texture** — `CMicroVegetDynAtlasTexture`
-   (`dyn_landscape.cpp`): an `ITexture` that composes the four ecosystem
-   atlases into one 2x2 1024x1024 RGBA texture at `doGenerate` time
-   (raw-row `blit` quarters; `buildMipMaps` precomputed). Installed by
+   (`dyn_landscape.cpp`): an `ITexture` that composes the ecosystem
+   atlases declared by the environment cfgs (`VegetAtlas` +
+   `VegetAtlasQuarter`) into one 2x2 1024x1024 RGBA texture at `doGenerate`
+   time (raw-row `blit` quarters; `buildMipMaps` precomputed). Installed by
    `CDynLandscape::loadDynVegetableAtlas()` (called from
    `dyn_continent.cpp`; falls back to the stock season-postfixed
-   `loadVegetableTexture` when a source is missing). Sources resolve via
+   `loadVegetableTexture` when a source is missing or none is declared).
+   Sources resolve via
    CPath: jungle/desert/lacustre from the legacy bed BNPs, prime roots
    from `pipeline/install/microveget_dyn/microveget_prime_roots.dds` (a
    deployment-local COPY — the whole `primes_racines_maps` dir must not
@@ -115,11 +127,13 @@ Fix (two halves, both dyn-side, no NeL core change):
    biome)`: scales the cached `CVegetableShape::VB` Tex0 of every shape of
    a group's desc into its biome's quarter (uv = quarterMin + uv·0.5)
    BEFORE the first IG of that shape compiles (Tex0 is copied into the
-   vegetable VBs at compile time). Biome→quarter: forest+jungle → TL
-   (jungle atlas, stock Matis), desert → TR (fyros), lakes → BL (tryker),
-   roots → BR (prime roots); quarter table = `DynVegetQuarterMin` in
-   `dyn_landscape.cpp` (v axis: the GL3 driver uploads bitmap rows without
-   a vertical flip, so v=0 is the first stored row both when composing and
+   vegetable VBs at compile time). Biome→quarter comes from the
+   environment cfgs (`VegetAtlasQuarter`): forest+jungle → 0/top-left
+   (jungle atlas, stock Matis), desert → 1/top-right (fyros), lakes →
+   2/bottom-left (tryker), roots → 3/bottom-right (prime roots); quarter
+   index → min UV = `dynVegetQuarterMinUV` in `dyn_landscape.cpp` (v axis:
+   the GL3 driver uploads bitmap rows without a vertical flip, so v=0 is
+   the first stored row both when composing and
    when remapping). Idempotent per shape name (record in
    `m_vegetShapeAtlasQuarter`, mutable cache); cross-quarter reuse of one
    shape name warns once and keeps the first quarter. The remap is gated
@@ -155,7 +169,7 @@ across all four quadrants of the source atlas; the `.veget` layout is
 `CVegetableShape::serial` (ver 1, 4 NELID checks + 4 bools + BendCenterMode
 sint32) + `CVertexBuffer::serial` ver 2 with header ver 3
 (`SerialOldPreferredMemory` on in the producing build) + subset ver 2
-(8-byte UVRouting); shapes parse byte-exact. See plan doc §8.1.
+(8-byte UVRouting); shapes parse byte-exact.
 
 ### Seed determinism
 
@@ -169,10 +183,10 @@ voxel edit replants untouched buckets identically ("planting is deterministic"
 The band distance classification must use the **same** center as the VP alpha:
 `View.refinePos()` (the player, 3rd person) — not `MainCam.getPos()`. Stock
 does the same (`CLandscape::refine`, `landscape.cpp:739`; alpha at
-`:1829`). Mixing the two was the §6.8 "fading missing"/pop root cause.
+`:1829`). Mixing the two was the "fading missing"/pop root cause.
 Block classification uses `CVegetBucket::SurfaceCenter` (area-weighted
 centroid, real z), **not** `Center` (z=0) — the inflated band distance of
-z=0 centers caused close-pop (§6.5–6.6). `Center` is unchanged so layout
+z=0 centers caused the close-pop bug. `Center` is unchanged so layout
 sizes stay bit-identical.
 
 ### Block lifecycle decoupled from sector-transition factor
@@ -180,7 +194,7 @@ sizes stay bit-identical.
 Blocks are created when the mesh is inserted into `m_regionsList` and erased
 only when it leaves it (recreated on pointer change = re-extraction). Deliberately
 **not** gated on `m_displayFactor`: a factor gate makes vegetation pop in after
-the terrain is visible and vanish at fade-out start (§6.7). Same-lod voxel edits
+the terrain is visible and vanish at fade-out start. Same-lod voxel edits
 then do erase+create+fill in one commit window (see budgets).
 
 ### Lock / fast-floor discipline
@@ -197,7 +211,7 @@ OptFastFloorEnd()`. `generateInstance` is main-thread only (VB allocator state).
 - **Near pool** `nearBudget = 2 × 256` for blocks within
   `NL3D_VEGETABLE_DEFAULT_DIST_MAX` (60 m): a freshly (re)created near block
   fills completely in its creation frame, so erase+create+fill is atomic
-  pre-render — kills the voxel-edit vegetation blink (§6.9).
+  pre-render — kills the voxel-edit vegetation blink.
 - Worst case (full 16 m sector = 64 buckets × 4 bands = 256 IGs) fits one
   near-pool frame.
 - Budget-starved entries retry next frame (all-or-nothing per entry per band).
@@ -207,7 +221,7 @@ OptFastFloorEnd()`. `generateInstance` is main-thread only (VB allocator state).
 White ambient; diffuse shade from the landing facet slope; water state
 `AboveWater`. `blendDistMax = (distType+1) × 10` (stock spatial alpha;
 a "late-create fade" shift was tried and disabled — tombstone comment in
-`createIgForDistType`, plan §6.8).
+`createIgForDistType`).
 
 ## The stock manager (untouched except noted)
 
@@ -217,7 +231,7 @@ a "late-create fade" shift was tried and disabled — tombstone comment in
 - Measured steady state at default density: ~14 clip blocks ≈ 3780 faces ≈
   ~8k AGP verts — ~16% of the Unlit quota (~6x headroom).
 - No engine-side change remains (2026-11-14 footprint strip): the
-  `NL3D_VegetFadeSlopeScale` knob and the P0 `getVegetProbeState`/
+  `NL3D_VegetFadeSlopeScale` knob and the `getVegetProbeState`/
   `updateSortBlockForIg` helpers were removed from
   `nel/src/3d/vegetable_manager.{h,cpp}` and
   `vegetable_blend_layer_model.cpp` (stock files again); the merged-atlas
@@ -240,9 +254,9 @@ landscape: the stock toggle path (`main_loop_utilities.cpp:167-196`,
 | `dyn_veget [0|1]` | Toggle microvegetation. Disable releases all blocks (frees VB space) via `CDynLandscape::setVegetableActive`; re-enable recreates via the structural sync. No arg = flip. |
 | `dyn_vegetdensity <pct>` | Set density % (forwards to `setVegetableDensity`); no arg prints current. |
 | `dyn_vegetdump` | Per-block inventory (`block lod=… sector=(…) center=… entries=… igs=…`) + global state. The material/env binding dump reports the final desc resolution: main-bank tile + tileset, "side-bank vegetDesc OK", or "no vegetDesc" per (material, env). |
-| `dyn_vegettest` | Synthetic ~30-instance patch at the player feet (P0 probe path, kept). |
+| `dyn_vegettest` | Synthetic ~30-instance patch at the player feet (probe path, kept). |
 | `dyn_renderveget` | Render toggle for the whole vegetable pass. |
-| `dyn_vegetseason <0-3|255>` | Force the merged atlas season variant (0=Sp 1=Su 2=Au 3=Wi, 255=base) — §8.2. Only swaps the veget atlas; tile colors etc. still follow the session season. |
+| `dyn_vegetseason <0-3|255>` | Force the merged atlas season variant (0=Sp 1=Su 2=Au 3=Wi, 255=base). Only swaps the veget atlas; tile colors etc. still follow the session season. |
 | `dyn_vegetbudget <n>` | Set `g_maxVegetCommit`. |
 | `dyn_vegetstats` | Render state + dyn-side block inventory (blocks/entries/IGs) + last-frame face count. |
 
@@ -254,13 +268,8 @@ its `NL3D_VegetFadeSlopeScale` engine knob in the 2026-11-14 footprint strip
 
 ## Validation history
 
-Full investigation record with root causes, experiments (including the
-disabled late-create fade), probe evidence and user sign-offs:
-`docs/DYNWORLD_MICROVEGETATION_PLAN.md` §6 (§6.5 close-pop/SurfaceCenter,
-§6.7 lifecycle decoupling, §6.8 reference-point fix, §6.9 near-budget blink
-fix, §6.10 probe strip, §6.11 P5 completion + budget sign-off). All 13
-dynworld test suites green (2026-11-13, direct-exe Release run); regression
-tests in `game_share_test/test_dynworld_vegetation.cpp`.
+All 13 dynworld test suites green (2026-11-13, direct-exe Release run);
+regression tests in `game_share_test/test_dynworld_vegetation.cpp`.
 
 ### 2026-11-14 — desert/lakes/roots vegetation missing (side-bank fix)
 
@@ -288,8 +297,8 @@ roots `Pr_*`/`PR_*` flora; jungle unchanged).
 Follow-up after the side-bank fix: user validated in-engine that
 desert/lakes now plant, but reported (1) desert **plants** look wrong
 ("mesh or uv mapping" — confirmed: the plants, not the terrain) and
-(2) lakes sawdust unreachable (blocked by wall/cliff — separate issue,
-tracked in the plan doc). Root cause of (1) (§ "Merged microveget atlas"
+(2) lakes sawdust unreachable (blocked by wall/cliff — separate issue).
+Root cause of (1) (§ "Merged microveget atlas"
 above): the manager's single stage-1 texture was the sheet's
 `microveget_jungle.tga` atlas, so the newly planted non-jungle shapes
 sampled jungle texels. Fix: `CMicroVegetDynAtlasTexture` (2x2 composite of
@@ -303,7 +312,7 @@ atlas, lakes = Tryker atlas, roots = prime_roots atlas).
 
 User report after the merged-atlas fix: "desert still looks off, but
 different. And now jungle is broken: veget looks a bit like desert ones".
-Root cause (deployment + code, plan doc §8.1): (1)
+Root cause (deployment + code): (1)
 `pipeline/install/microveget_dyn` had gone missing from the sandbox
 `client.cfg` PreDataPath, so the composite precheck failed and the stock
 single-atlas fallback was silently bound; (2) `ensureVegetShapeAtlasRemap`
@@ -334,7 +343,7 @@ catalog remain; season validation hint: `dyn_vegetseason <0-3|255>`.
 Per the new AGENTS.md footprint rule, the branch's shared-file changes were
 reduced to zero in `nel/`: `vegetable_manager.{h,cpp}` and
 `vegetable_blend_layer_model.cpp` are back to stock (fade knob
-`NL3D_VegetFadeSlopeScale`, the P0 `getVegetProbeState` probe accessors, and
+`NL3D_VegetFadeSlopeScale`, the `getVegetProbeState` probe accessors, and
 `updateSortBlockForIg` stripped — the `dyn_vegettest` probe now calls the
 public `CVegetableSortBlock::updateSortBlock` like the production
 `CDynVegetableBlock` path); the `u_landscape.h` `loadDynVegetableAtlas`
@@ -346,5 +355,50 @@ dispatch in `dyn_continent.cpp` (the Landscape global is a
 (additive): `game_share` CMake registration of `vegetation_placement`, the
 `game_share_test` registration, and the `Voxel::Raw` guard in
 `cursor_functions.cpp` (dynworld-only lines in an existing dyn hook).
+
+### 2026-11-15 — review round: cfg-driven data references, uniform per-biome pipeline
+
+User review of the merged feature (post-merge, no rebuild yet): two changes.
+
+1. **Data references moved to the environment cfgs** — the hardcoded tables
+   left `dyn_landscape.cpp`: per-environment `VegetBank` (ecosystem tile
+   bank with the vegetable descs), `VegetAtlas` + `VegetAtlasQuarter`
+   (merged-atlas quarter source and its grid position) now live in
+   `environments/*.cfg`, parsed by `CEnvironmentDefinition` (optional vars:
+   absent = the environment plants nothing / has no atlas quarter).
+   `loadVegetSideBanks` iterates the environments instead of a static
+   table; the atlas composition and the biome→quarter remap read the env
+   defs (`dynVegetAtlasSources`/`dynVegetBiomeToQuarter`). Adding a biome
+   is now a cfg change only.
+2. **Same pipeline for every biome** — jungle no longer special-cases
+   through the main TileBank (the newbieland sheet): `jungle.cfg` (and
+   `forest.cfg`, which has no dedicated bank in the shipped data and plants
+   with the jungle one) declares `jungle.smallbank` like every other
+   biome, and `resolveVegetDescForGroup` resolves exclusively through the
+   biome's cfg-declared bank. Season fidelity is preserved: the session
+   postfix recorded by `CDynLandscapeUser::postfixTileVegetableDesc` is
+   applied per tileset on load (`applyVegetSeasonPostfix`), with the base
+   `.vegetset` kept when the postfixed file is absent (all four ecosystems
+   ship base + season variants; the side-bank path previously used base
+   only — desert/lakes/roots now get season desc lists like jungle did).
+   Expected in-engine behavior change: none for jungle (same bank data,
+   same postfix), season desc lists now vary for desert/lakes/roots.
+
+Doc cleanup per the new AGENTS.md rule: plan/issue/phase references
+(`DYNWORLD_MICROVEGETATION_PLAN.md`, issue #7, `P0`–`P5`, `§6.x`) stripped
+from the code comments, this doc and the roadmap; the finalized plan doc
+stays as history.
+
+Validation (2026-11-15, Release): `ryzom_gameshare`, `ryzom_client`
+(compile + link) and the gtest suites
+`ryzom_dynworld_vegetation_test` (12/12) and
+`ryzom_dynworld_environment_definition_test` (1/1, includes the
+independent per-var try/catch for the new `Veget*` vars) all pass.
+Note: the test exes need the redist DLL dir on PATH
+(`redist\nel_tools_win_x64`) or they die with the known
+`0xC0000135` loader quirk (see `docs/TestEnvironmentNotes.md` § 1).
+In-engine validation (desert/lakes/roots should now plant with
+season-postfixed desc lists, jungle unchanged) is expected but still
+pending user check.
 
 

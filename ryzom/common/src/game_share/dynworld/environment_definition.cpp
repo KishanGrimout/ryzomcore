@@ -59,6 +59,27 @@ void CEnvironmentDefinition::initialize(const char* defFilename)
 				m_smallFloraSheetIds.push_back(sheetId);
 			}
 		}
+
+		// Optional microvegetation data references. Each is parsed
+		// independently so a missing var skips nothing (older cfgs, or
+		// environments that plant nothing, stay empty/-1).
+		try
+		{
+			m_vegetBankFile = m_config.getVar("VegetBank").asString();
+		}
+		catch (...) {}
+
+		try
+		{
+			m_vegetAtlasName = m_config.getVar("VegetAtlas").asString();
+		}
+		catch (...) {}
+
+		try
+		{
+			m_vegetAtlasQuarter = m_config.getVar("VegetAtlasQuarter").asInt();
+		}
+		catch (...) {}
 	}
 	catch (...)
 	{ }

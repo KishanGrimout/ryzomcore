@@ -50,7 +50,7 @@ H_AUTO_DECL( NL3D_Load_Landscape )
 #define	NL3D_HAUTO_LOAD_LANDSCAPE					H_AUTO_USE( NL3D_Load_Landscape )
 
 extern UCamera MainCam;
-extern bool g_renderVegetables; // dyn_landscape.cpp — P0 probe render toggle
+extern bool g_renderVegetables; // dyn_landscape.cpp — probe render toggle
 
 uint g_baselod = 0;
 uint g_maxlod = CDynLandscapeUser::LODCOUNT - 1;
@@ -66,10 +66,10 @@ float g_camPosOffset = 16.f;
 // Microvegetation placement hook: compute the placement
 // geometry of an extracted mesh into regMesh->m_vegetPlacements. Only
 // LOD0/LOD1 meshes host vegetables; LOD2 (far 350 m box) never plants.
-// soilIds is the per-biome soft-soil table (see DYNWORLD::buildSoftSoilTable,
+// soilIds is the per-biome soft-soil table (see buildSoftSoilTable,
 // main-thread only — capture it there when calling from a worker command).
 static void vegetPlacementsFromMesh(TGenericSectorId sectorId, uint lod,
-	const uint8 (&soilIds)[DYNWORLD::VegetMaxBiomeCount], const TDecodedMesh& decodedMesh, CRegionMesh* regMesh)
+	const uint8 (&soilIds)[VegetMaxBiomeCount], const TDecodedMesh& decodedMesh, CRegionMesh* regMesh)
 {
 	if (regMesh == nullptr || lod >= CDynLandscapeUser::LODCOUNT)
 		return;
@@ -87,7 +87,7 @@ static void vegetPlacementsFromMesh(TGenericSectorId sectorId, uint lod,
 	NLMISC::CVector worldOrigin(float(sectorPosI.x) * sideSize, float(sectorPosI.y) * sideSize, float(sectorPosI.z) * sideSize);
 	const float scale = CSectorLod::getVoxelSize(lod) * pow(2.f, float(lod));
 
-	DYNWORLD::computeVegetPlacements(decodedMesh, soilIds, worldOrigin, scale, regMesh->m_vegetPlacements);
+	computeVegetPlacements(decodedMesh, soilIds, worldOrigin, scale, regMesh->m_vegetPlacements);
 }
 
 float getPriorityToPlayer(const CVectorI& sectorPosI)
@@ -139,7 +139,7 @@ public:
 	{
 		// MAIN THREAD (ctor): capture the per-biome soft-soil table before the
 		// worker runs (CMaterialLibrary is main-thread-owned).
-		DYNWORLD::buildSoftSoilTable(m_soilIds);
+		buildSoftSoilTable(m_soilIds);
 
 		TRegion regionToEmerge;
 		CSectorLod::getRegion(m_lod, m_sectorId, regionToEmerge);
@@ -201,9 +201,9 @@ private:
 		TDecodedMesh decodedMesh;
 		m_map->extractMesh(m_sectorId, *regMesh, controller, m_lod, m_lod, &decodedMesh);
 
-		// P1 microvegetation placement: worker-side pure-data
+		// microvegetation placement: worker-side pure-data
 		// clustering of the plantable soft-soil surface, stored on the mesh
-		// result; committed by the landscape when the mesh becomes visible (P2).
+		// result; committed by the landscape when the mesh becomes visible.
 		vegetPlacementsFromMesh(m_sectorId, m_lod, m_soilIds, decodedMesh, regMesh);
 
 		m_outMesh = regMesh;
@@ -237,7 +237,7 @@ private:
 
 	TSectorsList m_loadingSectors;
 	bool m_prefetchDone;
-	uint8 m_soilIds[DYNWORLD::VegetMaxBiomeCount];
+	uint8 m_soilIds[VegetMaxBiomeCount];
 };
 
 // ***************************************************************************
@@ -313,10 +313,10 @@ void	CDynLandscapeUser::flushTiles (NLMISC::IProgressCallback &progress)
 
 	CMaterialLibrary::getInstance().bindMaterials(_Landscape->getLandscape().TileBank);
 
-	// Per-biome vegetable side banks: the main TileBank only holds
-	// the jungle ecosystem (the dyn continent reuses the newbieland sheet);
-	// desert/lakes/roots surface groups resolve their vegetable descs from
-	// their own ecosystem banks.
+	// Per-biome vegetable banks: every biome (jungle included) resolves its
+	// vegetable descs from the tile bank declared by its environment cfg
+	// (VegetBank); the main TileBank loaded above stays the texture source
+	// only.
 	static_cast<CDynLandscape&>(_Landscape->getLandscape()).loadVegetSideBanks();
 }
 
@@ -452,10 +452,10 @@ IRegionMesh* CDynLandscapeUser::generateMesh(TGenericSectorId sectorId, uint lod
 	TDecodedMesh decodedMesh;
 	m_map->extractMesh(sectorId, *regMesh, controller, lod, lod, &decodedMesh);
 
-	// P1 microvegetation placement: main-thread path, the soil
+	// microvegetation placement: main-thread path, the soil
 	// table can be built directly here.
-	uint8 soilIds[DYNWORLD::VegetMaxBiomeCount];
-	DYNWORLD::buildSoftSoilTable(soilIds);
+	uint8 soilIds[VegetMaxBiomeCount];
+	buildSoftSoilTable(soilIds);
 	vegetPlacementsFromMesh(sectorId, lod, soilIds, decodedMesh, regMesh);
 
 	bindRegionMeshTexture(regMesh);
@@ -515,7 +515,7 @@ void CDynLandscapeUser::logVegetStats() const
 	dynLandscape->logVegetStats();
 }
 
-// P0 probe commands — registered from here to avoid pulling
+// probe commands — registered from here to avoid pulling
 // the dynworld headers into commands.cpp (they drag nel/3d/animation.h, which
 // collides with the client's own CAnimation there).
 NLMISC_COMMAND(dyn_vegetdump, "Dump dyn landscape vegetable data", "")
@@ -608,7 +608,7 @@ NLMISC_COMMAND(dyn_vegetseason, "Force the merged microveget atlas season varian
 	return true;
 }
 
-// P2 commit budget knob: per-frame cap of vegetable IG
+// per-frame cap of vegetable IG
 // commits (initial plantings + ring band changes), declared in dyn_landscape.cpp.
 extern uint g_maxVegetCommit;
 NLMISC_COMMAND(dyn_vegetbudget, "Set the per-frame vegetable IG commit budget", "<maxIgCommitsPerFrame>")
@@ -905,7 +905,7 @@ void CDynLandscapeUser::refreshLodSectors(const CVector& pos, float radius, uint
 	// Check for finished generation deferred commands
 	updateGenerateMeshesCommands();
 
-	// P2: sync the vegetable blocks against m_regionsList and run
+	// sync the vegetable blocks against m_regionsList and run
 	// the ring-band commits (create/release IGs) under the per-frame budget,
 	// inside the vegetable-manager lock window. NB: the viewCenter MUST be the
 	// same point the vegetable VP alpha uses, i.e. the landscape refine center
@@ -913,7 +913,7 @@ void CDynLandscapeUser::refreshLodSectors(const CVector& pos, float radius, uint
 	// CLandscape::refine()/render() use refineCenter for both the band walk
 	// and the alpha, and a camera-vs-player offset makes every ring-edge
 	// create land at alpha = camOffset/10 (pop-in while moving forward,
-	// disappear-while-visible when moving backward) — plan doc §6.8.
+	// disappear-while-visible when moving backward).
 	landscape.updateVegetableBlocks(pos);
 
 	// .
@@ -1686,6 +1686,10 @@ void		CDynLandscapeUser::postfixTileVegetableDesc (const char *postfix)
 {
 	NL3D_HAUTO_LANDSCAPE_UPDATE_LIGHTING_ALL;
 	_Landscape->getLandscape().TileBank.postfixTileVegetableDesc(postfix);
+	// The vegetable banks loaded by flushTiles apply the same postfix to
+	// their tilesets' desc file names (base name kept when the postfixed
+	// .vegetset does not exist — see CDynLandscape::applyVegetSeasonPostfix).
+	static_cast<CDynLandscape&>(_Landscape->getLandscape()).setVegetSeasonPostfix(postfix);
 }
 
 // ***************************************************************************

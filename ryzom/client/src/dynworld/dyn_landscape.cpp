@@ -324,31 +324,27 @@ void CDynLandscape::clearGeneratedMeshes()
 }
 
 // ****************************************************************************
-// Per-biome vegetable side banks.
+// Per-biome vegetable banks.
 //
-// The dyn continent reuses the newbieland sheet, whose ecosystem is jungle:
-// the main TileBank holds only jungle tilesets. Materials whose (biome,
-// material) tile binding lives in another ecosystem's bank (SawDust for
-// desert/lakes, Humus for roots) resolve to tiles with no vegetable desc in
-// the main bank, so CDynVegetableBlock::init skipped their whole surface
-// groups — desert and lakes (and roots) stayed bare while jungle planted.
-// Side banks carry the missing ecosystems' tilesets + vegetable descs; they
-// are used ONLY for desc resolution (no texture is ever loaded from them).
+// Every biome resolves its vegetable descs from its OWN ecosystem tile bank,
+// declared in the environment cfg (VegetBank) — jungle included, whose bank
+// is the same file the main TileBank was serialised from (the dyn continent
+// reuses the newbieland sheet). A (biome, material) surface group resolves by
+// the same name-prefix tile match as CMaterialTextureSet::bindSet; textures
+// are never loaded from these banks (the main TileBank stays the only texture
+// source), so a material whose tile binding lives only in another ecosystem's
+// bank still binds its texture from the main bank and its vegetable desc from
+// here.
 namespace
 {
-	struct TVegetSideBankDef
+	// Season postfix inserted into a file name before its extension.
+	std::string vegetPostfixedName(const std::string& name, const std::string& postfix)
 	{
-		uint8 BiomeId;
-		const char* BankFile;
-		const char* EcosystemName;
-	};
-
-	// Biome ids are environment ids (voxel biome <- CBiomeManager <- env cfg).
-	const TVegetSideBankDef VegetSideBanks[] = {
-		{ 2, "desert.smallbank", "desert" },
-		{ 3, "lacustre.smallbank", "lacustre" },
-		{ 4, "primes_racines.smallbank", "primes racines" },
-	};
+		std::string::size_type pos = name.rfind('.');
+		if (pos == std::string::npos)
+			return name + postfix;
+		return name.substr(0, pos) + postfix + name.substr(pos);
+	}
 }
 
 void CDynLandscape::clearVegetSideBanks()
@@ -358,52 +354,88 @@ void CDynLandscape::clearVegetSideBanks()
 	m_vegetSideBanks.clear();
 }
 
+void CDynLandscape::applyVegetSeasonPostfix(NL3D::CTileBank* sideBank)
+{
+	if (sideBank == nullptr || m_vegetSeasonPostfix.empty())
+		return;
+
+	// Same treatment as the main bank (postfixTileVegetableDesc, applied by
+	// the continent selection before flushTiles), per tileset and only when
+	// the postfixed .vegetset resolves on the search paths: the ecosystems
+	// ship season variants for some tilesets only, and loadTileVegetableDesc
+	// yields an empty desc on a missing file — which would silently unplant
+	// the tileset.
+	const uint tileSetCount = (uint)sideBank->getTileSetCount();
+	for (uint ts = 0; ts < tileSetCount; ++ts)
+	{
+		CTileSet* tileSet = sideBank->getTileSet((sint)ts);
+		if (tileSet == nullptr)
+			continue;
+		const std::string& baseName = tileSet->getTileVegetableDescFileName();
+		if (baseName.empty())
+			continue;
+		const std::string postfixed = vegetPostfixedName(baseName, m_vegetSeasonPostfix);
+		if (!CPath::lookup(postfixed, false, false).empty())
+			tileSet->setTileVegetableDescFileName(postfixed);
+	}
+}
+
 void CDynLandscape::loadVegetSideBanks()
 {
 	if (!m_vegetSideBanks.empty())
 	{
 		// Stale desc pointers would dangle: drop the blocks with the banks.
-		nlwarning("3D: dynlandscape: vegetable side banks reloaded — releasing %u vegetable blocks", (uint)m_vegetableBlocks.size());
+		nlwarning("3D: dynlandscape: vegetable banks reloaded — releasing %u vegetable blocks", (uint)m_vegetableBlocks.size());
 		clearVegetableBlocks();
 		clearVegetSideBanks();
 	}
 
-	for (const TVegetSideBankDef& def : VegetSideBanks)
+	CMaterialLibrary& materialLibrary = CMaterialLibrary::instance();
+	for (uint envId = 0; envId <= materialLibrary.getMaxEnvironmentId(); ++envId)
 	{
-		const std::string path = CPath::lookup(def.BankFile, false, false, true);
+		const CEnvironmentDefinition* envDef = materialLibrary.getEnvironmentDef(envId);
+		if (envDef == nullptr)
+			continue;
+
+		const char* bankFile = envDef->getVegetBankFile();
+		if (bankFile == nullptr || bankFile[0] == '\0')
+			continue;
+
+		const std::string path = CPath::lookup(bankFile, false, false, true);
 		if (path.empty())
 		{
-			nlwarning("3D: dynlandscape: vegetable side bank '%s' (biome %u, %s) not found on search paths — this biome stays vegetation-free",
-				def.BankFile, (uint)def.BiomeId, def.EcosystemName);
+			nlwarning("3D: dynlandscape: vegetable bank '%s' (biome %u, %s) not found on search paths — this biome stays vegetation-free",
+				bankFile, envId, envDef->getName());
 			continue;
 		}
 
 		CTileBank* sideBank = new CTileBank;
 		try
 		{
-			CIFile bankFile(path);
-			sideBank->serial(bankFile);
+			CIFile bankStream(path);
+			sideBank->serial(bankStream);
 			// Same normalization as loadBankFiles (tile filenames are matched
 			// by name prefix only, as in CMaterialTextureSet::bindSet).
 			sideBank->makeAllPathRelative();
 			sideBank->makeAllExtensionDDS();
 			sideBank->setAbsPath("");
+			applyVegetSeasonPostfix(sideBank);
 			sideBank->loadTileVegetableDescs();
 			sideBank->initTileVegetableDescs(_VegetableManager);
-			m_vegetSideBanks[def.BiomeId] = sideBank;
-			nlinfo("3D: dynlandscape: vegetable side bank '%s' loaded for biome %u (%s): %u tilesets",
-				def.BankFile, (uint)def.BiomeId, def.EcosystemName, (uint)sideBank->getTileSetCount());
+			m_vegetSideBanks[envId] = sideBank;
+			nlinfo("3D: dynlandscape: vegetable bank '%s' loaded for biome %u (%s): %u tilesets",
+				bankFile, envId, envDef->getName(), (uint)sideBank->getTileSetCount());
 		}
 		catch (const Exception& e)
 		{
-			nlwarning("3D: dynlandscape: failed to load vegetable side bank '%s': %s", def.BankFile, e.what());
+			nlwarning("3D: dynlandscape: failed to load vegetable bank '%s': %s", bankFile, e.what());
 			delete sideBank;
 		}
 	}
 }
 
 // ****************************************************************************
-// P2 microvegetation blocks. See CDynVegetableBlock in
+// Microvegetation blocks. See CDynVegetableBlock in
 // dyn_landscape.h; the ring-band logic mirrors stock
 // CLandscapeVegetableBlock::update (landscape_vegetable_block.cpp).
 
@@ -429,39 +461,14 @@ namespace
 	const CDynVBSqrDistLUT DynVBSqrDistLUT;
 }
 
-namespace
-{
-	// (biome, material) -> first top-texture tile id, i.e. the same lookup
-	// bindRegionMeshTexture uses for the diffuse binding. 0xFFFF = unresolvable.
-	const uint16 VegetInvalidTileId = 0xFFFF;
-	uint16 resolveTileIdForGroup(Voxel::BiomeType biome, Voxel::MaterialType material)
-	{
-		const CMaterialDefinition* matDef = CMaterialLibrary::instance().getMaterialDef(material);
-		if (matDef == nullptr)
-			return VegetInvalidTileId;
-		const CMaterialTextureSet* textSet = matDef->getTextureSet(biome);
-		if (textSet == nullptr || textSet->m_textures.empty() || textSet->m_textures[0].m_variations.empty())
-			return VegetInvalidTileId;
-		return textSet->m_textures[0].m_variations[0];
-	}
-}
-
 // ****************************************************************************
 const NL3D::CTileVegetableDesc* CDynLandscape::resolveVegetDescForGroup(Voxel::BiomeType biome, Voxel::MaterialType material) const
 {
-	// 1. Main bank (stock path): the bindMaterials tile id for this
-	// (biome, material), then its tileset's vegetable desc.
-	const uint16 tileId = resolveTileIdForGroup(biome, material);
-	if (tileId != VegetInvalidTileId)
-	{
-		const CTileVegetableDesc& desc = TileBank.getTileVegetableDesc(tileId);
-		if (!desc.empty())
-			return &desc;
-	}
-
-	// 2. Biome side bank: same name-prefix tile match as bindSet, textures in
-	// cfg order, tiles in bank order; the first tileset with a non-empty desc
-	// wins (the analog of bindSet's variations[0] tile -> its tileset desc).
+	// Biome ecosystem bank (environment cfg VegetBank — every biome resolves
+	// the same way, jungle included): same name-prefix tile match as bindSet,
+	// textures in cfg order, tiles in bank order; the first tileset with a
+	// non-empty desc wins (the analog of bindSet's variations[0] tile ->
+	// its tileset desc).
 	auto it = m_vegetSideBanks.find(biome);
 	if (it == m_vegetSideBanks.end())
 		return nullptr;
@@ -523,49 +530,60 @@ const NL3D::CTileVegetableDesc* CDynLandscape::resolveVegetDescForGroup(Voxel::B
 // stay valid across season changes.
 namespace
 {
-	// Quarter min UVs of the merged atlas, in the order the sources are
-	// blitted below. v axis: the GL3 driver uploads bitmap rows without a
-	// vertical flip, so v=0 is the first stored row for both the composed
-	// texture and the remap (the quarters are composed in raw row order,
-	// matching the source DDS row order).
-	const CUV DynVegetQuarterMin[] =
-	{
-		CUV(0.f, 0.f),		// jungle (stock Matis/forest uses this atlas too)
-		CUV(0.5f, 0.f),		// fyros (desert)
-		CUV(0.f, 0.5f),		// tryker (lakes)
-		CUV(0.5f, 0.5f),	// prime roots
-	};
-	const uint DynVegetQuarterCount = sizeof(DynVegetQuarterMin) / sizeof(DynVegetQuarterMin[0]);
+	// The merged-atlas grid is 2x2; the environment cfgs declare which
+	// quarter each ecosystem atlas occupies (VegetAtlasQuarter).
+	const uint DynVegetQuarterCount = 4;
 
-	// Biome id (environment cfg id) -> quarter index; 0xFF = unknown biome.
-	uint8 dynVegetBiomeToQuarter(Voxel::BiomeType biome)
+	// Quarter min UV, from the quarter index (0=top-left, 1=top-right,
+	// 2=bottom-left, 3=bottom-right). v axis: the GL3 driver uploads bitmap
+	// rows without a vertical flip, so v=0 is the first stored row for both
+	// the composed texture and the remap (the quarters are composed in raw
+	// row order, matching the source DDS row order).
+	CUV dynVegetQuarterMinUV(uint quarter)
 	{
-		switch (biome)
-		{
-		case 0:		// forest
-		case 1:		// jungle
-			return 0;
-		case 2:		// desert
-			return 1;
-		case 3:		// lakes
-			return 2;
-		case 4:		// prime roots
-			return 3;
-		default:
-			return 0xFF;
-		}
+		return CUV((quarter % 2) ? 0.5f : 0.f, (quarter / 2) ? 0.5f : 0.f);
 	}
 
-	// Per-quarter base atlas names; the season postfix is inserted before the
-	// extension for per-season composites (all four ecosystems ship
-	// _Sp/_Su/_Au/_Wi variants in their maps BNPs / as loose dds).
-	const char* DynVegetQuarterBaseNames[DynVegetQuarterCount] =
+	// Quarter -> base atlas file name, collected from the environment cfgs
+	// (VegetAtlas/VegetAtlasQuarter) and cached: the layout must stay stable
+	// for the whole session (shape UV remaps are keyed by quarter). Two
+	// environments may share a quarter (forest and jungle both use the
+	// jungle atlas); the first declaration in environment-id order wins.
+	std::map<uint, std::string> dynVegetAtlasSources()
 	{
-		"microveget_jungle.dds",		// jungle_maps.bnp
-		"microveget_fyros.dds",			// desert_maps.bnp
-		"microveget_tryker.dds",		// lacustre_maps.bnp
-		"microveget_prime_roots.dds",	// pipeline/install/microveget_dyn (deployment-local copy)
-	};
+		static std::map<uint, std::string> sources;
+		static bool initialized = false;
+		if (!initialized)
+		{
+			initialized = true;
+			CMaterialLibrary& materialLibrary = CMaterialLibrary::instance();
+			for (uint envId = 0; envId <= materialLibrary.getMaxEnvironmentId(); ++envId)
+			{
+				const CEnvironmentDefinition* envDef = materialLibrary.getEnvironmentDef(envId);
+				if (envDef == nullptr || envDef->getVegetAtlasName()[0] == '\0')
+					continue;
+				const sint quarter = envDef->getVegetAtlasQuarter();
+				if (quarter < 0 || (uint)quarter >= DynVegetQuarterCount)
+				{
+					nlwarning("3D: dynlandscape: environment %u (%s) declares atlas quarter %d outside the 2x2 grid — atlas ignored",
+						envId, envDef->getName(), (int)quarter);
+					continue;
+				}
+				sources.emplace((uint)quarter, envDef->getVegetAtlasName());
+			}
+		}
+		return sources;
+	}
+
+	// Biome id (environment cfg id) -> quarter index; 0xFF = no atlas
+	// declared for that biome.
+	uint8 dynVegetBiomeToQuarter(Voxel::BiomeType biome)
+	{
+		const CEnvironmentDefinition* envDef = CMaterialLibrary::instance().getEnvironmentDef(biome);
+		if (envDef == nullptr || envDef->getVegetAtlasName()[0] == '\0' || envDef->getVegetAtlasQuarter() < 0)
+			return 0xFF;
+		return (uint8)envDef->getVegetAtlasQuarter();
+	}
 
 	// Season file postfixes (same convention as CSeasonFileExt::_Sp/_Su/_Au/
 	// _Wi; kept local so dyn_landscape does not depend on game_share).
@@ -578,11 +596,10 @@ namespace
 		return exts[season];
 	}
 
-	// Quarter source name with the season postfix inserted before the
-	// extension.
-	std::string dynVegetSeasonSource(uint8 season, uint quarter)
+	// Source name with the season postfix inserted before the extension.
+	std::string dynVegetSeasonSource(uint8 season, const std::string& baseName)
 	{
-		std::string name(DynVegetQuarterBaseNames[quarter]);
+		std::string name(baseName);
 		std::string::size_type pos = name.rfind(".dds");
 		if (pos != std::string::npos)
 			name = name.substr(0, pos);
@@ -615,19 +632,21 @@ namespace
 		virtual void doGenerate(bool async) override
 		{
 			CBitmap merged;
-			for (uint quarter = 0; quarter < DynVegetQuarterCount; ++quarter)
+			for (const auto& source : dynVegetAtlasSources())
 			{
-				const std::string seasonName = dynVegetSeasonSource(_Season, quarter);
+				const uint quarter = source.first;
+				const std::string& baseName = source.second;
+				const std::string seasonName = dynVegetSeasonSource(_Season, baseName);
 				std::string sourcePath = CPath::lookup(seasonName, false, false);
 				if (sourcePath.empty() && _Season < 4)
 				{
 					// Seasonal variant missing for this quarter: fall back
 					// to BASE (deployments shipping only the non-seasonal
 					// atlas still render, uncolored).
-					sourcePath = CPath::lookup(DynVegetQuarterBaseNames[quarter], false, false);
+					sourcePath = CPath::lookup(baseName, false, false);
 					if (!sourcePath.empty())
 						nlwarning("3D: dynlandscape: microveget atlas seasonal variant '%s' not found, using base '%s' (quarter %u)",
-							seasonName.c_str(), DynVegetQuarterBaseNames[quarter], quarter);
+							seasonName.c_str(), baseName.c_str(), quarter);
 				}
 				if (sourcePath.empty())
 				{
@@ -636,14 +655,14 @@ namespace
 					continue;
 				}
 
-				CBitmap source;
+				CBitmap sourceBitmap;
 				CIFile file(sourcePath);
-				if (!source.load(file) || source.getWidth() == 0)
+				if (!sourceBitmap.load(file) || sourceBitmap.getWidth() == 0)
 				{
 					nlwarning("3D: dynlandscape: failed to load microveget atlas source '%s'", sourcePath.c_str());
 					continue;
 				}
-				if (!source.convertToType(CBitmap::RGBA))
+				if (!sourceBitmap.convertToType(CBitmap::RGBA))
 				{
 					nlwarning("3D: dynlandscape: failed to convert microveget atlas source '%s' to RGBA", sourcePath.c_str());
 					continue;
@@ -652,18 +671,18 @@ namespace
 				{
 					// All shipped atlases are the same size (512x512); compose
 					// on first valid source and require it afterwards.
-					merged.resize(source.getWidth() * 2, source.getHeight() * 2);
+					merged.resize(sourceBitmap.getWidth() * 2, sourceBitmap.getHeight() * 2);
 				}
-				if (source.getWidth() * 2 != merged.getWidth() || source.getHeight() * 2 != merged.getHeight())
+				if (sourceBitmap.getWidth() * 2 != merged.getWidth() || sourceBitmap.getHeight() * 2 != merged.getHeight())
 				{
 					nlwarning("3D: dynlandscape: microveget atlas source '%s' size %ux%u mismatch (expected %ux%u)",
-						sourcePath.c_str(), source.getWidth(), source.getHeight(),
+						sourcePath.c_str(), sourceBitmap.getWidth(), sourceBitmap.getHeight(),
 						merged.getWidth() / 2, merged.getHeight() / 2);
 					continue;
 				}
 				// blit() copies raw stored rows (mip 0) — orientation matches
-				// DynVegetQuarterMin (v=0 = first stored row).
-				merged.blit(&source, (quarter % 2) ? source.getWidth() : 0, (quarter / 2) ? source.getHeight() : 0);
+				// dynVegetQuarterMinUV (v=0 = first stored row).
+				merged.blit(&sourceBitmap, (quarter % 2) ? sourceBitmap.getWidth() : 0, (quarter / 2) ? sourceBitmap.getHeight() : 0);
 
 			}
 			if (merged.getWidth() == 0)
@@ -687,20 +706,22 @@ bool CDynLandscape::loadDynVegetableAtlas(uint8 season)
 	if (_VegetableManager == nullptr)
 		return false;
 
-	// Precheck: all four quarter sources must resolve, else the caller keeps
-	// the stock sheet-driven single-ecosystem atlas.
-	static const char* sourceNames[] =
+	// Precheck: every atlas source declared by the environment cfgs must
+	// resolve, else the caller keeps the stock sheet-driven single-ecosystem
+	// atlas. (The seasonal variants may still be missing: doGenerate falls
+	// back to the base atlas per quarter.)
+	const std::map<uint, std::string> sources = dynVegetAtlasSources();
+	if (sources.empty())
 	{
-		"microveget_jungle.dds",
-		"microveget_fyros.dds",
-		"microveget_tryker.dds",
-		"microveget_prime_roots.dds",
-	};
-	for (const char* name : sourceNames)
+		nlwarning("3D: dynlandscape: no microveget atlas declared by the environment cfgs (VegetAtlas), keeping stock single-atlas load");
+		return false;
+	}
+	for (const auto& source : sources)
 	{
-		if (CPath::lookup(name, false, false).empty())
+		if (CPath::lookup(source.second, false, false).empty())
 		{
-			nlwarning("3D: dynlandscape: microveget atlas source '%s' not found, keeping stock single-atlas load", name);
+			nlwarning("3D: dynlandscape: microveget atlas source '%s' (quarter %u) not found, keeping stock single-atlas load",
+				source.second.c_str(), source.first);
 			return false;
 		}
 	}
@@ -708,7 +729,14 @@ bool CDynLandscape::loadDynVegetableAtlas(uint8 season)
 	ITexture* atlas = new CMicroVegetDynAtlasTexture(season);
 	_VegetableManager->loadTexture(atlas);
 	m_vegetMergedAtlasInstalled = true;
-	nlinfo("3D: dynlandscape: merged microveget atlas installed (2x2 quarters: jungle, fyros, tryker, prime_roots)");
+	std::string quarterList;
+	for (const auto& source : sources)
+	{
+		if (!quarterList.empty())
+			quarterList += ", ";
+		quarterList += NLMISC::toString("q%u=%s", source.first, source.second.c_str());
+	}
+	nlinfo("3D: dynlandscape: merged microveget atlas installed (%s)", quarterList.c_str());
 	return true;
 }
 
@@ -764,7 +792,7 @@ bool CDynLandscape::ensureVegetShapeAtlasRemap(const std::string& shapeName, Vox
 	CVertexBufferReadWrite vba;
 	shape->VB.lock(vba);
 	const uint numVertices = shape->VB.getNumVertices();
-	const CUV& quarterMin = DynVegetQuarterMin[quarter];
+	const CUV quarterMin = dynVegetQuarterMinUV(quarter);
 	for (uint i = 0; i < numVertices; ++i)
 	{
 		CUV* uv = vba.getTexCoordPointer(i, 0);
@@ -784,8 +812,8 @@ void CDynVegetableBlock::init(CRegionMesh& mesh, CVegetableManager& vegetManager
 	_Landscape = &landscape;
 	_ClipBlock = vegetManager.createClipBlock();
 
-	const DYNWORLD::CDynVegetPlacementSet& placements = mesh.m_vegetPlacements;
-	for (const DYNWORLD::CVegetSurfaceGroup& group : placements.Groups)
+	const CDynVegetPlacementSet& placements = mesh.m_vegetPlacements;
+	for (const CVegetSurfaceGroup& group : placements.Groups)
 	{
 		// Tile vegetable desc for this (biome, material) group: main bank
 		// first, then the biome's ecosystem side bank. nullptr =
@@ -795,7 +823,7 @@ void CDynVegetableBlock::init(CRegionMesh& mesh, CVegetableManager& vegetManager
 		if (tileVegetDesc == nullptr)
 			continue;
 
-		for (const DYNWORLD::CVegetBucket& bucket : group.Buckets)
+		for (const CVegetBucket& bucket : group.Buckets)
 		{
 			TBucketEntry entry;
 			entry.Bucket = &bucket;
@@ -892,7 +920,7 @@ void CDynVegetableBlock::createIgForDistType(TBucketEntry& entry, uint distType,
 	}
 	vegetManager.reserveIgCompile(vegetIg, vegetIgReserve);
 
-	// Then generate the real instances. Lighting v1 (plan): white ambient,
+	// Then generate the real instances. Lighting: white ambient,
 	// diffuse shade from the landing facet slope; water state AboveWater.
 	const CRGBAF ambientF(1.f, 1.f, 1.f, 1.f);
 	const float blendDistMax = (distType + 1) * NL3D_VEGETABLE_BLOCK_ELTDIST;
@@ -900,10 +928,10 @@ void CDynVegetableBlock::createIgForDistType(TBucketEntry& entry, uint distType,
 	// at the current distance when the IG would be visible at creation) was
 	// tried and DISABLED: it is only needed for fresh blocks materializing at
 	// 20-50 m, which do not visibly pop when walking once the band walk uses
-	// the same reference as the alpha (§6.8 fix 1), and it makes vegetation
+	// the same reference as the alpha, and it makes vegetation
 	// fade out when a voxel is edited near the view center (block recreated
 	// under the camera -> blendDist = dist -> alpha drops). Stock formula
-	// kept. See plan doc §6.8.
+	// kept.
 	for (uint v = 0; v < vegetableList.size(); ++v)
 	{
 		const CVegetable& veget = vegetableList[v];
@@ -911,7 +939,7 @@ void CDynVegetableBlock::createIgForDistType(TBucketEntry& entry, uint distType,
 		for (uint j = 0; j < instanceUV.size(); ++j)
 		{
 			CVector instancePos, instanceNormal;
-			DYNWORLD::vegetBucketResolvePosition(*entry.Bucket, instanceUV[j], instancePos, instanceNormal);
+			vegetBucketResolvePosition(*entry.Bucket, instanceUV[j], instancePos, instanceNormal);
 
 			// surface-aligned basis (stock style: K up the facet normal,
 			// I/J in the surface plane)
@@ -1138,7 +1166,7 @@ void CDynLandscape::updateVegetableBlocks(const CVector& viewCenter)
 	// block fills completely in its creation frame: the old block is erased
 	// in the same commit window, so a budget-deferred fill renders 1-3 frames
 	// of bare terrain over unchanged ground — the "veget blink" on near voxel
-	// edits (plan doc §6.9). Far blocks don't need the guarantee (their
+	// edits. Far blocks don't need the guarantee (their
 	// creates land at alpha ~0 anyway). Pool = 2x the shared budget covers a
 	// full sector refill (a 16 m lod0 sector needs up to 64 buckets x 4 bands
 	// = 256 IGs) plus margin.
@@ -1167,58 +1195,70 @@ void CDynLandscape::updateVegetableBlocks(const CVector& viewCenter)
 }
 
 // ****************************************************************************
-// P0 probe for the microvegetation plan (docs/DYNWORLD_MICROVEGETATION_PLAN.md):
-// dump everything the stock planting pipeline needs, so a client session can
-// validate the data pipeline end to end.
+// Debug probe: dump everything the stock planting pipeline needs, so a
+// client session can validate the data pipeline end to end.
 void CDynLandscape::dumpVegetableData() const
 {
 	nlinfo("DYNVEGET: dump begin (vegetableActive=%d, density=%.3f)", isVegetableActive(), getVegetableDensity());
 
 	const CTileBank& tileBank = TileBank;
-	const uint numTileSets = tileBank.getTileSetCount();
-	nlinfo("DYNVEGET: %u tilesets in the bank", numTileSets);
-
-	for (uint ts = 0; ts < numTileSets; ++ts)
+	// Per-bank tileset dump: desc file, per-DistType vegetable shapes.
+	auto dumpBank = [&](const char* label, const CTileBank& bank)
 	{
-		const CTileSet* tileSet = tileBank.getTileSet(sint(ts));
-		if (tileSet == nullptr)
-			continue;
-
-		const std::string& tileSetName = tileSet->getName();
-		const std::string& descFileName = tileSet->getTileVegetableDescFileName();
-		const CTileVegetableDesc& vegDesc = tileSet->getTileVegetableDesc();
-
-		if (vegDesc.empty())
+		const uint numTileSets = bank.getTileSetCount();
+		nlinfo("DYNVEGET: %u tilesets in the %s", numTileSets, label);
+		for (uint ts = 0; ts < numTileSets; ++ts)
 		{
-			nlinfo("DYNVEGET: tileset '%s' vegetDesc='%s' EMPTY", tileSetName.c_str(), descFileName.c_str());
-			continue;
-		}
-
-		for (uint distType = 0; distType < NL3D_VEGETABLE_BLOCK_NUMDIST; ++distType)
-		{
-			const std::vector<CVegetable>& vegetableList = vegDesc.getVegetableList(distType);
-			if (vegetableList.empty())
+			const CTileSet* tileSet = bank.getTileSet(sint(ts));
+			if (tileSet == nullptr)
 				continue;
 
-			std::string shapes;
-			for (const CVegetable& veget : vegetableList)
+			const std::string& tileSetName = tileSet->getName();
+			const std::string& descFileName = tileSet->getTileVegetableDescFileName();
+			const CTileVegetableDesc& vegDesc = tileSet->getTileVegetableDesc();
+
+			if (vegDesc.empty())
 			{
-				// Shape availability through the manager cache. NB: shapes are
-				// normally registered by initTileVegetableDescs (called from
-				// initTileBanks at flushTiles time); getVegetableShape only
-				// lazily loads what is missing.
-				CVegetableShape* shape = _VegetableManager->getVegetableShape(veget.ShapeName);
-				shapes += veget.ShapeName + (shape != nullptr ? "[ok]" : "[FAIL]") + " ";
+				nlinfo("DYNVEGET: tileset '%s' vegetDesc='%s' EMPTY", tileSetName.c_str(), descFileName.c_str());
+				continue;
 			}
-			nlinfo("DYNVEGET: tileset '%s' vegetDesc='%s' distType=%u seed=%u count=%u: %s",
-				tileSetName.c_str(), descFileName.c_str(), distType,
-				vegDesc.getVegetableSeed(distType), (uint)vegetableList.size(), shapes.c_str());
+
+			for (uint distType = 0; distType < NL3D_VEGETABLE_BLOCK_NUMDIST; ++distType)
+			{
+				const std::vector<CVegetable>& vegetableList = vegDesc.getVegetableList(distType);
+				if (vegetableList.empty())
+					continue;
+
+				std::string shapes;
+				for (const CVegetable& veget : vegetableList)
+				{
+					// Shape availability through the manager cache. NB: shapes are
+					// normally registered by initTileVegetableDescs (called from
+					// initTileBanks / loadVegetSideBanks at flushTiles time);
+					// getVegetableShape only lazily loads what is missing.
+					CVegetableShape* shape = _VegetableManager->getVegetableShape(veget.ShapeName);
+					shapes += veget.ShapeName + (shape != nullptr ? "[ok]" : "[FAIL]") + " ";
+				}
+				nlinfo("DYNVEGET: tileset '%s' vegetDesc='%s' distType=%u seed=%u count=%u: %s",
+					tileSetName.c_str(), descFileName.c_str(), distType,
+					vegDesc.getVegetableSeed(distType), (uint)vegetableList.size(), shapes.c_str());
+			}
 		}
+	};
+
+	// Main TileBank: the texture source (texture binding for the (biome,
+	// material) surface groups). Dumped for reference; the vegetable descs
+	// resolve from the biome banks below.
+	dumpBank("main TileBank (texture source)", tileBank);
+	for (auto& kv : m_vegetSideBanks)
+	{
+		const std::string label = NLMISC::toString("biome %u vegetable bank", (uint)kv.first);
+		dumpBank(label.c_str(), *kv.second);
 	}
 
-	// Material -> tile bindings (same lookup bindRegionMeshTexture uses), to
-	// see which tileset (hence which vegetable desc) each bound material ends
-	// up with.
+	// Material -> desc resolution (the same lookup CDynVegetableBlock::init
+	// uses), to see which vegetable desc each (biome, material) surface group
+	// ends up with.
 	CMaterialLibrary& materialLibrary = CMaterialLibrary::instance();
 	nlinfo("DYNVEGET: %u environments, %u materials", materialLibrary.getMaxEnvironmentId() + 1, materialLibrary.getMaxMaterialId() + 1);
 	for (uint matId = 0; matId <= materialLibrary.getMaxMaterialId(); ++matId)
@@ -1233,39 +1273,18 @@ void CDynLandscape::dumpVegetableData() const
 			if (textureSet == nullptr || textureSet->m_textures.empty())
 				continue;
 
-			// Final resolution: the same lookup CDynVegetableBlock::init uses
-			// (main-bank tile desc first, then the biome's ecosystem side bank).
 			const CTileVegetableDesc* resolved = resolveVegetDescForGroup((Voxel::BiomeType)envId, (Voxel::MaterialType)matId);
-			if (resolved != nullptr && !textureSet->m_textures[0].m_variations.empty()
-				&& &tileBank.getTileVegetableDesc(textureSet->m_textures[0].m_variations[0]) == resolved)
+			if (resolved != nullptr)
 			{
-				// Resolved in the main bank: keep the detailed binding diagnostic.
-				uint16 tileId = textureSet->m_textures[0].m_variations[0];
-				const CTileVegetableDesc& vegDesc = tileBank.getTileVegetableDesc(tileId);
-				std::string ownerTileSetName = "<no tileset>";
-				for (uint ts = 0; ts < numTileSets; ++ts)
-				{
-					const CTileSet* tileSet = tileBank.getTileSet(sint(ts));
-					if (tileSet != nullptr && &tileSet->getTileVegetableDesc() == &vegDesc)
-					{
-						ownerTileSetName = tileSet->getName();
-						break;
-					}
-				}
-				nlinfo("DYNVEGET: material '%s' env=%u -> tile %u tileset '%s' vegetDesc OK",
-					matDef->getName(), envId, (uint)tileId, ownerTileSetName.c_str());
-			}
-			else if (resolved != nullptr)
-			{
-				nlinfo("DYNVEGET: material '%s' env=%u -> main-bank tile %u EMPTY; side-bank vegetDesc OK",
+				nlinfo("DYNVEGET: material '%s' env=%u -> biome-bank vegetDesc OK (main-bank tile %u)",
 					matDef->getName(), envId,
-					textureSet->m_textures[0].m_variations.empty() ? 0u : (uint)textureSet->m_textures[0].m_variations[0]);
+					textureSet->m_textures[0].m_variations.empty() ? 0xFFFFu : (uint)textureSet->m_textures[0].m_variations[0]);
 			}
 			else
 			{
-				nlinfo("DYNVEGET: material '%s' env=%u -> no vegetDesc (main bank %s, no side bank desc)",
+				nlinfo("DYNVEGET: material '%s' env=%u -> no vegetDesc (main bank tile %s, no biome-bank desc)",
 					matDef->getName(), envId,
-					textureSet->m_textures[0].m_variations.empty() ? "has no matching tile" : "EMPTY/MISSING");
+					textureSet->m_textures[0].m_variations.empty() ? "unbound" : "bound but empty");
 			}
 		}
 	}
@@ -1287,7 +1306,7 @@ void CDynLandscape::dumpVegetableData() const
 }
 
 // ****************************************************************************
-// P0 probe: exercise the full stock reserve/add commit path and the
+// Debug probe: exercise the full stock reserve/add commit path and the
 // dyn_renderveget render hook with hand-planted instances.
 void CDynLandscape::vegetTest(const CVector& pos, const CVector& normal, const std::string& shapeName, uint count,
 	Voxel::BiomeType biome)
@@ -1389,7 +1408,7 @@ float g_tighten = 0.4679f;
 float g_shaderDebugMode = 0.f;
 Voxel::MaterialType g_discardMaterial = 0xFF;
 bool g_clipBV = true;
-// P3: render planted vegetable IGs with the stock manager. On by
+// Render planted vegetable IGs with the stock manager. On by
 // default now that the planting pipeline is live; .dyn_renderveget toggles it
 // off for A/B comparison against bare terrain.
 bool g_renderVegetables = true;
@@ -1400,7 +1419,7 @@ void CDynLandscape::logVegetStats() const
 		nlinfo("DYNVEGET: stats: no vegetable manager (vegetables not enabled?)");
 		return;
 	}
-	// P2 block-level state (const map: the pointer is const, the block isn't)
+	// Block-level state (const map: the pointer is const, the block isn't)
 	uint vegetBlocks = 0, vegetEntries = 0, vegetBlockIgs = 0;
 	for (auto& kv : m_vegetableBlocks)
 	{
@@ -1470,7 +1489,7 @@ void CDynLandscape::render(const CVector &refineCenter, const CVector &frontVect
 	_Driver->activePixelProgram(NULL);
 	_Driver->setupModelMatrix(CMatrix::Identity);
 
-	// P0 probe: stock microvegetation render through the embedded
+	// Probe: stock microvegetation render through the embedded
 	// CVegetableManager. No dynamic lightmap in dyn sessions (NULL), sun
 	// ambient/diffuse already fed by CDynLandscapeModel::setupVegetableLighting.
 	// NB: placed AFTER the buffer unlock below — the stock CLandscape::render
@@ -1494,7 +1513,7 @@ void CDynLandscape::render(const CVector &refineCenter, const CVector &frontVect
 		// the max face count ever seen in one frame.
 		_VegetableManager->resetNumVegetableFaceRendered();
 		_VegetableManager->render(refineCenter, frontVector, vegetPyramid, NULL, _Driver);
-		// P0 probe: log only on change so the log stays readable. The counter
+		// Probe: log only on change so the log stays readable. The counter
 		// is exactly this frame's rendered faces (reset above).
 		uint32 faces = _VegetableManager->getNumVegetableFaceRendered();
 		static sint32 lastFaces = -1;

@@ -1,5 +1,5 @@
-// Unit tests for the dynworld microvegetation placement engine
-// (ryzomcore issue #7, plan P1). Tests the pure-data placement geometry:
+// Unit tests for the dynworld microvegetation placement engine.
+// Tests the pure-data placement geometry:
 // soft-soil filtering (all-3-corners rule), spatial bucket clustering,
 // deterministic output, origin/scale transform, UV-to-position mapping, and
 // the commit-phase assumption that CVegetable::generateGroup instance counts
@@ -20,7 +20,6 @@
 static NLMISC::CApplicationContext vegetApplicationContext;
 
 using namespace NLMISC;
-using namespace DYNWORLD;
 
 namespace
 {
@@ -209,7 +208,7 @@ TEST(DynworldVegetationPlacementTest, SoilSurfaceBuildsPlacementSet)
 	EXPECT_NEAR(totalArea(set), 16.f, 1e-4f);
 }
 
-// Regression (issue #7 close-pop): the bucket SurfaceCenter must carry the
+// Regression: the bucket SurfaceCenter must carry the
 // real surface elevation — the z=0 quantized Center is a noise seed only, and
 // using it as the band-walk distance reference inflated classification
 // distances by the terrain elevation (24.5 m in-game), firing band swaps
@@ -437,7 +436,6 @@ TEST(DynworldVegetationBucketResolveTest, ResolveIsDeterministic)
 // ****************************************************************************
 // commit-phase assumption: CVegetable::generateGroup instance counts scale
 // exactly with (bucket area x density) when noise randomization is zero
-// (plan D3 validation numbers)
 
 TEST(DynworldVegetGenerateGroupTest, InstanceCountScalesWithAreaAndDensity)
 {

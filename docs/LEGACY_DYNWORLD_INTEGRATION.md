@@ -34,6 +34,9 @@ squashed feature commits + 2 kept small non-feature commits):
   to the old tip (`git diff f1ee22d56 dev/dyn` empty) before the `--force-with-lease`
   push; nobody had pulled the old pushes. The roadmap's commit-hash references elsewhere
   are unaffected (integration base and external checkouts only).
+- Later feature work merges as squash-PRs into `dev/dyn` directly:
+  `2cd0a9f23` (2026-11-14) — client-side microvegetation on soft soil
+  (system doc: `docs/DynMicroVegetation.md`).
 
 
 ## core4 sync into dev/dyn (2026-11-14)
@@ -76,11 +79,7 @@ Plan docs:
   on walls/cliffs): design direction, phases B0-B6, acceptance criteria. Its system content
   lives in `docs/VoxelTerrainCollision.md`.
 - Other open issues with doc context: ryzomcore#6 → `docs/SET_VOXEL_ROUND_TRIP_VALIDATION.md`
-  (plan; system content in `docs/VoxelMessageChain.md`); ryzomcore#7 →
-  `docs/DYNWORLD_MICROVEGETATION_PLAN.md` (plan, P0–P5 complete 2026-11-13;
-  system content now in `docs/DynMicroVegetation.md` — stock NeL microvegetation
-  reused, planted client-side on soft soil; debug commands `dyn_veget*`,
-  `dyn_vegfade`).
+  (plan; system content in `docs/VoxelMessageChain.md`).
 - The full index of documentation (system/reference + plans) is the ToC in `AGENTS.md`.
 
 Runtime error codes: documented in `docs/ShardRuntimeOps.md` § 6 (4010 joinSession

@@ -37,10 +37,7 @@ namespace NL3D
 	class CTileBank;
 }
 
-namespace DYNWORLD
-{
-	struct CVegetBucket;
-}
+struct CVegetBucket;
 
 class CRegionMesh;
 class CSectorTransition;
@@ -51,7 +48,7 @@ typedef std::vector<NLMISC::CSmartPtr<CSectorTransition>> TTransitionContainer;
 
 // ***************************************************************************
 /**
- * P2: dynworld analogue of NL3D::CLandscapeVegetableBlock.
+ * dynworld analogue of NL3D::CLandscapeVegetableBlock.
  *
  * One per (lod, sectorId) whose mesh hosts plantable surface. A stock
  * CVegetableClipBlock owns the sector vegetable geometry; one sort block and
@@ -74,7 +71,7 @@ public:
 		uint8 CurDistType = NL3D_VEGETABLE_BLOCK_NUMDIST;
 		/// Planting data, owned by the sector mesh's placement set (the block
 		/// is recreated whenever the mesh pointer changes).
-		const DYNWORLD::CVegetBucket* Bucket = nullptr;
+		const CVegetBucket* Bucket = nullptr;
 		const NL3D::CTileVegetableDesc* TileVegetDesc = nullptr;
 		/// Biome of the surface group.
 		Voxel::BiomeType Biome = 1;
@@ -138,9 +135,9 @@ public:
 
 	void clearGeneratedMeshes();
 
-	/// P2: per-frame vegetable block sync against
+	/// per-frame vegetable block sync against
 	/// m_regionsList (blocks keyed by (lod, sectorId), created on mesh
-	/// insertion regardless of displayFactor — see §6.7 —, released on
+	/// insertion regardless of displayFactor, released on
 	/// removal, recreated when the mesh pointer changed), then stock
 	/// ring-band updates nearest-block-first under the per-frame
 	/// g_maxVegetCommit IG budget. Main thread only; opens the vegetable
@@ -165,34 +162,46 @@ public:
 	/// Run via the "dyn_vegetstats" command.
 	void logVegetStats() const;
 
-	/// P5 debug command support: enable/disable
+	/// Debug command support: enable/disable
 	/// microvegetation. Disabling also releases the vegetable blocks
 	/// (frees the vegetable VB space); re-enabling recreates them through
 	/// the structural sync in updateVegetableBlocks.
 	void setVegetableActive(bool enable);
 
-	/// Per-biome vegetable side banks: load
-	/// the ecosystem tile banks the main TileBank does not contain (the dyn
-	/// continent reuses the newbieland sheet, whose ecosystem is jungle, so
-	/// the main bank holds only jungle tilesets). Call once after flushTiles.
-	/// Re-calling releases the vegetable blocks first (they hold desc
-	/// pointers into these banks) and rebuilds.
+	/// Per-biome vegetable banks: load the ecosystem tile banks declared by
+	/// the environment cfgs (VegetBank). Every biome goes through the same
+	/// pipeline — jungle included (its bank is the same file the main
+	/// TileBank was loaded from: the dyn continent reuses the newbieland
+	/// sheet). Call once after flushTiles (the season postfix recorded by
+	/// postfixTileVegetableDesc is applied first). Re-calling releases the
+	/// vegetable blocks (they hold desc pointers into these banks) and
+	/// rebuilds.
 	void loadVegetSideBanks();
 
+	/// Record the season postfix ("", "_Sp"/"_Su"/"_Au"/"_Wi") the vegetable
+	/// banks must apply to their tilesets' desc file names when loaded.
+	/// Called from CDynLandscapeUser::postfixTileVegetableDesc, which the
+	/// continent selection drives with the session season right before
+	/// flushTiles. The postfix is applied per tileset only when the
+	/// postfixed .vegetset exists on the search paths; the base file is kept
+	/// otherwise (loadTileVegetableDesc yields an empty desc on a missing
+	/// file, which would silently unplant the tileset).
+	void setVegetSeasonPostfix(const char* postfix) { m_vegetSeasonPostfix = postfix; }
+
 	/// Resolve the tile vegetable desc for a (biome, material) surface group:
-	/// main TileBank first (bindMaterials tile id — the stock path), then the
-	/// biome's side bank (name-prefix tile match, same rule as
-	/// CMaterialTextureSet::bindSet). Returns nullptr when the group has no
+	/// the biome's ecosystem bank (environment cfg VegetBank — every biome
+	/// resolves the same way), by name-prefix tile match, same rule as
+	/// CMaterialTextureSet::bindSet. Returns nullptr when the group has no
 	/// plantable data (the caller skips it).
 	const NL3D::CTileVegetableDesc* resolveVegetDescForGroup(Voxel::BiomeType biome, Voxel::MaterialType material) const;
 
 	/// Merged microvegetation atlas: install the 2x2
-	/// composition of the four ecosystem atlases (jungle, fyros, tryker,
-	/// prime roots) as the manager's stage-1 texture, using the season-
-	/// postfixed source variants for `season` (0..3 = Sp/Su/Au/Wi, 0xFF =
-	/// base, season >= 4 falls back to base). Returns false when a source
-	/// atlas is unavailable (caller falls back to the stock
-	/// single-ecosystem loadVegetableTexture path).
+	/// composition of the ecosystem atlases declared by the environment cfgs
+	/// (VegetAtlas/VegetAtlasQuarter) as the manager's stage-1 texture, using
+	/// the season-postfixed source variants for `season` (0..3 = Sp/Su/Au/Wi,
+	/// 0xFF = base, season >= 4 falls back to base). Returns false when a
+	/// source atlas is unavailable or none is declared (caller falls back to
+	/// the stock single-ecosystem loadVegetableTexture path).
 	bool loadDynVegetableAtlas(uint8 season);
 
 	/// Remap a .veget shape's Tex0 UVs (its ecosystem atlas coordinates) into
@@ -221,11 +230,19 @@ private:
 	void clearVegetableBlocks();
 	void createVegetableBlock(uint lod, TGenericSectorId sectorId, CRegionMesh& mesh);
 	void clearVegetSideBanks();
+	/// Insert the recorded season postfix into each tileset's desc file name
+	/// (only where the postfixed .vegetset resolves; the base name is kept
+	/// otherwise). No-op for an empty postfix.
+	void applyVegetSeasonPostfix(NL3D::CTileBank* sideBank);
 
-	/// Per-biome side tile banks for vegetable descs, keyed by biome id
-	/// (desert=2, lakes=3, roots=4). Owned; must outlive all vegetable
-	/// blocks (they store desc pointers into these banks).
+	/// Per-biome tile banks for vegetable descs, keyed by biome id. The banks
+	/// are the ones the environment cfgs declare (VegetBank); owned; must
+	/// outlive all vegetable blocks (they store desc pointers into them).
 	std::map<uint8, NL3D::CTileBank*> m_vegetSideBanks;
+
+	/// Season postfix ("", "_Sp"/"_Su"/"_Au"/"_Wi") recorded by
+	/// setVegetSeasonPostfix, applied to the vegetable banks at load time.
+	std::string m_vegetSeasonPostfix;
 
 	/// Merged-atlas remap record: shape name -> atlas quarter it was remapped
 	/// to. Mutable: ensureVegetShapeAtlasRemap is const
@@ -248,7 +265,7 @@ private:
 	NL3D::CPixelProgram* m_PP;
 	NL3D::CMaterial m_Mat;
 
-	/// P2 vegetable blocks, keyed by (lod, sectorId). Blocks are created only
+	/// vegetable blocks, keyed by (lod, sectorId). Blocks are created only
 	/// for meshes with a non-empty placement set (a block with zero plantable
 	/// entries stays in the map but costs only its empty structures).
 	std::map<std::pair<uint, TGenericSectorId>, CDynVegetableBlock*> m_vegetableBlocks;

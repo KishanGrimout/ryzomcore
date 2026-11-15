@@ -31,6 +31,14 @@ Session protocol:
 
 Rules:
 
+- Plans and issues are scaffolding, not knowledge. When the work a plan or issue
+  covers is **finalized** (merged and validated, findings consolidated into the
+  system doc and the roadmap), strip every reference to it from the rest of the
+  tree: plan-doc links and `§` references into them, phase tags (`P0`–`P5`,
+  `B0`–`B6`, …) and issue numbers/titles — in code comments, log/command
+  strings, test comments, system docs and the roadmap. The finalized plan doc
+  itself stays where it is (it records decisions and history) but must carry no
+  inbound references; the owning **system doc** is the canonical reference.
 - New docs, checklists and notes of project-wide relevance → create them under `docs/`.
 - Upstream `README.md` (Ryzom Core project readme) stays at the repo root untouched.
 - Deployment-local READMEs that travel with the artifacts they describe

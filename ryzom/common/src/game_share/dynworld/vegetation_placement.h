@@ -1,5 +1,5 @@
 // DynWorld
-// Copyright (C) 2014 Kishan Grimout <kishan.grimout@gmail.com>
+// Copyright (C) 2026 Kishan Grimout <kishan.grimout@gmail.com>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as
@@ -14,12 +14,12 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-// Microvegetation placement geometry (ryzomcore issue #7).
+// Microvegetation placement geometry for dyn world.
 //
 // Worker-side placement engine for the stock NeL microvegetation system
 // reused on the dynworld voxel terrain. It walks a decoded marching-cubes
 // mesh and clusters the plantable triangles into spatial buckets; the
-// main-thread commit phase (dyn_landscape, P2) resolves the tile-vegetable
+// main-thread commit phase (dyn_landscape) resolves the tile-vegetable
 // descriptors per (biome, material) and plants with
 // CVegetable::generateGroup using each bucket as the generating "patch"
 // (stock equivalent: CPatch::generateTileVegetable with a 16 m^2 tile).
@@ -44,16 +44,12 @@
 #include "nel/misc/vector.h"
 #include "nel/misc/vector_2f.h"
 
-#include <cstdint>
 #include <vector>
-
-namespace DYNWORLD
-{
 
 /// Bucket cell size in meters. Marching-cubes triangles are ~voxel scale
 /// (~0.5 m edges, ~0.1 m^2), far below the stock 16 m^2 vegetable tile, so
 /// per-triangle generateGroup would floor(density*area) to ~0 instances
-/// almost everywhere (plan D3). Triangles are therefore clustered into
+/// almost everywhere. Triangles are therefore clustered into
 /// ~4 m^2 cells, which is the planting granularity of generateGroup.
 const float VegetBucketCellSize = 2.0f;
 
@@ -74,9 +70,7 @@ struct CVegetBucket
 {
 	/// Quantized cell center in world XY (z = 0). Commit-time noise seed for
 	/// CVegetable::generateGroup ONLY — never a distance reference: the band
-	/// walk must use SurfaceCenter (issue #7 close-pop: a z=0 center inflates
-	/// classification distances by the terrain elevation, which fires every
-	/// band create/delete mid-band at full alpha, i.e. visible pops).
+	/// walk must use SurfaceCenter
 	NLMISC::CVector Center;
 	/// Area-weighted centroid of the member triangle corners (real surface
 	/// position). Used by the client band walk and as the sort-block center.
@@ -139,7 +133,5 @@ void computeVegetPlacements(const TDecodedMesh& mesh, const uint8 (&soilIds)[Veg
 /// \param outNormal the landing triangle's face normal (orientation basis).
 void vegetBucketResolvePosition(const CVegetBucket& bucket, const NLMISC::CVector2f& uv,
 	NLMISC::CVector& outPos, NLMISC::CVector& outNormal);
-
-} // namespace DYNWORLD
 
 #endif

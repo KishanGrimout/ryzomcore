@@ -71,7 +71,7 @@ public:
 	// right after extraction, consumed by the commit phase when the mesh
 	// becomes visible (P2). Follows the mesh lifecycle automatically (rebuilt
 	// on every re-extraction, freed with the mesh).
-	DYNWORLD::CDynVegetPlacementSet m_vegetPlacements;
+	CDynVegetPlacementSet m_vegetPlacements;
 };
 
 class CSkirtRegionMesh : public IRegionMesh

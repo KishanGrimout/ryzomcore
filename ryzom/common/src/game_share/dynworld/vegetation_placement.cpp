@@ -1,5 +1,5 @@
 // DynWorld
-// Copyright (C) 2014 Kishan Grimout <kishan.grimout@gmail.com>
+// Copyright (C) 2026 Kishan Grimout <kishan.grimout@gmail.com>
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as
@@ -20,9 +20,6 @@
 #include "environment_definition.h"
 
 #include <map>
-
-namespace DYNWORLD
-{
 
 using namespace NLMISC;
 
@@ -243,5 +240,3 @@ void vegetBucketResolvePosition(const CVegetBucket& bucket, const CVector2f& uv,
 		normal.set(0.f, 0.f, 1.f);
 	outNormal = normal;
 }
-
-} // namespace DYNWORLD
