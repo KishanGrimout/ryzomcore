@@ -156,6 +156,7 @@ PolyVox change beyond the one below). Unit coverage:
 | `GetExistingChunk` / `CreateChunk` / `SearchFreeChunkSlot` / `SearchOldestChunk` / `DeleteOldestChunk` / `PageInChunk` | PolyVox write-branch event sites (pre-existing `PIX` markers, now wired) | VPW: internal-lock write work; `SearchOldestChunk` only fires when over the chunk limit (P3b); `PageInChunk` = the pager body with **no locks held** since P3a' | plan P5 |
 | `pagerPageIn` | `CSlavePager`/`CMasterPager::pageIn` | VPI: total pageIn (chunk-lock hold from the pager side; nested sums include the sub-sites below) | plan P5 |
 | `cacheTryFill` / `cacheReadChunk` | `CSlavePager` + `map_cache_manager.cpp` | VPI: cache load path total / the disk+LZMA unpack part | plan P5 |
+| `cacheDiskRead` / `cacheLzmaDecode` | `map_cache_manager.cpp` `readChunk` (nested inside `cacheReadChunk`) | VPI: the I/O/CPU split of a cache page-in — `CDiskFileDataBase::readData` vs `unpackLZMA` of the 1 MB chunk (decide cache-layer work from these, not from the total) | plan P5 |
 | `mapGenMakeChunk` | both pagers around `CMapGen::makeChunk` | VPI: from-scratch generation | plan P5 |
 | `cacheSaveCall` | `CSlavePager` around `saveRegionToCache` | VPI: synchronous save part (copy; compression already deferred) | plan P5 |
 | `regionPagedIn` / `regionPagedOut` | both pagers around the map notification | VPI: notification incl. metadata lock (nested: includes `mapLock*` below) | plan P5 |
@@ -669,3 +670,50 @@ terrain there generates cheaply — while the same volume's background generatio
 averaged 145 ms. So a hitch occurs only when a *heavy* fresh chunk (the ~205 ms
 class) happens to be the one the sweep touches first, which is what the
 `DYNQPAGEIN`/`DYNHITCH` pair now pinpoints per occurrence.
+
+### 6.8 Chunk load cost: what a cache layer can and cannot buy (2026-11-18)
+
+The movement-blocking target is closed (§ 6.7); what remains measurable is the
+*per-chunk load cost*, so "would an in-memory cache layer help?" is answered with
+numbers instead of intuition.
+
+Facts from the 197 s validation window (§ 6.7), where the movement thread paged
+in nothing:
+
+| Marker | value | reading |
+|---|---|---|
+| `pageInChunk` | 52 867 / 200 s | 3.8 ms average, i.e. **~1.0 core continuously busy paging** |
+| `cacheTryFill` | 52 867 / 190.6 s | 3.6 ms of that is the cache path: disk read + LZMA unpack of a 1 MB chunk (64³ voxels × 4 B) |
+| `createChunk` vs `pageInChunk` | 52 870 vs 52 867 | **every page-in is a first load**: no chunk is requested twice in the window |
+| `mapGenMakeChunk` | 57 / 9.1 s (avg 160 ms) | generation is ~45× a cache load |
+
+Consequences:
+
+- The 1024-chunk limit is not thrashing in the LRU sense (a thrash would show
+  `pageInChunk` >>> `createChunk`). The client streams a working set far larger
+  than the limit and touches each chunk once.
+- A **compressed in-memory cache** (LZMA blobs in RAM instead of in
+  `./cache/map.cache`) removes only the disk read, still pays the decode, and —
+  with no reuse — would rarely be hit. Small win at best, plus RAM for blobs.
+- A **raw/decompressed memory cache** would remove the decode too, but costs
+  1 MB/chunk (1 GB for 1024 chunks) and again only pays on reuse.
+- Generation (160 ms) is the expensive path and already off the hot path thanks
+  to the prefetch, so cache work must be judged against 3.6 ms, not against 160 ms.
+
+The decisive number is the disk/decode split, now instrumented by `cacheDiskRead`
+and `cacheLzmaDecode` (registry § 5, nested inside `cacheReadChunk`; no number
+yet — one session with the split build decides it). Reference throughput:
+`cacheReadChunk` count × 1 048 576 B / total seconds.
+
+- Decode-dominant (expected): the lever is the cache **format** (cheaper codec
+  such as LZ4, or storing chunks uncompressed and letting the OS page cache
+  serve them), not another RAM tier.
+- Read-dominant: an in-memory blob cache (or a sequential layout / larger OS
+  page cache) is the lever.
+
+P4 as scoped ("async/manual paging") does not change any of this: it moves the
+cost to another thread, and the original target (movement blocking) is already at
+zero. If paging throughput becomes visible once slower code paths depend on it
+(the same window still had 1 991 background page-in waits / 13.3 s / max 380 ms,
+i.e. extraction threads queueing on each other), the follow-up is a
+**chunk-load-cost** task, not the P4 locking task.

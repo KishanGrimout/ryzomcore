@@ -106,7 +106,15 @@ public:
 			NLMISC::CMemStream stream(true, false);
 			uint8* streamPtr = stream.bufferToFill(leastBufLen);
 
-			if (!m_db.readData(id, streamPtr, leastBufLen))
+			bool readOk;
+			{
+				// I/O split (docs/VoxelVolumePaging.md § 5): separate the disk
+				// read from the LZMA decode so a dump says which one bounds the
+				// page-in cost
+				CVoxelPagingStatScope diskScope(voxelPagingStats().cacheDiskRead);
+				readOk = m_db.readData(id, streamPtr, leastBufLen);
+			}
+			if (!readOk)
 				return false;
 
 			uint8 chunkSaveVersion;
@@ -123,7 +131,12 @@ public:
 			size_t lzmaBufLen = leastBufLen - stream.getPos();
 			uint8* chunkData = (uint8*)pChunk->getData();
 			size_t chunkDataLen = pChunk->getDataSizeInBytes();
-			if (!unpackLZMA(lzmaBuf, lzmaBufLen, chunkData, chunkDataLen))
+			bool unpackOk;
+			{
+				CVoxelPagingStatScope decodeScope(voxelPagingStats().cacheLzmaDecode);
+				unpackOk = unpackLZMA(lzmaBuf, lzmaBufLen, chunkData, chunkDataLen);
+			}
+			if (!unpackOk)
 			{
 				return false;
 			}
