@@ -240,9 +240,7 @@ Measured priority order (each still gated on its own before/after numbers):
     page-ins (16 fresh generations) but the worst was **12 ms**; background
     generations averaged 145 ms. So the residual hitch class is a *heavy* fresh
     chunk landing on the movement sweep (the 205 ms case), not a systemic stall.
-    Optional follow-up if it recurs: give the prefetch a lead along the movement
-    direction so heavy chunks are generated ahead of arrival. P3e-2 is otherwise
-    validated; next is P4 async paging and the shard leg (H5).
+    (The follow-up — a directional lead on two hot points — is described below.)
   - **Prefetch coverage — camera vs player (decision 2026-11-18, implemented)**:
     the hot box was centred on the *camera* (`View.refinePos`), the position the
     per-frame PACS hook receives. That was not enough: camera collisions query
@@ -261,9 +259,14 @@ Measured priority order (each still gated on its own before/after numbers):
     at the point-mirrored location**, caused by the `MVDBG3` collision probe's
     mirrored-column read (every movement-thread page-in of that window was at
     mirrored coordinates) — not by a collision lookup. The `MVDBG*` probes are
-    now behind `g_dynCollisionDebug` (default off, `dyn_collisiondebug`); one
-    clean session remains to close P3e. Details: `docs/VoxelVolumePaging.md` § 6.7
-    and `docs/VoxelTerrainCollision.md` § 5.
+    now behind `g_dynCollisionDebug` (default off, `dyn_collisiondebug`); the
+    follow-up session (**197 s, 52 867 page-ins**) confirmed it: zero `MVDBG`
+    lines and **`pageInChunkQuery` / `mapGenMakeChunkQuery` / `pageInWaitChunkQuery`
+    all 0**, i.e. the movement thread paid no page-in at all. P3e-2's target class
+    is closed. The only counted gap (121 ms) had no query-thread paging — a
+    main-thread cost outside this plan (zone/mesh streaming around load).
+    Details: `docs/VoxelVolumePaging.md` § 6.7 and
+    `docs/VoxelTerrainCollision.md` § 5.
   - Region-batching at the call sites (`traceSegment`/`castRay`/extraction
     loops) is **deferred**: after P3e-1 the per-voxel cost is lock round-trips,
     not lookups; re-evaluate only if a new profile shows it dominating.

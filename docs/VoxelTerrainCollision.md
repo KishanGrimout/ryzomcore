@@ -165,6 +165,9 @@ All four `MVDBG*` probes are **off by default** behind `bool g_dynCollisionDebug
   in 2 minutes of walking (5 MB log rotation per minute), formatted on the
   movement path.
 
+Confirmed live 2026-11-18 22:36+ (build with the gate): zero `MVDBG` lines, and
+zero movement-thread page-ins over 197 s / 52 867 page-ins.
+
 Known leftover that stays: the MVDBG4-style **cursor** conversion
 (`voxelUnderCursor()`) uses its own truncating `CVectorI` path too — tooling only,
 harmless for movement; left as-is (visible in

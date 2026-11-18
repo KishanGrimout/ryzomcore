@@ -521,6 +521,27 @@ gated behind `g_dynCollisionDebug` (default off, `dyn_collisiondebug`), which
 also removes ~200 warnings/s of movement-path log spam. Details:
 `docs/VoxelTerrainCollision.md` § 5.
 
+**Validation after the gate (2026-11-18 22:37:12–22:40:29, 197 s, build 22:36):**
+zero `MVDBG` lines, and the movement thread paid **no page-in at all**:
+
+| Marker | value |
+|---|---|
+| `pageInChunkQuery` | **0** |
+| `mapGenMakeChunkQuery` | **0** |
+| `pageInWaitChunkQuery` | 0 |
+| `pageInChunk` (all threads) | 52 867 / 200 s / max 396 ms |
+| `mapGenMakeChunk` (all threads) | 57 / max 395 ms |
+| `frameHitch` | 1 / 121 ms (no query-thread paging) |
+
+The same session's first half (old build, probes on) reproduced the probe
+self-stall three times — 102, 171 and 358 ms gaps, each with 1–2 fresh
+generations on the query thread at mirrored regions — so the attribution is
+confirmed from both sides. **P3e-2's target class is closed.**
+
+Residual gap class (outside this plan): the counted 121 ms gap, and a 406 ms one
+at startup before the reset, carry `pageIns on query thread 0` → a main-thread
+cost that is not paging (zone/mesh streaming around load).
+
 **Movement-wait attribution** (added 2026-11-18, before accepting the prefetch as a
 hitch fix). `pageInWaitChunk` alone cannot tell a user-visible hitch from a
 background thread waiting on the prefetcher's own generation: with ~30 k page-ins
