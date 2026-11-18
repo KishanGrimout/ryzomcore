@@ -255,6 +255,15 @@ Measured priority order (each still gated on its own before/after numbers):
     from inside `testCylinderMove`/`doMove` (they already receive the
     `UGlobalPosition`), so no shared-client-code edit was needed. Knowledge:
     `docs/VoxelVolumePaging.md` § 6.7 ("Two hot points + directional lead").
+  - **Validated 2026-11-18 22:16–22:19 (two dumped windows, two-slot + lead
+    build)**: `pageInWaitChunkQuery` **0** in both windows, page-ins otherwise
+    ≤19 ms. The single hitch (387 ms) was a **365 ms fresh generation of a chunk
+    at the point-mirrored location**, caused by the `MVDBG3` collision probe's
+    mirrored-column read (every movement-thread page-in of that window was at
+    mirrored coordinates) — not by a collision lookup. The `MVDBG*` probes are
+    now behind `g_dynCollisionDebug` (default off, `dyn_collisiondebug`); one
+    clean session remains to close P3e. Details: `docs/VoxelVolumePaging.md` § 6.7
+    and `docs/VoxelTerrainCollision.md` § 5.
   - Region-batching at the call sites (`traceSegment`/`castRay`/extraction
     loops) is **deferred**: after P3e-1 the per-voxel cost is lock round-trips,
     not lookups; re-evaluate only if a new profile shows it dominating.

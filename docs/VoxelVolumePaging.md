@@ -491,12 +491,35 @@ Regression tests: `PrefetchTwoSlotsDoNotStarveEachOther` (camera and player far
 apart: both paged), `PrefetchMergesNearbyHotPoints`, and the region math
 (`LeadIsClampedToTheBoxHalfSize`, `NearAndUnionHelpers`).
 
-Measurement plan (pending an in-game session): the target class is the
+Measurement protocol (used for the round below): the target class is the
 `DYNHITCH` line with `freshGen>=1 (on query thread>=1)`; with the lead and the
 player slot those should disappear, while `pageInWaitChunkQuery` and
 `pageInChunkQuery` stay ~0. A `DYNQPAGEIN` region that is now adjacent to the
 player (not the camera) means the player slot is still being outrun — check the
 lead against the local generation cost before widening `g_prefetchBound`.
+
+**Validation 2026-11-18 22:16–22:19 (build 21:28, two dumped windows):**
+
+| Marker | window A (~85 s) | window B (~110 s) |
+|---|---|---|
+| `frameHitch` | 0 | **1 / 387 ms** |
+| `pageInWaitChunkQuery` | 0 | 0 |
+| `pageInChunkQuery` | 14 / max 14 ms | 15 / max 366 ms |
+| `mapGenMakeChunkQuery` | 3 / max 12 ms | **2 / max 365 ms** |
+| `pageInChunk` (all threads) | 13 684 | 25 576 |
+
+The prefetch held in both windows (no query waits, page-ins ≤ 19 ms except the
+generator). The single hitch was **caused by the collision debug probe, not by
+collision lookups**: every one of the 15 movement-thread page-ins in window B is
+at a *point-mirrored* coordinate (`(-x, -y)` of the real column), and the fresh
+generation of 365 ms at 22:19:23 is the chunk of `(-42100, +68301)` — exactly
+`MVDBG3`'s `getVoxelAt(mirrorPos)` read. That probe exists to answer "is this hit
+a mirrored-volume sample?", and the log now answers it (the hit itself is at the
+real `(42100, -68301)`), so the read is pure cost: a mirrored column the player
+walks past is a chunk nobody generated. The four `MVDBG*` probes are therefore
+gated behind `g_dynCollisionDebug` (default off, `dyn_collisiondebug`), which
+also removes ~200 warnings/s of movement-path log spam. Details:
+`docs/VoxelTerrainCollision.md` § 5.
 
 **Movement-wait attribution** (added 2026-11-18, before accepting the prefetch as a
 hitch fix). `pageInWaitChunk` alone cannot tell a user-visible hitch from a

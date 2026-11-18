@@ -149,6 +149,22 @@ Kept-by-design until strip point (plan B6 / Phase-5 validation; then rebuild + r
 | `MVDBG2`/`MVDBG3` probes | `testCylinderMove` | intermediate move/ground debug returns | B6 |
 | `MVDBG4` column profile | `testCylinderMove` | column profile z−2..+5 with the height walk vs body DDA comparison (confirmed the `getVoxelAt` fix live) | B6 |
 
+All four `MVDBG*` probes are **off by default** behind `bool g_dynCollisionDebug`
+(`dyn_global_retriever.cpp`), toggled in-game by `dyn_collisiondebug [0|1]`
+(client debug builds only). Reasons (2026-11-18 session):
+
+- **They cost a page-in.** `MVDBG3` reads the point-mirrored voxel
+  (`-hit.x, -hit.y, hit.z`) to prove the hit is *not* a mirror sample. The answer
+  is now known (hits are at the true column), but each new mirrored column the
+  player walks past is a chunk nobody generated, so the read pages it in — and
+  when it is absent entirely, *generates* it on the movement thread. Measured:
+  one such generation of 365 ms caused the only 387 ms hitch of a 110 s window,
+  and every one of the 15 movement-thread page-ins in that window was at a
+  mirrored coordinate.
+- **They are one warning per move query** (`MVDBG` + `MVDBG2`): ~23 600 log lines
+  in 2 minutes of walking (5 MB log rotation per minute), formatted on the
+  movement path.
+
 Known leftover that stays: the MVDBG4-style **cursor** conversion
 (`voxelUnderCursor()`) uses its own truncating `CVectorI` path too — tooling only,
 harmless for movement; left as-is (visible in

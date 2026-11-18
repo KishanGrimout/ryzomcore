@@ -47,6 +47,12 @@ CDynGlobalRetriever::CDynGlobalRetriever(const CDynRetrieverBank *bank, CMapBase
 
 CVector g_prefetchBound(25.f, 25, 25); // to keep "hot" what is just around
 bool g_forceRegenerate = false;
+// Collision-path probes (MVDBG/MVDBG2/MVDBG3/MVDBG4 in testCylinderMove,
+// docs/VoxelTerrainCollision.md § 5). Off by default: besides ~100 warnings/s
+// while walking, MVDBG3 reads the point-mirrored voxel, which pages in (and can
+// generate) a chunk at the mirrored world location on the movement thread.
+// Toggled by the dyn_collisiondebug client command.
+bool g_dynCollisionDebug = false;
 
 // P4-lite (docs/VoxelVolumePaging.md § 6.7): the hot-neighborhood region for a
 // position, in global voxel coords (the frame getDoubleGlobalPosition feeds to
@@ -906,12 +912,11 @@ const TCollisionSurfaceDescVector* CDynGlobalRetriever::testCylinderMove(const U
 		sectorOriginVoxelZ = sectorOz * TLoadingSector::SideSizeInVoxels;
 	}
 
-	// MVDBG (temporary, strip with the MVNAN set at B6/B5): identifies the
-	// sector-id <-> estimation frame mismatch that lands the body sweep on a
-	// mirrored/doubled column for nonzero sector ids (embedded t=0 hits on
-	// gentle slopes, confirmed in a client session with the debugger: id
-	// sector decodes negated against the true sector, and the converter
-	// scales the origin by SideSizeInVoxels instead of SideSize)
+	// MVDBG (temporary, plan B6): identifies the sector-id <-> estimation
+	// frame mismatch that lands the body sweep on a mirrored/doubled column
+	// for nonzero sector ids. Off by default (dyn_collisiondebug): it emits
+	// one warning per move query, i.e. ~100 lines/s while walking.
+	if (g_dynCollisionDebug)
 	{
 		const CVectorD dbgGlobal = m_map->getDoubleGlobalPosition(startPos.InstanceId, start);
 		nlwarning("MVDBG: id=%" NL_I64 "u sector=(%d,%d,%d) est=(%.3f,%.3f,%.3f) global=(%.3f,%.3f,%.3f)",
@@ -935,12 +940,15 @@ const TCollisionSurfaceDescVector* CDynGlobalRetriever::testCylinderMove(const U
 	const float startGroundZ = getMeanHeight(startPos);
 	const float endGroundZ = getMeanHeight(endPos);
 
-	// MVDBG (temporary, strip with the MVNAN set): the walkability inputs
-	// next to the frame trace — the stand z against the two grounds tells
-	// whether the snap itself is one voxel low (surface inside the next
-	// voxel up)
-	nlwarning("MVDBG2: startGround=%.3f endGround=%.3f est.z=%.3f",
-		startGroundZ, endGroundZ, startPos.LocalPosition.Estimation.z);
+	// MVDBG2 (temporary, plan B6): the walkability inputs next to the frame
+	// trace — the stand z against the two grounds tells whether the snap
+	// itself is one voxel low (surface inside the next voxel up). Off by
+	// default (dyn_collisiondebug): one warning per move query.
+	if (g_dynCollisionDebug)
+	{
+		nlwarning("MVDBG2: startGround=%.3f endGround=%.3f est.z=%.3f",
+			startGroundZ, endGroundZ, startPos.LocalPosition.Estimation.z);
+	}
 
 	// ground walkability: the destination ground may rise or fall by at most ONE
 	// voxel (climb up/down 1 voxel only, whatever the local slope or voxel
@@ -973,9 +981,14 @@ const TCollisionSurfaceDescVector* CDynGlobalRetriever::testCylinderMove(const U
 				// (found live at sector z=1: hitTop=33.0 against endGround=0.5)
 				const float hitTop = (float(hit.m_voxelPos.z - sectorOriginVoxelZ) + 1.f) * TLoadingSector::VoxelSize;
 
-				// MVDBG3 (temporary): is the hit voxel a real terrain lip at
-				// our own column, or a mirrored-volume sample? prints the
-				// hit cell's content and its point-mirrored counterpart's
+				// MVDBG3/MVDBG4 (temporary, plan B6): is the hit voxel a real
+				// terrain lip at our own column, or a mirrored-volume sample?
+				// prints the hit cell's content, its point-mirrored
+				// counterpart's, and the column profile. Off by default: the
+				// mirrored read pages in (and can generate) a chunk at the
+				// mirrored world location, i.e. the probe buys itself a
+				// movement-thread stall (docs/VoxelTerrainCollision.md § 5).
+				if (g_dynCollisionDebug)
 				{
 					const Voxel hitVoxel = m_map->getVoxelAt(hit.m_voxelPos);
 					TVoxelPos mirrorPos(-hit.m_voxelPos.x, -hit.m_voxelPos.y, hit.m_voxelPos.z);

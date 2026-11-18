@@ -5374,6 +5374,20 @@ NLMISC_COMMAND(dyn_regenmesh, "Regenerates dyn world mesh", "")
 	return true;
 }
 
+// collision-path probes (docs/VoxelTerrainCollision.md § 5): MVDBG/MVDBG2/3/4
+// in testCylinderMove. Off by default; MVDBG3's mirrored-column read pages in a
+// chunk at the mirrored location, so only enable it while debugging collisions.
+extern bool g_dynCollisionDebug;
+NLMISC_COMMAND(dyn_collisiondebug, "Toggle dyn world collision probes (MVDBG)", "[0|1]")
+{
+	if (args.empty())
+		g_dynCollisionDebug = !g_dynCollisionDebug;
+	else
+		g_dynCollisionDebug = (args[0] != "0" && args[0] != "off" && args[0] != "false");
+	nlinfo("dyn_collisiondebug: %s", g_dynCollisionDebug ? "on" : "off");
+	return true;
+}
+
 extern CVector g_prefetchBound;
 NLMISC_COMMAND(dyn_prefetchextents, "Set the voxels prefetch extents", "<X extent> <Y extent> <Z extent>")
 {
