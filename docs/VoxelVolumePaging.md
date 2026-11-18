@@ -695,10 +695,16 @@ Consequences:
 - A **compressed in-memory cache** (LZMA blobs in RAM instead of in
   `./cache/map.cache`) removes only the disk read, still pays the decode, and —
   with no reuse — would rarely be hit. Small win at best, plus RAM for blobs.
+  Note the OS file cache already serves repeated reads of the cache file from
+  RAM, so the tier only saves the copy, and only for chunks read twice.
 - A **raw/decompressed memory cache** would remove the decode too, but costs
   1 MB/chunk (1 GB for 1024 chunks) and again only pays on reuse.
 - Generation (160 ms) is the expensive path and already off the hot path thanks
   to the prefetch, so cache work must be judged against 3.6 ms, not against 160 ms.
+- Volume of traffic: 52 867 page-ins × 1 MB / 197 s ≈ **270 MB/s of decompressed
+  chunk bytes**, i.e. the paging path is not a few slow outliers but a continuous
+  stream. Anything that only shaves a fraction of 3.6 ms/chunk is invisible next
+  to that; only removing a whole stage (decode, or the read) changes the budget.
 
 The decisive number is the disk/decode split, now instrumented by `cacheDiskRead`
 and `cacheLzmaDecode` (registry § 5, nested inside `cacheReadChunk`; no number

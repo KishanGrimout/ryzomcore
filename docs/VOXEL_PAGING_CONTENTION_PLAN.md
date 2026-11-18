@@ -59,10 +59,10 @@ the split was extended to page-in **work** (`pageInChunkQuery`,
 `pagerPageInQuery`, `cacheTryFillQuery`, `mapGenMakeChunkQuery`) and a per-frame
 `frameHitch` probe (gaps ≥ 100 ms, `DYNHITCH` log with the paging deltas during
 each gap) was added in `refreshLrAround` — it decides per hitch whether the stall
-is terrain work or another main-thread cost. Next: collect one
-`DYNHITCH`-instrumented session, then P4 async paging (measured target: the ~99 %
-`cacheTryFill` disk+LZMA pipeline and the continuous chunk-limit thrash) and the
-P2/P3 shard leg (H5) when the user drives a shard session.
+is terrain work or another main-thread cost. Outcome: the target class is closed
+(`docs/VoxelVolumePaging.md` § 6.7), so P4 async paging is deferred (§ P4 status
+below) and the open question is per-chunk load cost (`docs/VoxelVolumePaging.md`
+§ 6.8), plus the P2/P3 shard leg (H5) when the user drives a shard session.
 
 ## 1. Problem statement
 
@@ -287,6 +287,19 @@ Measured priority order (each still gated on its own before/after numbers):
   stats; they were write-only, so per-worker tracking preserves behavior).
 
 ### P4 — Manual/async paging (the structural change; the user's proposal)
+
+**Status (2026-11-18): not required for the plan's target — deferred, not
+abandoned.** P4's acceptance names two things: *no lock spans a `makeChunk`/file-IO
+call*, and *no movement stall on fresh-terrain entry*. The second is validated
+(`docs/VoxelVolumePaging.md` § 6.7: 197 s / 52 867 page-ins with 0 query-thread
+page-ins). The first is what P3a' already bought for the paths that matter (the
+page-in holds are measured outside the chunk lock, § 6.6). What remains is
+*throughput*, not blocking: background threads queue on each other (1 991 waits /
+13.3 s / max 380 ms in that window), which delays extraction/mesh/vegetation work
+(pop-in), never the player. Whether that is worth P4's structural cost depends on
+the per-chunk load cost, i.e. on the disk/decode split — see
+`docs/VoxelVolumePaging.md` § 6.8. Revisit P4 only if a new consumer needs page-in
+throughput (slower mesh code, larger view distance, server-side dynworld A*).
 
 - **P4a** Ryzom-side miss detection: queries use `tryGetChunk`-style probes
   (`CMapBase` layer) instead of synchronous `getChunk` page-in — per D4 semantics
