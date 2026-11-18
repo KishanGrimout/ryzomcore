@@ -4,6 +4,7 @@
 #include <thread>
 
 #include <game_share/dynworld/map.h>
+#include <game_share/dynworld/prefetch_region.h>
 #include <game_share/dynworld/voxel_paging_stats.h>
 
 // Test suite for the voxel paging instrumentation registry
@@ -614,4 +615,118 @@ TEST(DynWorldPagingStats, PageInWaitAttributionFollowsQueryRole)
 	map.getVoxelAt(TVoxelPos(3 * ChunkSide, 0, 0));
 	EXPECT_EQ(voxelPagingStats().pageInChunk.m_count.load(), workTotal + 2);
 	EXPECT_EQ(voxelPagingStats().pageInChunkQuery.m_count.load(), workQuery + 1);
+}
+
+// Hot-region math (docs/VoxelVolumePaging.md § 6.7): the prefetch box is
+// dragged along the hot point's velocity, but the lead is clamped inside the
+// box so a sprint spike or a teleport cannot fling the prefetch across the
+// world and evict the hot set.
+TEST(DynWorldPagingRegion, LeadIsClampedToTheBoxHalfSize)
+{
+	const NLMISC::CVector halfSize(25.f, 25.f, 25.f);
+
+	// no velocity: the box is centred on the position
+	const TRegion centred = makePrefetchRegion(NLMISC::CVector(100.f, 50.f, 10.f), NLMISC::CVector::Null, halfSize, 0.5f);
+	EXPECT_EQ(150, centred.getLowerX());
+	EXPECT_EQ(250, centred.getUpperX());
+	EXPECT_EQ(50, centred.getLowerY());
+	EXPECT_EQ(150, centred.getUpperY());
+	EXPECT_EQ(-30, centred.getLowerZ());
+	EXPECT_EQ(70, centred.getUpperZ());
+
+	// walking speed (3 m/s, 0.5 s): the box moves 1.5 m downrange
+	const TRegion walked = makePrefetchRegion(NLMISC::CVector(100.f, 50.f, 10.f), NLMISC::CVector(3.f, 0.f, 0.f), halfSize, 0.5f);
+	EXPECT_EQ(153, walked.getLowerX());
+	EXPECT_EQ(253, walked.getUpperX());
+
+	// 100 m/s spike: the lead is clamped to the half-size (25 m), not 50 m
+	const TRegion spiked = makePrefetchRegion(NLMISC::CVector(100.f, 50.f, 10.f), NLMISC::CVector(100.f, 0.f, 0.f), halfSize, 0.5f);
+	EXPECT_EQ(200, spiked.getLowerX());
+	EXPECT_EQ(300, spiked.getUpperX());
+
+	// negative velocity is clamped symmetrically
+	const TRegion reversed = makePrefetchRegion(NLMISC::CVector(100.f, 50.f, 10.f), NLMISC::CVector(-100.f, 0.f, 0.f), halfSize, 0.5f);
+	EXPECT_EQ(100, reversed.getLowerX());
+	EXPECT_EQ(200, reversed.getUpperX());
+}
+
+// Two hot points at most one chunk apart share a single prefetch pass (their
+// union); farther apart they are independent (so one cannot starve the other).
+TEST(DynWorldPagingRegion, NearAndUnionHelpers)
+{
+	const TRegion a(0, 0, 0, 64, 64, 64);
+	const TRegion adjacent(128, 0, 0, 192, 64, 64); // exactly one chunk away
+	const TRegion apart(200, 0, 0, 264, 64, 64);    // more than one chunk away
+
+	EXPECT_TRUE(prefetchRegionsNear(a, adjacent, PrefetchMergeMarginVoxels));
+	EXPECT_FALSE(prefetchRegionsNear(a, apart, PrefetchMergeMarginVoxels));
+	// overlap is trivially near
+	EXPECT_TRUE(prefetchRegionsNear(a, TRegion(32, 0, 0, 96, 64, 64), 0));
+
+	const TRegion merged = prefetchUnion(a, adjacent);
+	EXPECT_EQ(0, merged.getLowerX());
+	EXPECT_EQ(192, merged.getUpperX());
+	EXPECT_EQ(0, merged.getLowerY());
+	EXPECT_EQ(64, merged.getUpperY());
+	EXPECT_EQ(0, merged.getLowerZ());
+	EXPECT_EQ(64, merged.getUpperZ());
+}
+
+// Camera and player are independent hot points: the player position (collision
+// queries) can be far from the camera, and a single latest-wins region would
+// let the second request replace the first, leaving one of them never
+// prefetched. Both slots must be served.
+TEST(DynWorldPagingStats, PrefetchTwoSlotsDoNotStarveEachOther)
+{
+	CSleepPager pager;
+	CMapBase map;
+	map.initMap(&pager, 64ull * 1024 * 1024);
+
+	const TLoadingSector::TId cameraSector = TLoadingSector::s_posToId(3, 0, 0);
+	const TLoadingSector::TId playerSector = TLoadingSector::s_posToId(20, 0, 0);
+	TRegion cameraRegion, playerRegion;
+	TLoadingSector::getRegion(cameraSector, cameraRegion);
+	TLoadingSector::getRegion(playerSector, playerRegion);
+
+	map.prefetchRegionAsync(cameraRegion, CMapBase::PrefetchSlotCamera);
+	map.prefetchRegionAsync(playerRegion, CMapBase::PrefetchSlotPlayer);
+
+	bool cameraDone = false, playerDone = false;
+	for (uint i = 0; i < 500 && !(cameraDone && playerDone); ++i)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		cameraDone = map.isSectorLoaded(cameraSector) == PolyVox::RegionStatus::Available;
+		playerDone = map.isSectorLoaded(playerSector) == PolyVox::RegionStatus::Available;
+	}
+	EXPECT_TRUE(cameraDone) << "the camera hot point must be prefetched";
+	EXPECT_TRUE(playerDone) << "the player hot point must be prefetched even when requested after the camera";
+}
+
+// Near hot points (third-person camera right behind the player) are merged:
+// both ends of the union must end paged in.
+TEST(DynWorldPagingStats, PrefetchMergesNearbyHotPoints)
+{
+	CSleepPager pager;
+	CMapBase map;
+	map.initMap(&pager, 64ull * 1024 * 1024);
+
+	const TLoadingSector::TId cameraSector = TLoadingSector::s_posToId(3, 0, 0);
+	const TLoadingSector::TId playerSector = TLoadingSector::s_posToId(4, 0, 0);
+	TRegion cameraRegion, playerRegion;
+	TLoadingSector::getRegion(cameraSector, cameraRegion);
+	TLoadingSector::getRegion(playerSector, playerRegion);
+	ASSERT_TRUE(prefetchRegionsNear(cameraRegion, playerRegion, PrefetchMergeMarginVoxels));
+
+	map.prefetchRegionAsync(cameraRegion, CMapBase::PrefetchSlotCamera);
+	map.prefetchRegionAsync(playerRegion, CMapBase::PrefetchSlotPlayer);
+
+	bool cameraDone = false, playerDone = false;
+	for (uint i = 0; i < 500 && !(cameraDone && playerDone); ++i)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		cameraDone = map.isSectorLoaded(cameraSector) == PolyVox::RegionStatus::Available;
+		playerDone = map.isSectorLoaded(playerSector) == PolyVox::RegionStatus::Available;
+	}
+	EXPECT_TRUE(cameraDone) << "the merged prefetch must cover the camera hot point";
+	EXPECT_TRUE(playerDone) << "the merged prefetch must cover the player hot point";
 }

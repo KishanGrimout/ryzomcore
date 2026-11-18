@@ -18,6 +18,7 @@
 
 #include "game_share/dynworld/map.h"
 #include "game_share/dynworld/map_sector.h"
+#include "game_share/dynworld/prefetch_region.h"
 #include "game_share/dynworld/voxel_paging_stats.h"
 
 #include "nel/misc/async_file_manager.h"
@@ -52,15 +53,108 @@ bool g_forceRegenerate = false;
 // traceSegment). The radius is clamped to the hot box: callers pass the
 // static-PACS streaming radius (400 m), far beyond what the voxel cache should
 // ever hold.
-static TRegion s_hotRegionAround(const CVector &position)
+//
+// The box is dragged along the hot point's velocity so the prefetcher starts on
+// the chunks it is heading towards: a chunk absent entirely is generated
+// synchronously (~145 ms average, ~400 ms worst) by whichever query touches it
+// first, and without a lead the prefetch trails the player by exactly the
+// generation time. The lead is clamped inside the box by makePrefetchRegion, so
+// a teleport can never fling the prefetch across the world.
+static const float kPrefetchLeadSeconds = 0.5f;
+// Velocity smoothing time constant (s): short enough to follow a turn, long
+// enough that single-frame jitter does not swing the lead around.
+static const float kPrefetchVelocityTauSeconds = 0.25f;
+// Player requests are throttled: the collision service calls its entry points
+// several times per tick, the prefetch only needs a fresh target now and then.
+static const float kPlayerPrefetchIntervalSeconds = 0.1f;
+// Above this speed the displacement is a teleport / sector change, not motion:
+// drop the estimate instead of leading the prefetch somewhere unrelated.
+static const float kPrefetchMaxSpeedMps = 50.f;
+
+// Smoothed velocity of one hot point (camera or player). Positions are world
+// meters; the clock is the caller's (the camera moves with the render loop, the
+// player with the movement service).
+struct SHotPointTracker
 {
-	CVectorD lo = position - g_prefetchBound;
-	CVectorD hi = position + g_prefetchBound;
-	lo *= TLoadingSector::InvVoxelSize;
-	hi *= TLoadingSector::InvVoxelSize;
-	return TRegion(
-		(sint32)floor(lo.x), (sint32)floor(lo.y), (sint32)floor(lo.z),
-		(sint32)floor(hi.x), (sint32)floor(hi.y), (sint32)floor(hi.z));
+	NLMISC::CVector m_lastPosition;
+	NLMISC::CVector m_velocity;
+	NLMISC::TTicks m_lastTime;
+	bool m_valid;
+
+	SHotPointTracker()
+		: m_lastPosition(NLMISC::CVector::Null)
+		, m_velocity(NLMISC::CVector::Null)
+		, m_lastTime(0)
+		, m_valid(false)
+	{}
+
+	NLMISC::CVector update(const NLMISC::CVector &position, NLMISC::TTicks now)
+	{
+		if (m_valid && now > m_lastTime)
+		{
+			const float dt = (float)NLMISC::CTime::ticksToSecond(now - m_lastTime);
+			if (dt > 0.f && dt < 1.f)
+			{
+				const NLMISC::CVector instantaneous = (position - m_lastPosition) * (1.f / dt);
+				if (instantaneous.norm() > kPrefetchMaxSpeedMps)
+					m_velocity = NLMISC::CVector::Null;
+				else
+				{
+					// exponential smoothing, weight of the new sample follows dt
+					const float alpha = std::exp(-dt / kPrefetchVelocityTauSeconds);
+					m_velocity = m_velocity * alpha + instantaneous * (1.f - alpha);
+				}
+			}
+			else
+			{
+				// first update after a long gap: no usable dt
+				m_velocity = NLMISC::CVector::Null;
+			}
+		}
+		m_lastPosition = position;
+		m_lastTime = now;
+		m_valid = true;
+		return m_velocity;
+	}
+};
+
+static TRegion s_hotRegionAround(const CVector &position, const CVector &velocity)
+{
+	return makePrefetchRegion(position, velocity, g_prefetchBound, kPrefetchLeadSeconds);
+}
+
+// Player hot point: movement/collision queries run at the *player* position,
+// which can sit far from the camera (zoom-out, free look). Requested from the
+// collision entry points themselves, which already receive the UGlobalPosition
+// (no client-side edit needed). Skipped for an unknown sector frame (tests,
+// teleporting entities), and throttled since these entry points run several
+// times per tick.
+static void s_prefetchPlayerHotPoint(CMapBase *map, const UGlobalPosition &startPos)
+{
+	if (map == NULL || startPos.InstanceId == TLoadingSector::InvalidId)
+		return;
+
+	static thread_local SHotPointTracker s_playerTracker;
+	static thread_local NLMISC::TTicks s_lastRequest = 0;
+
+	const NLMISC::TTicks now = NLMISC::CTime::getPerformanceTime();
+	if (s_lastRequest != 0)
+	{
+		const float elapsed = (float)NLMISC::CTime::ticksToSecond(now - s_lastRequest);
+		if (elapsed >= 0.f && elapsed < kPlayerPrefetchIntervalSeconds)
+			return;
+	}
+	s_lastRequest = now;
+
+	// the Estimation is SECTOR-LOCAL; convert to the world-meters frame the
+	// camera position and the region math use
+	const NLMISC::CVectorD world = map->getDoubleGlobalPosition(startPos.InstanceId, startPos.LocalPosition.Estimation);
+	const NLMISC::CVector meters((float)world.x, (float)world.y, (float)world.z);
+	if (!std::isfinite(meters.x) || !std::isfinite(meters.y) || !std::isfinite(meters.z))
+		return;
+
+	const NLMISC::CVector velocity = s_playerTracker.update(meters, now);
+	map->prefetchRegionAsync(s_hotRegionAround(meters, velocity), CMapBase::PrefetchSlotPlayer);
 }
 
 void CDynGlobalRetriever::refreshLrAroundNow(const CVector &position, float radius)
@@ -95,7 +189,7 @@ void CDynGlobalRetriever::refreshLrAroundMax(const CVector &position, float radi
 	// async latest-wins prefetcher instead.
 	(void)radius;
 	(void)maxEmerge;
-	m_map->prefetchRegion(s_hotRegionAround(position));
+	m_map->prefetchRegion(s_hotRegionAround(position, CVector::Null));
 }
 
 bool g_refresh = true;
@@ -156,8 +250,12 @@ void CDynGlobalRetriever::refreshLrAround(const CVector &position, float radius)
 	if (g_refresh)
 	{
 		// P4-lite: per-frame path — async, latest-wins (never blocks the main
-		// loop; a query that outruns the prefetcher still blocks, D4)
-		m_map->prefetchRegionAsync(s_hotRegionAround(position));
+		// loop; a query that outruns the prefetcher still blocks, D4). The box
+		// is led by the camera's smoothed velocity; the player hot point is
+		// requested from the collision entry points into the other slot.
+		static thread_local SHotPointTracker s_cameraTracker;
+		const CVector cameraVelocity = s_cameraTracker.update(position, NLMISC::CTime::getPerformanceTime());
+		m_map->prefetchRegionAsync(s_hotRegionAround(position, cameraVelocity), CMapBase::PrefetchSlotCamera);
 	}
 	return;
 
@@ -524,6 +622,10 @@ UGlobalPosition CDynGlobalRetriever::doMove(const UGlobalPosition &startPos, con
 	UGlobalPosition endPos(startPos);
 	endPos.LocalPosition.Estimation = start + delta * t;
 
+	// prefetch the player hot point (docs/VoxelVolumePaging.md § 6.7: the
+	// camera can sit behind/far from the player)
+	s_prefetchPlayerHotPoint(m_map, startPos);
+
 	float startHeight = getMeanHeight(startPos);
 	float endHeight = getMeanHeight(endPos);
 
@@ -774,6 +876,10 @@ const TCollisionSurfaceDescVector* CDynGlobalRetriever::testCylinderMove(const U
 	// (the body is swept as a few sample points above the feet, not a true
 	// cylinder; a span-based approximation was the plan's step 2)
 	cst.CollisionDescs.clear();
+
+	// prefetch the player hot point (docs/VoxelVolumePaging.md § 6.7: the
+	// camera can sit behind/far from the player)
+	s_prefetchPlayerHotPoint(m_map, startPos);
 
 	const CVector &start = startPos.LocalPosition.Estimation;
 

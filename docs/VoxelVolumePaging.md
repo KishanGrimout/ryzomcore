@@ -432,18 +432,18 @@ prefetch kept the camera neighborhood warm, which is why cursor-raycast reads lo
 smooth while movement occasionally hitched.
 
 Fix (dynworld-owned):
-- `CMapBase::prefetchRegionAsync(region)` — a latest-wins async prefetch worker
-  (one thread per map, created in `initMap`, joined first thing in `~CMapBase`
-  before the volume dies). The worker calls `m_volume->prefetch(region)`;
-  requests overwrite a pending slot so per-frame callers cannot queue up work.
-  `prefetchRegion(region)` is the synchronous flavor (blocking load-time calls).
+- `CMapBase::prefetchRegionAsync(region, slot)` — a latest-wins async prefetch
+  worker (one thread per map, created in `initMap`, joined first thing in
+  `~CMapBase` before the volume dies). The worker calls
+  `m_volume->prefetch(region)`; requests overwrite their pending slot so
+  per-frame callers cannot queue up work. `prefetchRegion(region)` is the
+  synchronous flavor (blocking load-time calls).
 - `CDynGlobalRetriever::refreshLrAround` (called every main-loop frame with the
   camera position) now feeds the async worker; `refreshLrAroundNow` (continent
   init under the progress bar) uses the synchronous prefetch. Region: the tuned
   `g_prefetchBound` (25 m) box in global voxel coords — the caller's radius
   (static-PACS streaming radius, 400 m) is deliberately ignored, it would thrash
-  the 1024-chunk volume limit. Coverage is camera-centred only; covering the
-  player/collision position as well is tracked in the plan.
+  the 1024-chunk volume limit.
 - Semantics unchanged (D4): queries still block synchronously when they outrun
   the prefetcher; the prefetch only makes that rare (walk speed ≈ 3 voxels/s vs
   165 ms generation per 64-voxel chunk).
@@ -451,6 +451,52 @@ Fix (dynworld-owned):
 Regression test: `PrefetchRegionAsyncPagesInBackground` — the async call returns
 without blocking on the pager, the region becomes `Available` on the worker, and
 back-to-back (latest-wins) requests still complete.
+
+**Two hot points + directional lead** (2026-11-18, after the first attributed
+hitch). Two findings drove this:
+
+1. *Coverage*: the hot box was camera-centred only, but the collision queries a
+   hitch waits on run at the **player** position, which can be far from the
+   camera (zoom-out, free look), and camera collisions query the volume too. One
+   box served neither reliably.
+2. *Timing*: a chunk that is absent entirely is generated **synchronously** by
+   whichever query touches it first (~145 ms average, up to ~400 ms) — no wait
+   is paid, so the earlier fix did not cover it, and a camera-centred box sitting
+   on the player still trails the player by one generation time.
+
+Design (`map.h` `EPrefetchSlot`, `prefetch_region.h`, `dyn_global_retriever.cpp`):
+
+- **Two independent slots** in the worker (`PrefetchSlotCamera`,
+  `PrefetchSlotPlayer`), each latest-wins. Both pending regions are taken per
+  round, so a request for one hot point can never replace the other's.
+- **Merge when near**: if the two regions are within `PrefetchMergeMarginVoxels`
+  (one chunk = 64 voxels = 32 m) of each other, the worker pages in
+  `prefetchUnion` once instead of two near-identical passes (the usual
+  third-person case, camera a few metres behind the player).
+- **Directional lead** (`makePrefetchRegion`): the box is shifted along the hot
+  point's smoothed velocity × `kPrefetchLeadSeconds` (0.5 s ≈ the order of one
+  generation), clamped per axis to the box half-size so a sprint spike or a
+  teleport cannot fling the prefetch across the world and evict the hot set.
+  Velocity is an exponential estimate (τ = 0.25 s) from consecutive positions;
+  speeds above 50 m/s (teleport, sector change) reset it instead of leading.
+- **Player request site**: `s_prefetchPlayerHotPoint` is called at the top of
+  `testCylinderMove` and `doMove`, which already receive the
+  `UGlobalPosition` — no shared client code touched. It converts the
+  sector-local estimation with `getDoubleGlobalPosition` (world meters, the
+  camera frame), is throttled to ~100 ms (the collision service calls these
+  several times per tick), and is skipped for `InstanceId == InvalidId`
+  (unknown sector frame: test worlds, teleporting entities).
+
+Regression tests: `PrefetchTwoSlotsDoNotStarveEachOther` (camera and player far
+apart: both paged), `PrefetchMergesNearbyHotPoints`, and the region math
+(`LeadIsClampedToTheBoxHalfSize`, `NearAndUnionHelpers`).
+
+Measurement plan (pending an in-game session): the target class is the
+`DYNHITCH` line with `freshGen>=1 (on query thread>=1)`; with the lead and the
+player slot those should disappear, while `pageInWaitChunkQuery` and
+`pageInChunkQuery` stay ~0. A `DYNQPAGEIN` region that is now adjacent to the
+player (not the camera) means the player slot is still being outrun — check the
+lead against the local generation cost before widening `g_prefetchBound`.
 
 **Movement-wait attribution** (added 2026-11-18, before accepting the prefetch as a
 hitch fix). `pageInWaitChunk` alone cannot tell a user-visible hitch from a

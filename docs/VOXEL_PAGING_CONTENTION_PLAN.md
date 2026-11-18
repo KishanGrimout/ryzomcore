@@ -243,19 +243,18 @@ Measured priority order (each still gated on its own before/after numbers):
     Optional follow-up if it recurs: give the prefetch a lead along the movement
     direction so heavy chunks are generated ahead of arrival. P3e-2 is otherwise
     validated; next is P4 async paging and the shard leg (H5).
-  - **Prefetch coverage — camera vs player (decision note 2026-11-18)**: the hot
-    box is currently centred on the *camera* (`View.refinePos`), because that is
-    the position the per-frame PACS hook receives. That is not enough: camera
-    collisions query the same volume, and the camera can sit behind the player
-    and be far from it (zoom-out, free look), while the movement/collision
-    queries run at the *player* position. The prefetch must cover **both** hot
-    points, each with its own directional lead (player motion for entity
-    collisions, camera motion for camera collisions). The player position is
-    already available inside `testCylinderMove`/`doMove` (the `UGlobalPosition`
-    they receive), so the second region can be requested from dynworld code with
-    no shared-client-code edit; the latest-wins worker then needs two pending
-    slots (or a union of the two boxes when they are close) so one request does
-    not starve the other. To be implemented with the directional lead.
+  - **Prefetch coverage — camera vs player (decision 2026-11-18, implemented)**:
+    the hot box was centred on the *camera* (`View.refinePos`), the position the
+    per-frame PACS hook receives. That was not enough: camera collisions query
+    the same volume, and the camera can sit behind the player and far from it
+    (zoom-out, free look), while the movement/collision queries run at the
+    *player* position. The prefetch now covers **both** hot points, each with its
+    own directional lead (camera motion / player motion), through two
+    latest-wins slots in the worker (`EPrefetchSlot`), merged into one union pass
+    when the two regions are within one chunk. The player region is requested
+    from inside `testCylinderMove`/`doMove` (they already receive the
+    `UGlobalPosition`), so no shared-client-code edit was needed. Knowledge:
+    `docs/VoxelVolumePaging.md` § 6.7 ("Two hot points + directional lead").
   - Region-batching at the call sites (`traceSegment`/`castRay`/extraction
     loops) is **deferred**: after P3e-1 the per-voxel cost is lock round-trips,
     not lookups; re-evaluate only if a new profile shows it dominating.

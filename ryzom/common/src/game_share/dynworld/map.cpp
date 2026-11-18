@@ -21,6 +21,7 @@
 #include "nel/misc/aabbox.h"
 #include "game_share/dynworld/cast_collector.h"
 #include "game_share/dynworld/marching_controller.h"
+#include "game_share/dynworld/prefetch_region.h"
 #include "game_share/dynworld/voxel_paging_stats.h"
 
 #include <limits>
@@ -50,12 +51,17 @@ CMapBase::~CMapBase()
 // prefetch. One worker thread pages pending regions in so movement/collision
 // queries find their chunks already paged; a query that outruns the prefetcher
 // still blocks synchronously (D4 amendment: collision queries always block).
+//
+// Two slots (camera and player hot points) so neither starves the other; when
+// they are close (third-person view) the worker pages in their union once.
 class CMapBase::CPrefetchWorker
 {
 public:
 	explicit CPrefetchWorker(CMapBase* map)
-		: m_map(map), m_quit(false), m_hasRequest(false)
+		: m_map(map), m_quit(false)
 	{
+		for (sint32 slot = 0; slot < CMapBase::PrefetchSlotCount; ++slot)
+			m_hasRequest[slot] = false;
 		m_thread = std::thread(&CPrefetchWorker::run, this);
 	}
 
@@ -70,34 +76,69 @@ public:
 			m_thread.join();
 	}
 
-	void request(const TRegion& region)
+	void request(const TRegion& region, CMapBase::EPrefetchSlot slot)
 	{
 		{
 			std::unique_lock<std::mutex> lock(m_mutex);
-			m_pendingRegion = region;
-			m_hasRequest = true;
+			m_pendingRegion[slot] = region;
+			m_hasRequest[slot] = true;
 		}
 		m_cv.notify_one();
 	}
 
 private:
+	bool anyRequest() const
+	{
+		for (sint32 slot = 0; slot < CMapBase::PrefetchSlotCount; ++slot)
+			if (m_hasRequest[slot])
+				return true;
+		return false;
+	}
+
+	// runs with m_mutex released (paging can take seconds)
+	void prefetchPending(const TRegion region[CMapBase::PrefetchSlotCount], const bool has[CMapBase::PrefetchSlotCount])
+	{
+		if (m_map->m_volume == NULL)
+			return;
+
+		// near hot points (camera close to the player, third-person view): one
+		// pass over the union instead of two near-identical passes
+		if (has[CMapBase::PrefetchSlotCamera] && has[CMapBase::PrefetchSlotPlayer]
+			&& prefetchRegionsNear(region[CMapBase::PrefetchSlotCamera], region[CMapBase::PrefetchSlotPlayer], PrefetchMergeMarginVoxels))
+		{
+			m_map->m_volume->prefetch(prefetchUnion(region[CMapBase::PrefetchSlotCamera], region[CMapBase::PrefetchSlotPlayer]));
+			return;
+		}
+
+		// player first: it is the hot point movement/collision queries wait on
+		if (has[CMapBase::PrefetchSlotPlayer])
+			m_map->m_volume->prefetch(region[CMapBase::PrefetchSlotPlayer]);
+		if (has[CMapBase::PrefetchSlotCamera])
+			m_map->m_volume->prefetch(region[CMapBase::PrefetchSlotCamera]);
+	}
+
 	void run()
 	{
 		std::unique_lock<std::mutex> lock(m_mutex);
 		while (true)
 		{
-			m_cv.wait(lock, [this] { return m_quit || m_hasRequest; });
+			m_cv.wait(lock, [this] { return m_quit || anyRequest(); });
 			if (m_quit)
 				return;
 
-			// take the latest pending region, release the lock while paging
-			// (a request arriving meanwhile accumulates for the next round)
-			TRegion region = m_pendingRegion;
-			m_hasRequest = false;
+			// take every pending region, release the lock while paging
+			// (requests arriving meanwhile accumulate for the next round)
+			TRegion region[CMapBase::PrefetchSlotCount];
+			bool has[CMapBase::PrefetchSlotCount];
+			for (sint32 slot = 0; slot < CMapBase::PrefetchSlotCount; ++slot)
+			{
+				region[slot] = m_pendingRegion[slot];
+				has[slot] = m_hasRequest[slot];
+				m_hasRequest[slot] = false;
+			}
 			lock.unlock();
 
-			if (m_map->m_volume != NULL)
-				m_map->m_volume->prefetch(region);
+			prefetchPending(region, has);
 
 			lock.lock();
 		}
@@ -107,9 +148,9 @@ private:
 	std::thread m_thread;
 	std::mutex m_mutex;
 	std::condition_variable m_cv;
-	TRegion m_pendingRegion;
+	TRegion m_pendingRegion[CMapBase::PrefetchSlotCount];
 	bool m_quit;
-	bool m_hasRequest;
+	bool m_hasRequest[CMapBase::PrefetchSlotCount];
 };
 
 void CMapBase::initMap(TPager* pager, uint64 memoryLimit)
@@ -126,7 +167,7 @@ void CMapBase::prefetchRegion(const TRegion& region)
 	m_volume->prefetch(region);
 }
 
-void CMapBase::prefetchRegionAsync(const TRegion& region)
+void CMapBase::prefetchRegionAsync(const TRegion& region, EPrefetchSlot slot)
 {
 	if (m_volume == NULL)
 		return;
@@ -136,7 +177,7 @@ void CMapBase::prefetchRegionAsync(const TRegion& region)
 		prefetchRegion(region);
 		return;
 	}
-	m_prefetchWorker->request(region);
+	m_prefetchWorker->request(region, slot);
 }
 
 SectorStatus CMapBase::isSectorLoaded(TLoadingSector::TId sectorIndex) const

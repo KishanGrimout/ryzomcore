@@ -75,7 +75,20 @@ public:
 	// P4-lite movement prefetch (docs/VoxelVolumePaging.md § 6.7): page the
 	// region in on a background worker, latest request wins. Best-effort only:
 	// a query that outruns the prefetcher still blocks synchronously (D4).
-	void prefetchRegionAsync(const TRegion& region);
+	//
+	// Two hot points are tracked in independent slots: the camera and the player
+	// query the same volume (camera collisions vs entity collisions) and the
+	// camera can sit behind and far from the player, so a single latest-wins
+	// region would let one of them starve the other. The worker pages each
+	// pending slot, and merges the two regions into one pass when they are close.
+	enum EPrefetchSlot
+	{
+		PrefetchSlotCamera = 0,
+		PrefetchSlotPlayer = 1,
+		PrefetchSlotCount = 2
+	};
+
+	void prefetchRegionAsync(const TRegion& region, EPrefetchSlot slot = PrefetchSlotCamera);
 
 	// synchronous counterpart (refreshLrAroundNow / initial loads): blocks
 	// until every chunk of the region is paged in
