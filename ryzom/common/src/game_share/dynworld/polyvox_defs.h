@@ -20,9 +20,13 @@
 // Disable PIX profiling (Windows Performance Analyzer SDK) as per integration rules
 #ifndef PIX_COLOR_DEFAULT
 #define PIX_COLOR_DEFAULT 0
-#define PIXBeginEvent(color, name) do {} while(0)
-#define PIXEndEvent() do {} while(0)
-#define PIXScopedEvent(color, name) do {} while(0)
+// P1 instrumentation (docs/VoxelVolumePaging.md § 5): the PolyVox event sites in
+// PagedVolume.inl are driven through these macros, wired to the voxel paging stats
+// registry instead of PIX. The sites run at per-page-in frequency (never per voxel).
+#include "voxel_paging_stats.h"
+#define PIXBeginEvent(color, name) voxelPagingPix().beginEvent(name)
+#define PIXEndEvent() voxelPagingPix().endEvent()
+#define PIXScopedEvent(color, name) CVoxelPagingPixScope pixScopedEvent(name)
 #endif
 
 #include <PolyVox/PagedVolume.h>
@@ -92,21 +96,32 @@ public:
 	virtual void dirtyCache();
 
 private:
-	// Storing these properties individually has proved to be faster than keeping
-	// them in a Vector3DInt32 as it avoids constructions and comparison overheads.
-	// They are also at the start of the class in the hope that they will be pulled
-	// into cache - I've got no idea if this actually makes a difference.
+	// P3e (docs/VoxelVolumePaging.md § 6.7): the single-slot TLS cache was
+	// defeated by any sweep that alternates chunks (DDA collision sweeps,
+	// marching-cubes samplers) - every voxel read then fell through to
+	// getChunk's internal-lock lookup (33-56 M lookups per session, F4).
+	// Direct-mapped 32-slot TLS cache keyed by chunk coordinates: chunk-space
+	// neighbors (+/-1 on one axis) always map to different slots because the
+	// hash constants are odd, so boundary-crossing sweeps keep all their
+	// working slots warm.
+	static const uint32_t CacheSlotCount = 32;
+	static const uint32_t CacheSlotMask = CacheSlotCount - 1;
 	thread_local static struct CacheData
 	{
-		int32_t m_v3dLastAccessedChunkX{ 0 };
-		int32_t m_v3dLastAccessedChunkY{ 0 };
-		int32_t m_v3dLastAccessedChunkZ{ 0 };
-		std::weak_ptr<TVolume::Chunk> m_pLastAccessedChunk;
-		const void* m_pVolume{ nullptr };
+		struct Slot
+		{
+			const void* m_pVolume{ nullptr };
+			int32_t m_chunkX{ 0 };
+			int32_t m_chunkY{ 0 };
+			int32_t m_chunkZ{ 0 };
+			std::weak_ptr<TVolume::Chunk> m_pChunk;
+		};
+		Slot m_slots[CacheSlotCount];
 	} *mtls_cacheData;
 
 	CacheData& getCacheData();
 	const CacheData& getCacheData() const;
+	static uint32_t slotIndex(int32_t iChunkX, int32_t iChunkY, int32_t iChunkZ);
 };
 
 inline const PolyVox::Vector3DInt32& ToPolyVoxVectorI(const NLMISC::CVectorI& in)

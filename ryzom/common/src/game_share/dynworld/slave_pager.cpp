@@ -19,6 +19,7 @@
 #include "game_share/dynworld/map.h"
 #include "game_share/dynworld/map_cache_manager.h"
 #include "game_share/dynworld/mapgen/mapgen.h"
+#include "game_share/dynworld/voxel_paging_stats.h"
 
 #include "seven_zip/7zCrc.h"
 
@@ -39,23 +40,56 @@ bool g_saveSectors = true;
 bool g_loadFromCache = true;
 void CSlavePager::pageIn(const TRegion& region, TVolume::Chunk* pChunk)
 {
+	// VPI: total pageIn (runs under the chunk write lock, see VoxelVolumePaging §3)
+	CVoxelPagingStatScope pageInScope(voxelPagingStats().pagerPageIn);
+
 	SectorMetadata infos;
-	if (g_loadFromCache && !CMapCacheManager::instance().tryFillRegion(region, pChunk, infos))
+	bool filledFromCache = false;
+	if (g_loadFromCache)
+	{
+		CVoxelPagingStatScope tryFillScope(voxelPagingStats().cacheTryFill);
+		filledFromCache = CMapCacheManager::instance().tryFillRegion(region, pChunk, infos);
+	}
+
+	if (!filledFromCache)
 	{
 		nlassert(pChunk != nullptr);
 		CBlockMakeData makeData(region, *pChunk);
-		m_mapgen->makeChunk(makeData);
+		{
+			CVoxelPagingStatScope makeScope(voxelPagingStats().mapGenMakeChunk);
+			m_mapgen->makeChunk(makeData);
+		}
 
 		infos.m_contentState = makeData.m_isEmpty ? SectorMetadata::IsEmpty : (makeData.m_isFull ? SectorMetadata::IsFull : SectorMetadata::IsHeterogeneous);
 		infos.m_contentState |= (makeData.m_hasObjects ? SectorMetadata::HasObjects : 0);
 		infos.m_revision = 0;
 
 		if (g_saveSectors)
+		{
+			// synchronous part only (data copy + db insert); compression runs deferred
+			CVoxelPagingStatScope saveScope(voxelPagingStats().cacheSaveCall);
 			CMapCacheManager::instance().saveRegionToCache(region, pChunk, infos);
+		}
+	}
+
+	// DYNHITCH attribution (docs/VoxelVolumePaging.md § 6.7): a page-in
+	// performed on a movement/collision query thread is either prefetch lag
+	// (the chunk is next to the player) or a wrong-position lookup (the chunk
+	// is far away). Log the region; the DYNHITCH line carries the camera
+	// position at the same instant, so the distance can be compared.
+	if (voxelPagingRole() == EVoxelPagingRole::Query)
+	{
+		nlwarning("DYNQPAGEIN: page-in performed on the query thread: region v=(%d,%d,%d)-(%d,%d,%d) source=%s",
+			region.getLowerX(), region.getLowerY(), region.getLowerZ(),
+			region.getUpperX(), region.getUpperY(), region.getUpperZ(),
+			filledFromCache ? "cache" : "generated");
 	}
 
 	// notify the map
-	m_map.regionPagedIn(region, pChunk, infos);
+	{
+		CVoxelPagingStatScope notifyScope(voxelPagingStats().regionPagedIn);
+		m_map.regionPagedIn(region, pChunk, infos);
+	}
 }
 
 void CSlavePager::pageOut(const TRegion& region, TVolume::Chunk* pChunk)

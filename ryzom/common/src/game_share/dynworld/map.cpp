@@ -21,8 +21,12 @@
 #include "nel/misc/aabbox.h"
 #include "game_share/dynworld/cast_collector.h"
 #include "game_share/dynworld/marching_controller.h"
+#include "game_share/dynworld/voxel_paging_stats.h"
 
 #include <limits>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 #include <PolyVox/Raycast.h>
 
 using namespace NLMISC;
@@ -30,19 +34,109 @@ using namespace NLMISC;
 CMapBase::CMapBase()
 	: m_volume(NULL)
 {
-	
+
 }
 
 CMapBase::~CMapBase()
 {
+	// join the prefetch worker BEFORE the volume dies (it dereferences it)
+	m_prefetchWorker.reset();
 	nlassert(m_loadedSectors.empty());
 	delete m_volume;
 	m_volume = NULL;
 }
 
+// P4-lite (docs/VoxelVolumePaging.md § 6.7): async, latest-wins region
+// prefetch. One worker thread pages pending regions in so movement/collision
+// queries find their chunks already paged; a query that outruns the prefetcher
+// still blocks synchronously (D4 amendment: collision queries always block).
+class CMapBase::CPrefetchWorker
+{
+public:
+	explicit CPrefetchWorker(CMapBase* map)
+		: m_map(map), m_quit(false), m_hasRequest(false)
+	{
+		m_thread = std::thread(&CPrefetchWorker::run, this);
+	}
+
+	~CPrefetchWorker()
+	{
+		{
+			std::unique_lock<std::mutex> lock(m_mutex);
+			m_quit = true;
+		}
+		m_cv.notify_all();
+		if (m_thread.joinable())
+			m_thread.join();
+	}
+
+	void request(const TRegion& region)
+	{
+		{
+			std::unique_lock<std::mutex> lock(m_mutex);
+			m_pendingRegion = region;
+			m_hasRequest = true;
+		}
+		m_cv.notify_one();
+	}
+
+private:
+	void run()
+	{
+		std::unique_lock<std::mutex> lock(m_mutex);
+		while (true)
+		{
+			m_cv.wait(lock, [this] { return m_quit || m_hasRequest; });
+			if (m_quit)
+				return;
+
+			// take the latest pending region, release the lock while paging
+			// (a request arriving meanwhile accumulates for the next round)
+			TRegion region = m_pendingRegion;
+			m_hasRequest = false;
+			lock.unlock();
+
+			if (m_map->m_volume != NULL)
+				m_map->m_volume->prefetch(region);
+
+			lock.lock();
+		}
+	}
+
+	CMapBase* m_map;
+	std::thread m_thread;
+	std::mutex m_mutex;
+	std::condition_variable m_cv;
+	TRegion m_pendingRegion;
+	bool m_quit;
+	bool m_hasRequest;
+};
+
 void CMapBase::initMap(TPager* pager, uint64 memoryLimit)
 {
 	m_volume = new TVolume(pager, memoryLimit, 64, new MultiThreadChunkCache);
+	if (m_prefetchWorker == NULL)
+		m_prefetchWorker.reset(new CPrefetchWorker(this));
+}
+
+void CMapBase::prefetchRegion(const TRegion& region)
+{
+	if (m_volume == NULL)
+		return;
+	m_volume->prefetch(region);
+}
+
+void CMapBase::prefetchRegionAsync(const TRegion& region)
+{
+	if (m_volume == NULL)
+		return;
+	if (m_prefetchWorker == NULL)
+	{
+		// no worker (initMap not called?): fall back to synchronous
+		prefetchRegion(region);
+		return;
+	}
+	m_prefetchWorker->request(region);
 }
 
 SectorStatus CMapBase::isSectorLoaded(TLoadingSector::TId sectorIndex) const
@@ -55,6 +149,7 @@ SectorStatus CMapBase::isSectorLoaded(TLoadingSector::TId sectorIndex) const
 SectorMetadata* CMapBase::getSectorInfo(TLoadingSector::TId sectorIndex)
 {
 	CAutoMutex<CMutex> lock(m_volumeLock);
+	CVoxelPagingStatScope lockScope(voxelPagingStats().mapLockGetSectorInfo);
 	// not a direct access to the volume but this list is modified by the volume through the pager
 
 	// first, look into loaded sectors
@@ -81,7 +176,13 @@ SectorMetadata* CMapBase::getSectorInfo(TLoadingSector::TId sectorIndex)
 bool CMapBase::emergeSector(TLoadingSector::TId sectorIndex)
 {
 	// check it's not already in memory
-	if (isSectorLoaded(sectorIndex) == SectorStatus::NotAvailable)
+	// NOTE(dynworld) P3a': `Locked` now also covers "page-in in progress on
+	// another thread" (the chunk write lock is no longer held during the
+	// page-in), and in that case the sector metadata is not registered yet.
+	// Prefetch anyway: getChunk waits on the paging flag and the pager
+	// delivers regionPagedIn (metadata) before this returns, restoring the
+	// old invariant that a sector that is not NotAvailable has metadata.
+	if (isSectorLoaded(sectorIndex) != SectorStatus::Available)
 	{
 		TRegion regionToEmerge;
 		TLoadingSector::getRegion(sectorIndex, regionToEmerge);
@@ -108,6 +209,7 @@ void CMapBase::flushSectors(const TSectorsList& list)
 void CMapBase::diffSectors(const TSectorsList& input, TSectorsList& added, TSectorsList& removed)
 {
 	CAutoMutex<CMutex> lock(m_volumeLock);
+	CVoxelPagingStatScope lockScope(voxelPagingStats().mapLockDiffSectors);
 	diffSectors<TLoadingSector>(m_loadedSectors, input, added, removed,
 		[](TSectorsContainer::const_iterator it) { return it->first; },
 		[](const TSectorsContainer& map, TLoadingSector::TId id) { return map.find(id); });
@@ -363,6 +465,7 @@ bool CMapBase::getGroundNormal(TLoadingSector::TId localSector, const NLMISC::CV
 void CMapBase::getLoadedSectors(TSectorsList& outList) const
 {
 	CAutoMutex<CMutex> lock(m_volumeLock);
+	CVoxelPagingStatScope lockScope(voxelPagingStats().mapLockGetLoadedSectors);
 	// not a direct access to the volume but this list is modified by the volume through the pager
 	outList.clear();
 	outList.reserve(m_loadedSectors.size());
@@ -507,6 +610,7 @@ void CMapBase::voxelTouched(const TVoxelPos& voxelPos, Voxel voxelBefore, Voxel 
 void CMapBase::regionPagedIn(const TRegion& region, TVolume::Chunk* pChunk, const SectorMetadata& infos)
 {
 	NLMISC::CAutoMutex<NLMISC::CMutex> lock(m_volumeLock);
+	CVoxelPagingStatScope lockScope(voxelPagingStats().mapLockRegionPagedIn);
 
 	TLoadingSector::TId sectorIndex = TLoadingSector::getRegionId(region);
 
@@ -537,6 +641,7 @@ void CMapBase::regionPagedIn(const TRegion& region, TVolume::Chunk* pChunk, cons
 void CMapBase::regionPagedOut(const TRegion& region, TVolume::Chunk* pChunk, SectorMetadata& outInfos)
 {
 	NLMISC::CAutoMutex<NLMISC::CMutex> lock(m_volumeLock);
+	CVoxelPagingStatScope lockScope(voxelPagingStats().mapLockRegionPagedOut);
 
 	TLoadingSector::TId sectorIndex = TLoadingSector::getRegionId(region);
 

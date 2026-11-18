@@ -40,16 +40,27 @@ const MultiThreadChunkCache::CacheData& MultiThreadChunkCache::getCacheData() co
 	return *mtls_cacheData;
 }
 
+uint32_t MultiThreadChunkCache::slotIndex(int32_t iChunkX, int32_t iChunkY, int32_t iChunkZ)
+{
+	// spatial hash (odd multiplicative constants, XOR-mixed), direct-mapped by
+	// the mask; sign wrap on negative coordinates is deterministic and fine.
+	const uint32_t hash = uint32_t(iChunkX) * 73856093u
+		^ uint32_t(iChunkY) * 19349663u
+		^ uint32_t(iChunkZ) * 83492791u;
+	return hash & CacheSlotMask;
+}
+
 std::weak_ptr<TVolume::Chunk> MultiThreadChunkCache::getChunkCached(const TVolume* pVolume, int32_t iChunkX, int32_t iChunkY, int32_t iChunkZ) const
 {
 	const CacheData& cache = getCacheData();
-	if ((!cache.m_pLastAccessedChunk.expired()) &&
-		(cache.m_pVolume == pVolume) &&
-		(cache.m_v3dLastAccessedChunkX == iChunkX) &&
-		(cache.m_v3dLastAccessedChunkY == iChunkY) &&
-		(cache.m_v3dLastAccessedChunkZ == iChunkZ))
+	const CacheData::Slot& slot = cache.m_slots[slotIndex(iChunkX, iChunkY, iChunkZ)];
+	if ((!slot.m_pChunk.expired()) &&
+		(slot.m_pVolume == pVolume) &&
+		(slot.m_chunkX == iChunkX) &&
+		(slot.m_chunkY == iChunkY) &&
+		(slot.m_chunkZ == iChunkZ))
 	{
-		return cache.m_pLastAccessedChunk;
+		return slot.m_pChunk;
 	}
 
 	return std::weak_ptr<TVolume::Chunk>{};
@@ -58,14 +69,17 @@ std::weak_ptr<TVolume::Chunk> MultiThreadChunkCache::getChunkCached(const TVolum
 void MultiThreadChunkCache::setChunkCached(const TVolume* pVolume, std::weak_ptr<TVolume::Chunk> pChunk, int32_t iChunkX, int32_t iChunkY, int32_t iChunkZ)
 {
 	CacheData& cache = getCacheData();
-	cache.m_v3dLastAccessedChunkX = iChunkX;
-	cache.m_v3dLastAccessedChunkY = iChunkY;
-	cache.m_v3dLastAccessedChunkZ = iChunkZ;
-	cache.m_pLastAccessedChunk = pChunk;
-	cache.m_pVolume = pVolume;
+	CacheData::Slot& slot = cache.m_slots[slotIndex(iChunkX, iChunkY, iChunkZ)];
+	slot.m_pVolume = pVolume;
+	slot.m_chunkX = iChunkX;
+	slot.m_chunkY = iChunkY;
+	slot.m_chunkZ = iChunkZ;
+	slot.m_pChunk = pChunk;
 }
 
 void MultiThreadChunkCache::dirtyCache()
 {
-	getCacheData().m_pLastAccessedChunk.reset();
+	CacheData& cache = getCacheData();
+	for (uint32_t i = 0; i < CacheSlotCount; ++i)
+		cache.m_slots[i] = CacheData::Slot{};
 }

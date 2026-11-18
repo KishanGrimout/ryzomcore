@@ -17,6 +17,7 @@
 #include "master_pager.h"
 #include "game_share/dynworld/map_cache_manager.h"
 #include "game_share/dynworld/mapgen/mapgen.h"
+#include "game_share/dynworld/voxel_paging_stats.h"
 
 #include "seven_zip/7zCrc.h"
 
@@ -34,12 +35,18 @@ CMasterPager::~CMasterPager()
 
 void CMasterPager::pageIn(const TRegion& region, TVolume::Chunk* pChunk)
 {
+	// VPI: total pageIn (runs under the chunk write lock, see VoxelVolumePaging §3)
+	CVoxelPagingStatScope pageInScope(voxelPagingStats().pagerPageIn);
+
 	SectorMetadata infos;
 	//if (!CMapCacheManager::instance().tryFillRegion(region, pChunk, infos))
 	{
 		nlassert(pChunk != nullptr);
 		CBlockMakeData makeData(region, *pChunk);
-		m_mapgen->makeChunk(makeData);
+		{
+			CVoxelPagingStatScope makeScope(voxelPagingStats().mapGenMakeChunk);
+			m_mapgen->makeChunk(makeData);
+		}
 
 		infos.m_contentState = makeData.m_isEmpty ? SectorMetadata::IsEmpty : (makeData.m_isFull ? SectorMetadata::IsFull : SectorMetadata::IsHeterogeneous);
 		infos.m_contentState |= (makeData.m_hasObjects ? SectorMetadata::HasObjects : 0);
@@ -47,7 +54,10 @@ void CMasterPager::pageIn(const TRegion& region, TVolume::Chunk* pChunk)
 	}
 
 	// notify the map
-	m_map.regionPagedIn(region, pChunk, infos);
+	{
+		CVoxelPagingStatScope notifyScope(voxelPagingStats().regionPagedIn);
+		m_map.regionPagedIn(region, pChunk, infos);
+	}
 }
 
 void CMasterPager::pageOut(const TRegion& region, TVolume::Chunk* pChunk)

@@ -21,6 +21,7 @@
 
 #include "game_share/dynworld/map_sector.h"
 #include "game_share/dynworld/disk_file_db.h"
+#include "game_share/dynworld/voxel_paging_stats.h"
 
 #include "seven_zip/seven_zip.h"
 
@@ -98,6 +99,7 @@ public:
 
 	bool readChunk(TLoadingSector::TId id, TVolume::Chunk* pChunk, SectorMetadata& outInfos)
 	{
+		CVoxelPagingStatScope readScope(voxelPagingStats().cacheReadChunk);
 		if (m_db.isValid())
 		{
 			sint64 leastBufLen = pChunk->getDataSizeInBytes() + sizeof(SectorMetadata) + sizeof(s_ChunkSaveVersion);

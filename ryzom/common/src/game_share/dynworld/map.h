@@ -21,6 +21,8 @@
 #include "nel/misc/aabbox.h"
 #include "nel/misc/mutex.h"
 
+#include <memory>
+
 #include "game_share/dynworld/polyvox_defs.h"
 #include "game_share/dynworld/map_sector.h"
 #include "game_share/dynworld/map_deferred_command.h"
@@ -69,6 +71,15 @@ public:
 
 	// returns true if it has been loaded, false if it was already loaded
 	bool emergeSector(TLoadingSector::TId sectorIndex);
+
+	// P4-lite movement prefetch (docs/VoxelVolumePaging.md § 6.7): page the
+	// region in on a background worker, latest request wins. Best-effort only:
+	// a query that outruns the prefetcher still blocks synchronously (D4).
+	void prefetchRegionAsync(const TRegion& region);
+
+	// synchronous counterpart (refreshLrAroundNow / initial loads): blocks
+	// until every chunk of the region is paged in
+	void prefetchRegion(const TRegion& region);
 
 	void flushSectors(const TSectorsList &list);
 
@@ -130,6 +141,12 @@ public:
 protected:
 	mutable NLMISC::CMutex m_volumeLock; // TODO: find a better way to avoid concurrent accesses to volume
 	TVolume* m_volume;
+
+private:
+	// P4-lite: async region prefetch worker (latest request wins); heap-held
+	// so the worker joins before m_volume is deleted (~CMapBase resets it first)
+	class CPrefetchWorker;
+	std::unique_ptr<CPrefetchWorker> m_prefetchWorker;
 
 	typedef std::map<TLoadingSector::TId, SectorMetadata> TSectorsContainer;
 	TSectorsContainer m_loadedSectors;

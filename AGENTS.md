@@ -60,6 +60,7 @@ System/reference docs (CamelCase):
 | `docs/UnitTesting.md` | how to add and run unit tests: the two test homes (NeL `ut_*`, ryzom `test_modules`), `add_test_executable` checklist, build/run commands, pitfalls |
 | `docs/LegacyAssetInventory.md` | survey of the legacy tree `D:\Programmation\ryzomcore_old` (client run dir, data repos, Mercurial access recipe, external ANL/PolyVox checkouts) |
 | `docs/DynMicroVegetation.md` | client-side microvegetation on soft soil (stock NeL vegetable system reuse, placement engine, block/band lifecycle, commit budgets, debug command catalog) |
+| `docs/VoxelVolumePaging.md` | voxel volume & chunk paging (PolyVox PagedVolume integration, lock inventory on read/write/pageIn paths, paging pipeline, contention chains) |
 
 Plan/handoff docs:
 
@@ -70,6 +71,7 @@ Plan/handoff docs:
 | `docs/SET_VOXEL_ROUND_TRIP_VALIDATION.md` | GitHub issue #6 — paused SET_VOXEL round-trip investigation (suspects, resume protocol, instrumentation inventory) |
 | `docs/DYNLANDSCAPE_GLSL_MIGRATION_PLAN.md` | dyn landscape shaders vp1/arbfp1 assembly → hand-authored GLSL via the GL3 driver (assessment, phases 0–5) |
 | `docs/DYNWORLD_MICROVEGETATION_PLAN.md` | GitHub issue #7 — reuse the stock NeL microvegetation system, planted client-side from extracted meshes on soft soil (audit, decisions D1–D4, phases P0–P5) |
+| `docs/VOXEL_PAGING_CONTENTION_PLAN.md` | voxel paging mutex contention — instrument, profile, optimize (decisions D1–D5, phases P0–P5; depends on `docs/VoxelVolumePaging.md`) |
 
 Deployment-local (stay where they are, linked from here):
 

@@ -184,6 +184,22 @@ target_link_libraries(ryzom_dynworld_map_cache_test
         Ryzom::gameshare
 )
 
+add_test_executable(ryzom_dynworld_paging_stats_test
+        test_dynworld_paging_stats.cpp
+)
+
+target_include_directories(ryzom_dynworld_paging_stats_test
+        PRIVATE
+        ${CMAKE_SOURCE_DIR}/ryzom/common/src
+        ${POLYVOX_INCLUDE_DIR}
+)
+
+target_link_libraries(ryzom_dynworld_paging_stats_test
+        PRIVATE
+        NeL::misc
+        Ryzom::gameshare
+)
+
 add_test_executable(ryzom_dynworld_vegetation_test
         test_dynworld_vegetation.cpp
 )

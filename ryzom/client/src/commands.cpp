@@ -110,6 +110,7 @@
 #include "item_group_manager.h"
 #include "dynworld/dyn_continent.h"
 #include "dynworld/map_client.h"
+#include "game_share/dynworld/voxel_paging_stats.h"
 
 //
 // Only the define FINAL_VERSION can be defined on the project, not in this file
@@ -5338,6 +5339,31 @@ extern bool g_forceRegenerate;
 NLMISC_COMMAND(dyn_regenvoxels, "Regenerates dyn world voxels", "")
 {
 	g_forceRegenerate = true;
+	return true;
+}
+
+// P1 instrumentation (docs/VOXEL_PAGING_CONTENTION_PLAN.md): dump the voxel paging
+// lock/timing counters; optional "reset" argument clears them for a fresh window.
+NLMISC_COMMAND(dyn_paging_stats, "Dump voxel paging lock/timing stats", "[reset]")
+{
+	if (!args.empty() && args[0] == "reset")
+	{
+		voxelPagingStats().reset();
+		nlinfo("dyn_paging_stats: counters reset");
+		return true;
+	}
+	std::string dump = voxelPagingStats().dump();
+	// one nlinfo per line so the log stays readable
+	size_t pos = 0;
+	while (pos < dump.size())
+	{
+		size_t end = dump.find('\n', pos);
+		if (end == std::string::npos)
+			end = dump.size();
+		if (end > pos)
+			nlinfo("%.*s", int(end - pos), dump.c_str() + pos);
+		pos = end + 1;
+	}
 	return true;
 }
 

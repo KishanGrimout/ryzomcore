@@ -18,6 +18,7 @@
 
 #include "game_share/dynworld/map.h"
 #include "game_share/dynworld/map_sector.h"
+#include "game_share/dynworld/voxel_paging_stats.h"
 
 #include "nel/misc/async_file_manager.h"
 #include "nel/misc/hierarchical_timer.h"
@@ -45,6 +46,23 @@ CDynGlobalRetriever::CDynGlobalRetriever(const CDynRetrieverBank *bank, CMapBase
 
 CVector g_prefetchBound(25.f, 25, 25); // to keep "hot" what is just around
 bool g_forceRegenerate = false;
+
+// P4-lite (docs/VoxelVolumePaging.md § 6.7): the hot-neighborhood region for a
+// position, in global voxel coords (the frame getDoubleGlobalPosition feeds to
+// traceSegment). The radius is clamped to the hot box: callers pass the
+// static-PACS streaming radius (400 m), far beyond what the voxel cache should
+// ever hold.
+static TRegion s_hotRegionAround(const CVector &position)
+{
+	CVectorD lo = position - g_prefetchBound;
+	CVectorD hi = position + g_prefetchBound;
+	lo *= TLoadingSector::InvVoxelSize;
+	hi *= TLoadingSector::InvVoxelSize;
+	return TRegion(
+		(sint32)floor(lo.x), (sint32)floor(lo.y), (sint32)floor(lo.z),
+		(sint32)floor(hi.x), (sint32)floor(hi.y), (sint32)floor(hi.z));
+}
+
 void CDynGlobalRetriever::refreshLrAroundNow(const CVector &position, float radius)
 {
 	refreshLrAroundMax(position, radius);
@@ -56,7 +74,7 @@ void CDynGlobalRetriever::refreshLrAroundMax(const CVector &position, float radi
 // 	CAABBox	box;
 // 	box.setCenter(position);
 // 	box.setHalfSize(g_prefetchBound);
-// 
+//
 // 	selectInstances(box, _InternalCST);
 
 	if (g_forceRegenerate)
@@ -68,28 +86,78 @@ void CDynGlobalRetriever::refreshLrAroundMax(const CVector &position, float radi
 		g_forceRegenerate = false;
 	}
 
-// 	uint emergeCount = _InternalCST.CollisionInstances.size();
-// 	uint sectorsLoaded = 0;
-
-	// load all possible sectors
-// 	for (uint i = 0; i < emergeCount; ++i)
-// 	{
-// 		// TODO: use map deferred command
-// 		if (m_map->emergeSector(_InternalCST.CollisionInstances[i]))
-// 			++sectorsLoaded;
-// 
-// 		if (sectorsLoaded == maxEmerge)
-// 			break;
-// 	}
+	// P4-lite (docs/VoxelVolumePaging.md § 6.7): keep the chunk neighborhood
+	// of the position hot. The stock selectInstances+emergeSector loop above
+	// was disabled, so movement/collision sweeps were the first to touch fresh
+	// chunks and blocked on their generation (pageInWaitChunk hitches, up to
+	// ~400 ms). This is the synchronous flavor (refreshLrAroundNow: load-time
+	// calls under a progress bar); the per-frame refreshLrAround path uses the
+	// async latest-wins prefetcher instead.
+	(void)radius;
+	(void)maxEmerge;
+	m_map->prefetchRegion(s_hotRegionAround(position));
 }
 
 bool g_refresh = true;
 void CDynGlobalRetriever::refreshLrAround(const CVector &position, float radius)
 {
 	NLPACS_HAUTO_REFRESH_LR_AROUND
+
+	// Main-loop stall detector (docs/VoxelVolumePaging.md § 6.7): the client
+	// main loop calls this once per frame, so the interval between two calls is
+	// the frame time. A gap >= 100 ms is a user-visible hitch; the log line
+	// carries the paging deltas accumulated during the gap so the stall can be
+	// attributed to terrain work or ruled out.
+	{
+		struct SPagingSnapshot
+		{
+			uint32 pageIns, queryPageIns, generations, queryGenerations;
+			uint32 cacheFills, queryCacheFills, waits, queryWaits;
+		};
+		static thread_local NLMISC::TTicks s_lastFrameTime = 0;
+		static thread_local SPagingSnapshot s_previous = { 0, 0, 0, 0, 0, 0, 0, 0 };
+
+		const CVoxelPagingStats& stats = voxelPagingStats();
+		SPagingSnapshot current;
+		current.pageIns = stats.pageInChunk.m_count.load(std::memory_order_relaxed);
+		current.queryPageIns = stats.pageInChunkQuery.m_count.load(std::memory_order_relaxed);
+		current.generations = stats.mapGenMakeChunk.m_count.load(std::memory_order_relaxed);
+		current.queryGenerations = stats.mapGenMakeChunkQuery.m_count.load(std::memory_order_relaxed);
+		current.cacheFills = stats.cacheTryFill.m_count.load(std::memory_order_relaxed);
+		current.queryCacheFills = stats.cacheTryFillQuery.m_count.load(std::memory_order_relaxed);
+		current.waits = stats.pageInWaitChunk.m_count.load(std::memory_order_relaxed);
+		current.queryWaits = stats.pageInWaitChunkQuery.m_count.load(std::memory_order_relaxed);
+
+		const NLMISC::TTicks now = NLMISC::CTime::getPerformanceTime();
+		if (s_lastFrameTime != 0)
+		{
+			const double gapMs = NLMISC::CTime::ticksToSecond(now - s_lastFrameTime) * 1000.0;
+			if (gapMs >= 100.0)
+			{
+				voxelPagingStats().frameHitch.account(uint64(now - s_lastFrameTime));
+				// deltas guard against a mid-session dyn_paging_stats reset
+				auto delta = [](uint32 after, uint32 before) { return after >= before ? after - before : 0u; };
+				nlwarning("DYNHITCH: main loop gap %.0f ms pos=(%.1f,%.1f,%.1f) | paging during gap: pageIns=%u (on query thread %u), freshGen=%u (on query thread %u), cacheFill=%u (on query thread %u), pageInWaits=%u (on query thread %u)",
+					gapMs, position.x, position.y, position.z,
+					delta(current.pageIns, s_previous.pageIns),
+					delta(current.queryPageIns, s_previous.queryPageIns),
+					delta(current.generations, s_previous.generations),
+					delta(current.queryGenerations, s_previous.queryGenerations),
+					delta(current.cacheFills, s_previous.cacheFills),
+					delta(current.queryCacheFills, s_previous.queryCacheFills),
+					delta(current.waits, s_previous.waits),
+					delta(current.queryWaits, s_previous.queryWaits));
+			}
+		}
+		s_lastFrameTime = now;
+		s_previous = current;
+	}
+
 	if (g_refresh)
 	{
-		refreshLrAroundMax(position, radius, 1); // only emerge one at a time
+		// P4-lite: per-frame path — async, latest-wins (never blocks the main
+		// loop; a query that outruns the prefetcher still blocks, D4)
+		m_map->prefetchRegionAsync(s_hotRegionAround(position));
 	}
 	return;
 
@@ -427,6 +495,10 @@ CVectorD CDynGlobalRetriever::getDoubleGlobalPosition(const NLPACS::UGlobalPosit
 
 UGlobalPosition CDynGlobalRetriever::doMove(const UGlobalPosition &startPos, const CVector &delta, float t, CCollisionSurfaceTemp &cst, bool rebuildChains) const
 {
+	// attribute any page-in wait paid on this thread to the movement query
+	// cohort (dyn_paging_stats: pageInWaitChunkQuery, docs/VoxelVolumePaging.md § 6.7)
+	CVoxelPagingRoleScope pagingRole(EVoxelPagingRole::Query);
+
 	UGlobalPosition result = startPos;
 
 	// clamp factor.
@@ -694,6 +766,10 @@ static const sint g_BodySpanCount = 3;
 
 const TCollisionSurfaceDescVector* CDynGlobalRetriever::testCylinderMove(const UGlobalPosition &startPos, const CVector &delta, float /*radius*/, CCollisionSurfaceTemp &cst) const
 {
+	// attribute any page-in wait paid on this thread to the movement query
+	// cohort (dyn_paging_stats: pageInWaitChunkQuery, docs/VoxelVolumePaging.md § 6.7)
+	CVoxelPagingRoleScope pagingRole(EVoxelPagingRole::Query);
+
 	// real movement test on the voxel terrain. v1 note: the radius is ignored
 	// (the body is swept as a few sample points above the feet, not a true
 	// cylinder; a span-based approximation was the plan's step 2)

@@ -122,8 +122,11 @@ bool g_hasSurfaceDensity = true;
 float g_surfaceDensityOffset = 0.f;
 uint g_underSurfaceDensity = Voxel::MaxDensity;
 uint g_averageFactor = 26;
-float g_logMinSoil = 100.f;
-float g_logMaxSoil = -100.f;
+// F1 (VoxelVolumePaging §6.2): these were plain floats updated per-voxel from
+// concurrent worker threads (data race). They are write-only stats, so they
+// are now thread-local: each generation worker tracks its own soil range.
+thread_local float g_logMinSoil = 100.f;
+thread_local float g_logMaxSoil = -100.f;
 float g_invXYdisplacementSpread = 1.f / 25.f;
 float g_invSurfaceAttenuationHeight = 1.f / 10.f;
 
