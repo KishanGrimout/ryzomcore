@@ -157,6 +157,7 @@ PolyVox change beyond the one below). Unit coverage:
 | `pagerPageIn` | `CSlavePager`/`CMasterPager::pageIn` | VPI: total pageIn (chunk-lock hold from the pager side; nested sums include the sub-sites below) | plan P5 |
 | `cacheTryFill` / `cacheReadChunk` | `CSlavePager` + `map_cache_manager.cpp` | VPI: cache load path total / the disk+LZMA unpack part | plan P5 |
 | `cacheDiskRead` / `cacheLzmaDecode` | `map_cache_manager.cpp` `readChunk` (nested inside `cacheReadChunk`) | VPI: the I/O/CPU split of a cache page-in — `CDiskFileDataBase::readData` vs `unpackLZMA` of the 1 MB chunk (decide cache-layer work from these, not from the total) | plan P5 |
+| `cachePathLookup` / `cacheFileIo` | `disk_file_db.h` `readData` (nested inside `cacheDiskRead`) | VPI: the fixed-cost split of a cache file read — `CPath::lookup` name resolution (probes every alternative data path + the local directory) vs open/read/close of the ~4 KB per-chunk file. The read is 72 % of a page-in and is *not* bandwidth-bound, so these say which half to attack (§ 6.8.1) | plan P5 |
 | `mapGenMakeChunk` | both pagers around `CMapGen::makeChunk` | VPI: from-scratch generation | plan P5 |
 | `cacheSaveCall` | `CSlavePager` around `saveRegionToCache` | VPI: synchronous save part (copy; compression already deferred) | plan P5 |
 | `regionPagedIn` / `regionPagedOut` | both pagers around the map notification | VPI: notification incl. metadata lock (nested: includes `mapLock*` below) | plan P5 |
@@ -707,15 +708,61 @@ Consequences:
   to that; only removing a whole stage (decode, or the read) changes the budget.
 
 The decisive number is the disk/decode split, now instrumented by `cacheDiskRead`
-and `cacheLzmaDecode` (registry § 5, nested inside `cacheReadChunk`; no number
-yet — one session with the split build decides it). Reference throughput:
-`cacheReadChunk` count × 1 048 576 B / total seconds.
+and `cacheLzmaDecode` (registry § 5, nested inside `cacheReadChunk`).
 
-- Decode-dominant (expected): the lever is the cache **format** (cheaper codec
-  such as LZ4, or storing chunks uncompressed and letting the OS page cache
-  serve them), not another RAM tier.
-- Read-dominant: an in-memory blob cache (or a sequential layout / larger OS
-  page cache) is the lever.
+- Decode-dominant: the lever is the cache **format** (cheaper codec such as LZ4,
+  or storing chunks uncompressed).
+- Read-dominant: the lever is how the bytes are fetched (see 6.8.1 — with
+  per-chunk files the cost is not bandwidth but per-file fixed cost).
+
+**6.8.1 Measured 2026-11-19 (116 s window, build 21:02).** Dump 21:11:40 →
+21:13:36: 15 167 page-ins, **all served from cache** (`mapGenMakeChunk` 0,
+`cacheSaveCall` 0), `pageInChunkQuery` 0, `frameHitch` **0**.
+
+| Marker | count | total | per chunk | share |
+|---|---|---|---|---|
+| `pageInChunk` | 15 167 | 81.7 s | 5.39 ms | — |
+| `cacheReadChunk` | 15 167 | 81.6 s | 5.38 ms | 100 % |
+| `cacheDiskRead` | 15 167 | **59.0 s** | **3.89 ms** | **72 %** |
+| `cacheLzmaDecode` | 15 167 | 22.4 s | 1.48 ms | 28 % |
+
+81.7 s of paging work in a 116 s window = **0.70 core continuously busy**
+(0.51 core in the read, 0.19 core in the decode).
+
+**The read is not an I/O-bandwidth cost.** The "database" is one file per chunk
+(`CDiskFileDataBase::getFileName` → `<id>.sector` under `./cache/map/`), measured
+on the sandbox cache: **88 746 files, 4.0 KB average, 348 MB total**. A page-in
+therefore reads ~4 KB (0.5 MB/s at 131 page-ins/s — nothing) and expands it to
+1 MB, i.e. a ~256:1 ratio; that is why decode is only 1.48 ms for 1 MB of output.
+3.89 ms for a 4 KB read is **fixed cost per file**, not throughput: `readData`
+calls `CPath::lookup` on every single read (lowercase copy, two VFS map lookups,
+then a `CFile::fileExists` probe on every alternative data path *and* on the
+local directory before falling back to the cache dir) and then opens, reads and
+closes the file (the disk is an SSD: `Get-PhysicalDisk` → Samsung 860 QVO / 990
+PRO, so a 4 KB read should be ≪1 ms).
+
+Two counters split that fixed cost for the next session: `cachePathLookup`
+(name resolution) and `cacheFileIo` (open + read + close), both nested inside
+`cacheDiskRead`.
+
+Consequence for the "compressed cache in memory" idea:
+
+- **Lazy tier: no.** `createChunk` 15 164 ≈ `pageInChunk` 15 167 — not a single
+  chunk was requested twice in the window, so a cache that fills on miss is
+  never hit.
+- **Preload: yes, that is the lever.** The whole compressed cache is 348 MB, so
+  holding the 4 KB blobs in RAM (filled by a background pass at start-up, not on
+  demand) removes the entire 72 % read half and leaves decode-only page-ins
+  (~1.48 ms, paging CPU 0.70 → 0.19 core). This is a cache-layer change that
+  pays *without* reuse, because the win is the removed per-file syscall path.
+- Cheaper intermediate options, in increasing effort: skip `CPath::lookup` for
+  cache files (the name is `<id>.sector` in a known directory — the VFS probe is
+  pure waste), keep one pack file + index instead of 88 746 tiny files (one
+  open for the session, offset reads), and check whether a Defender/AV filter
+  is inflating every open.
+- The decode half is already cheap and, unlike the read, bounded by real work;
+  swapping LZMA for LZ4 would buy ≤0.19 core and needs a cache-format migration,
+  so it is the last lever, not the first.
 
 P4 as scoped ("async/manual paging") does not change any of this: it moves the
 cost to another thread, and the original target (movement blocking) is already at

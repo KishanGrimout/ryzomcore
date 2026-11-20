@@ -85,6 +85,8 @@ struct CVoxelPagingStats
 	TVoxelPagingStat cacheTryFillQuery;   // cache load path paid by a query thread (disk+LZMA on the movement thread)
 	TVoxelPagingStat cacheReadChunk;      // inside tryFillRegion: the raw readChunk call
 	TVoxelPagingStat cacheDiskRead;       // inside readChunk: the CDiskFileDataBase read (I/O)
+	TVoxelPagingStat cachePathLookup;     // inside CDiskFileDataBase::readData: name resolution (CPath::lookup + string work)
+	TVoxelPagingStat cacheFileIo;         // inside CDiskFileDataBase::readData: open + read + close of the per-chunk file
 	TVoxelPagingStat cacheLzmaDecode;     // inside readChunk: the LZMA unpack (CPU)
 	TVoxelPagingStat mapGenMakeChunk;     // from-scratch terrain generation
 	TVoxelPagingStat mapGenMakeChunkQuery; // from-scratch generation performed on a query thread
@@ -121,6 +123,8 @@ struct CVoxelPagingStats
 		cacheTryFillQuery.reset();
 		cacheReadChunk.reset();
 		cacheDiskRead.reset();
+		cachePathLookup.reset();
+		cacheFileIo.reset();
 		cacheLzmaDecode.reset();
 		mapGenMakeChunk.reset();
 		mapGenMakeChunkQuery.reset();
@@ -161,6 +165,8 @@ struct CVoxelPagingStats
 		line("cacheTryFillQuery", cacheTryFillQuery);
 		line("cacheReadChunk", cacheReadChunk);
 		line("cacheDiskRead", cacheDiskRead);
+		line("cachePathLookup", cachePathLookup);
+		line("cacheFileIo", cacheFileIo);
 		line("cacheLzmaDecode", cacheLzmaDecode);
 		line("mapGenMakeChunk", mapGenMakeChunk);
 		line("mapGenMakeChunkQuery", mapGenMakeChunkQuery);

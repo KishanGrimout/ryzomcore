@@ -17,6 +17,8 @@
 #ifndef DISKFILE_DATABASE_HEADER
 #define DISKFILE_DATABASE_HEADER
 
+#include "voxel_paging_stats.h"
+
 class CDiskFileDataBase
 {
 	static const char* ms_defaultPath;
@@ -46,7 +48,20 @@ public:
 	template <typename K>
 	bool readData(K key, void* buffer, sint64& inOutBufLen, sint64 readOffset = 0)
 	{
-		std::string filename = getFileName(key);
+		// Fixed-cost split (docs/VoxelVolumePaging.md § 5, nested in
+		// cacheDiskRead): resolving the name is NOT free — getFileName runs
+		// CPath::lookup on every read, which probes each alternative data path
+		// (and the local directory) with a file-exists call before falling back
+		// to ./cache/map/. The rest is one open/read/close of a ~4 KB file. Which
+		// half dominates decides whether a cache-layer change should target name
+		// resolution or the per-chunk file open.
+		std::string filename;
+		{
+			CVoxelPagingStatScope lookupScope(voxelPagingStats().cachePathLookup);
+			filename = getFileName(key);
+		}
+
+		CVoxelPagingStatScope fileIoScope(voxelPagingStats().cacheFileIo);
 
 		NLMISC::CIFile file;
 		if (file.open(filename))
