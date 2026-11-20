@@ -5342,7 +5342,7 @@ NLMISC_COMMAND(dyn_regenvoxels, "Regenerates dyn world voxels", "")
 	return true;
 }
 
-// P1 instrumentation (docs/VOXEL_PAGING_CONTENTION_PLAN.md): dump the voxel paging
+// Voxel paging instrumentation (docs/VoxelVolumePaging.md § 5): dump the voxel paging
 // lock/timing counters; optional "reset" argument clears them for a fresh window.
 NLMISC_COMMAND(dyn_paging_stats, "Dump voxel paging lock/timing stats", "[reset]")
 {

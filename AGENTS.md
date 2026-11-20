@@ -71,7 +71,7 @@ Plan/handoff docs:
 | `docs/SET_VOXEL_ROUND_TRIP_VALIDATION.md` | GitHub issue #6 — paused SET_VOXEL round-trip investigation (suspects, resume protocol, instrumentation inventory) |
 | `docs/DYNLANDSCAPE_GLSL_MIGRATION_PLAN.md` | dyn landscape shaders vp1/arbfp1 assembly → hand-authored GLSL via the GL3 driver (assessment, phases 0–5) |
 | `docs/DYNWORLD_MICROVEGETATION_PLAN.md` | GitHub issue #7 — reuse the stock NeL microvegetation system, planted client-side from extracted meshes on soft soil (audit, decisions D1–D4, phases P0–P5) |
-| `docs/VOXEL_PAGING_CONTENTION_PLAN.md` | voxel paging mutex contention — instrument, profile, optimize (decisions D1–D5, phases P0–P5; depends on `docs/VoxelVolumePaging.md`) |
+| `docs/VOXEL_PAGING_CONTENTION_PLAN.md` | voxel paging mutex contention — instrument, profile, optimize (decisions D1–D5, phases P0–P5; **closed 2026-11-20**, P4 async paging out of scope, markers kept; knowledge in `docs/VoxelVolumePaging.md`) |
 
 Deployment-local (stay where they are, linked from here):
 

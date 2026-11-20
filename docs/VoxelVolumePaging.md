@@ -2,13 +2,12 @@
 
 > **System doc.** Documents the `TVolume` layer: the PolyVox `PagedVolume<Voxel, VolumeRWLock>`
 > integration, the chunk paging pipeline, and every lock on the voxel read/write/page paths.
-> The related **plan** (instrumentation → profile → optimize, open decisions) is
-> `docs/VOXEL_PAGING_CONTENTION_PLAN.md`. Collision-side consequences of these locks are in
+> Collision-side consequences of these locks are in
 > `docs/VoxelTerrainCollision.md`; test-runner environment quirks in `docs/TestEnvironmentNotes.md`.
 
-Status: **audit recorded 2026-11-16** (contention reported by user; instrument/profil/optimize
-work pending — owned by the plan). The lock inventory below is source-audit fact; the
-contention chains are hypotheses to be confirmed by the plan's profile phase.
+Status: **audit recorded 2026-11-16, contention work closed 2026-11-20.** The lock
+inventory below is source-audit fact; the contention chains were confirmed or refuted by
+the profile rounds in § 6, which also record the measured outcome and the open follow-ups.
 
 ## 1. Where the system lives
 
@@ -29,7 +28,7 @@ Four lock layers, from the caller down to the chunk bytes:
 
 ### 2.1 Per-chunk RW lock (`PagedVolume::Chunk::m_lock`, type `VolumeRWLock`)
 
-- **Since P3a' (2026-11-17), the chunk write lock is no longer held during
+- **Since the page-in decoupling (2026-11-17), the chunk write lock is no longer held during
   `pageIn`.** The chunk carries an atomic `m_bPagingInProgress` flag instead:
   raised before the chunk is published into the chunk array, cleared after the
   pager body completes. Readers (getVoxel/setVoxel/samplers/getChunk) check the
@@ -38,10 +37,10 @@ Four lock layers, from the caller down to the chunk bytes:
   uninitialized buffer contents (flag raised before publication; release-store
   at finalize).
 - Read-locked **per voxel read** in `getVoxel` (`PagedVolume.inl:147`) — still the
-  per-voxel cost (P3e target, finding F4).
+  per-voxel cost (hot-read-path target, finding F4).
 - `getExistingChunk` no longer acquires the chunk lock at all: it is a peek
   (position match + timestamp touch), so the internal-lock read is never held
-  across a page-in wait (the old P3c chain, absorbed).
+  across a page-in wait (the old chain where the wait held the internal lock read, absorbed).
 - `isLocked()` ORs the paging flag, so `getRegionStatus` keeps reporting
   `Locked` for a chunk whose page-in is in progress (region-status semantics
   preserved; unit-tested in `ryzom_dynworld_paging_stats_test`).
@@ -52,12 +51,12 @@ Four lock layers, from the caller down to the chunk bytes:
   peek — no chunk-lock acquire, no wait).
 - **Write**: chunk creation + hash-slot insertion + eviction. The creation's
   O(65536) oldest-chunk scan runs **only when the incrementally-maintained
-  `m_uChunkCount` exceeds the limit** (P3b, 2026-11-17); during steady churn it
-  still runs per creation (~80 µs, measured — full LRU-list redesign is P4
-  scope). Eviction skips chunks whose page-in is in progress (their buffers are
+  `m_uChunkCount` exceeds the limit** (incremental count, 2026-11-17); during steady churn it
+  still runs per creation (~80 µs, measured — removing that needs a real LRU list, which
+  is not scheduled). Eviction skips chunks whose page-in is in progress (their buffers are
   being filled outside all locks by the pager thread). Also `flush`/`flushAll`
   (which now maintain `m_uChunkCount`).
-- Contention shape after P3a': cache-missing readers wait on the *target
+- Contention shape after the decoupling: cache-missing readers wait on the *target
   chunk's flag* with no volume lock held, so a slow page-in no longer blocks
   chunk creation/eviction on other chunks, nor other readers. The remaining
   wait is per-target-chunk and bounded by that chunk's page-in only.
@@ -93,7 +92,7 @@ Four lock layers, from the caller down to the chunk bytes:
 
 ## 3. Paging pipeline (the pageIn path end to end)
 
-Updated for the P3a' lock protocol (2026-11-17):
+Updated for the decoupled lock protocol (2026-11-17):
 
 ```
 getVoxel(x,y,z)                                   PagedVolume.inl:130
@@ -105,9 +104,9 @@ getVoxel(x,y,z)                                   PagedVolume.inl:130
       hit + flag set    → spin on m_bPagingInProgress (NO locks held), re-lookup
       miss → internal WRITE (2.2)
         create Chunk, raise m_bPagingInProgress BEFORE publication,
-        slot insert, eviction only if m_uChunkCount > limit (P3b)
+        slot insert, eviction only if m_uChunkCount > limit (incremental count)
       (internal lock released)
-      chunk->pageIn()                             ← NO locks held (P3a')
+      chunk->pageIn()                             ← NO locks held
         pager->pageIn(region, chunk)
           CSlavePager:  tryFillRegion (file IO)   slave_pager.cpp:43
                         else makeChunk + saveRegionToCache (file IO!)  :47,54
@@ -121,10 +120,10 @@ getVoxel(x,y,z)                                   PagedVolume.inl:130
 Concurrent miss on the SAME chunk by other threads: they find the chunk in the
 read-branch peek, see the paging flag, spin **with no volume lock held** (the
 `WaitPagingChunk` site), then re-lookup — the pile-up no longer holds 2.2 read
-(the old H1/P3c chain). Cross-chunk work (creations, evictions, other chunks'
-reads) proceeds during the wait.
+(the old chain where the wait held the internal lock read). Cross-chunk work
+(creations, evictions, other chunks' reads) proceeds during the wait.
 
-## 4. Suspected contention chains (to confirm in profile phase)
+## 4. Contention chains (audit hypotheses; verdicts in § 6)
 
 | # | Chain | Symptom |
 |---|---|---|
@@ -136,7 +135,7 @@ reads) proceeds during the wait.
 
 ## 5. Instrumentation registry
 
-Registered by plan P1 (2026-11-16). All markers are **always-compiled, near-zero-cost
+Registered 2026-11-16. All markers are **always-compiled, near-zero-cost
 atomic counters** (count / total / max ticks) in `voxel_paging_stats.h`
 (`game_share/dynworld/`), dumped via the client `dyn_paging_stats` command
 (`[reset]` argument clears for a fresh window) and callable from tests via
@@ -145,38 +144,38 @@ hook in `polyvox_defs.h` (the fork expects the includer to define `PIX*`; no
 PolyVox change beyond the one below). Unit coverage:
 `ryzom_dynworld_paging_stats_test` (10 tests).
 
-| Marker | Fed by | What it measures | Strip gate |
+| Marker | Fed by | What it measures | Keep |
 |---|---|---|---|
-| `ReadLookupChunk` | PolyVox `getChunk` read-path lookup (`PagedVolume.inl:405`, one added `PIX` pair — strippable PolyVox edit) | VPL: cache-miss reader lookup cost; since P3a' no longer includes the page-in wait (that moved to `WaitPagingChunk`) | plan P5 |
-| `WaitPagingChunk` | PolyVox `getChunk` flag spin (added in P3a') | VPL: reader wait for a chunk whose page-in is in progress, no locks held | plan P5 |
-| `pageInWaitChunkQuery` | `CVoxelPagingPix` accounting, when the waiting thread's `EVoxelPagingRole` is `Query` (set by `CVoxelPagingRoleScope` in `CDynGlobalRetriever::testCylinderMove`/`doMove`) | VPL: the subset of `WaitPagingChunk` paid by the movement/collision query thread — the user-visible hitch cohort (D4) | plan P5 |
-| `pageInChunkQuery` / `pagerPageInQuery` / `cacheTryFillQuery` / `mapGenMakeChunkQuery` | same `Query`-role split, applied to the page-in **work** sites | VPI: page-in work *performed* on the movement/collision thread (self page-in — pays no wait, so the wait counter cannot see it) | plan P5 |
-| `frameHitch` | `CDynGlobalRetriever::refreshLrAround`, called once per main-loop frame | main-loop gap count/total/max (gaps ≥ 100 ms) — the hitch counter; each gap logs a `DYNHITCH` line with the paging deltas accumulated during it | plan P5 |
-| `DYNQPAGEIN` (log, not a counter) | `CSlavePager::pageIn`, only when `voxelPagingRole() == Query` | chunk region + `source=cache|generated` of a page-in *performed by* the movement/collision thread; pairs with the `DYNHITCH` camera position to classify prefetch lag vs a wrong-position lookup | plan P5 |
-| `GetExistingChunk` / `CreateChunk` / `SearchFreeChunkSlot` / `SearchOldestChunk` / `DeleteOldestChunk` / `PageInChunk` | PolyVox write-branch event sites (pre-existing `PIX` markers, now wired) | VPW: internal-lock write work; `SearchOldestChunk` only fires when over the chunk limit (P3b); `PageInChunk` = the pager body with **no locks held** since P3a' | plan P5 |
-| `pagerPageIn` | `CSlavePager`/`CMasterPager::pageIn` | VPI: total pageIn (chunk-lock hold from the pager side; nested sums include the sub-sites below) | plan P5 |
-| `cacheTryFill` / `cacheReadChunk` | `CSlavePager` + `map_cache_manager.cpp` | VPI: cache load path total / the disk+LZMA unpack part | plan P5 |
-| `cacheDiskRead` / `cacheLzmaDecode` | `map_cache_manager.cpp` `readChunk` (nested inside `cacheReadChunk`) | VPI: the I/O/CPU split of a cache page-in — `CDiskFileDataBase::readData` vs `unpackLZMA` of the 1 MB chunk (decide cache-layer work from these, not from the total) | plan P5 |
-| `cachePathLookup` / `cacheFileIo` | `disk_file_db.h` `readData` (nested inside `cacheDiskRead`) | VPI: the fixed-cost split of a cache file read — `CPath::lookup` name resolution (probes every alternative data path + the local directory) vs open/read/close of the ~4 KB per-chunk file. The read is 72 % of a page-in and is *not* bandwidth-bound, so these say which half to attack (§ 6.8.1) | plan P5 |
-| `mapGenMakeChunk` | both pagers around `CMapGen::makeChunk` | VPI: from-scratch generation | plan P5 |
-| `cacheSaveCall` | `CSlavePager` around `saveRegionToCache` | VPI: synchronous save part (copy; compression already deferred) | plan P5 |
-| `regionPagedIn` / `regionPagedOut` | both pagers around the map notification | VPI: notification incl. metadata lock (nested: includes `mapLock*` below) | plan P5 |
-| `mapLockGetSectorInfo` / `mapLockDiffSectors` / `mapLockGetLoadedSectors` / `mapLockRegionPagedIn` / `mapLockRegionPagedOut` | `map.cpp` around each `CMapBase::m_volumeLock` (exclusive CMutex) scope | VPM: metadata-lock hold per site | plan P5 |
-| per-`getVoxel` volume read acquire cost (VPV) | not a counter — to be estimated by microbench/profiler in P2 (per-voxel counters would defeat their purpose) | 2.3 volume RW-lock acquire/release overhead | plan P2 |
+| `ReadLookupChunk` | PolyVox `getChunk` read-path lookup (`PagedVolume.inl:405`, one added `PIX` pair — strippable PolyVox edit) | VPL: cache-miss reader lookup cost; since the decoupling no longer includes the page-in wait (that moved to `WaitPagingChunk`) | kept |
+| `WaitPagingChunk` | PolyVox `getChunk` flag spin (added by the decoupling) | VPL: reader wait for a chunk whose page-in is in progress, no locks held | kept |
+| `pageInWaitChunkQuery` | `CVoxelPagingPix` accounting, when the waiting thread's `EVoxelPagingRole` is `Query` (set by `CVoxelPagingRoleScope` in `CDynGlobalRetriever::testCylinderMove`/`doMove`) | VPL: the subset of `WaitPagingChunk` paid by the movement/collision query thread — the user-visible hitch cohort | kept |
+| `pageInChunkQuery` / `pagerPageInQuery` / `cacheTryFillQuery` / `mapGenMakeChunkQuery` | same `Query`-role split, applied to the page-in **work** sites | VPI: page-in work *performed* on the movement/collision thread (self page-in — pays no wait, so the wait counter cannot see it) | kept |
+| `frameHitch` | `CDynGlobalRetriever::refreshLrAround`, called once per main-loop frame | main-loop gap count/total/max (gaps ≥ 100 ms) — the hitch counter; each gap logs a `DYNHITCH` line with the paging deltas accumulated during it | kept |
+| `DYNQPAGEIN` (log, not a counter) | `CSlavePager::pageIn`, only when `voxelPagingRole() == Query` | chunk region + `source=cache|generated` of a page-in *performed by* the movement/collision thread; pairs with the `DYNHITCH` camera position to classify prefetch lag vs a wrong-position lookup | kept |
+| `GetExistingChunk` / `CreateChunk` / `SearchFreeChunkSlot` / `SearchOldestChunk` / `DeleteOldestChunk` / `PageInChunk` | PolyVox write-branch event sites (pre-existing `PIX` markers, now wired) | VPW: internal-lock write work; `SearchOldestChunk` only fires when over the chunk limit; `PageInChunk` = the pager body with **no locks held** since the decoupling | kept |
+| `pagerPageIn` | `CSlavePager`/`CMasterPager::pageIn` | VPI: total pageIn (chunk-lock hold from the pager side; nested sums include the sub-sites below) | kept |
+| `cacheTryFill` / `cacheReadChunk` | `CSlavePager` + `map_cache_manager.cpp` | VPI: cache load path total / the disk+LZMA unpack part | kept |
+| `cacheDiskRead` / `cacheLzmaDecode` | `map_cache_manager.cpp` `readChunk` (nested inside `cacheReadChunk`) | VPI: the I/O/CPU split of a cache page-in — `CDiskFileDataBase::readData` vs `unpackLZMA` of the 1 MB chunk (decide cache-layer work from these, not from the total) | kept |
+| `cachePathLookup` / `cacheFileIo` | `disk_file_db.h` `readData` (nested inside `cacheDiskRead`) | VPI: the fixed-cost split of a cache file read — `CPath::lookup` name resolution (probes every alternative data path + the local directory) vs open/read/close of the ~4 KB per-chunk file. The read is ~45 % of a page-in since the AV exclusion (§ 6.8.2) and is *not* bandwidth-bound, so these say which half to attack (§ 6.8.1) | kept |
+| `mapGenMakeChunk` | both pagers around `CMapGen::makeChunk` | VPI: from-scratch generation | kept |
+| `cacheSaveCall` | `CSlavePager` around `saveRegionToCache` | VPI: synchronous save part (copy; compression already deferred) | kept |
+| `regionPagedIn` / `regionPagedOut` | both pagers around the map notification | VPI: notification incl. metadata lock (nested: includes `mapLock*` below) | kept |
+| `mapLockGetSectorInfo` / `mapLockDiffSectors` / `mapLockGetLoadedSectors` / `mapLockRegionPagedIn` / `mapLockRegionPagedOut` | `map.cpp` around each `CMapBase::m_volumeLock` (exclusive CMutex) scope | VPM: metadata-lock hold per site | kept |
+| per-`getVoxel` volume read acquire cost (VPV) | not a counter — to be estimated by microbench/profiler (per-voxel counters would defeat their purpose) | 2.3 volume RW-lock acquire/release overhead | not registered |
 
-The one PolyVox edit of P1 (D3): the `ReadLookupChunk` PIX pair around the read-path
-lookup in `getChunk` — recorded as the single strippable PolyVox residual of P1.
+The one PolyVox edit made purely for instrumentation: the `ReadLookupChunk` PIX pair around
+the read-path lookup in `getChunk` — recorded as the single strippable PolyVox residual.
 
-### 5.1 PolyVox fork residual edits (D3 record, strippable at plan P5)
+### 5.1 PolyVox fork residual edits (dynworld fork record)
 
-The P3a'/P3b restructuring (2026-11-17) required the following edits in
+The page-in decoupling and the incremental chunk count (2026-11-17) required the following edits in
 `D:\Programmation\polyvox\include\PolyVox\` (the fork has no dynworld-side
 extension point for chunk-publication ordering; justification: moving the
 page-in body out of the chunk write lock is exactly the fork's locking logic):
 
 - `PagedVolume.h`: `#include <atomic>`; `Chunk::m_bPagingInProgress`
   (std::atomic<bool>) + public `isPagingInProgress()`; volume member
-  `m_uChunkCount` (incremental count, P3b).
+  `m_uChunkCount` (incremental count).
 - `PagedVolume.inl`: `#include <thread>`; `getExistingChunk` converted to a
   peek (no chunk-lock acquire/wait); `getChunk` restructured into the
   claim → lock-free pager body → finalize protocol (re-lookup loop,
@@ -188,22 +187,22 @@ page-in body out of the chunk write lock is exactly the fork's locking logic):
   is default-initialized in the header).
 - `PagedVolumeSampler.inl`: paging-flag check on the cache-hit fast path.
 
-All are marked with `NOTE(dynworld) P3a'`/`P3b` comments in place. Semantics
+All are marked with `NOTE(dynworld)` comments in place. Semantics
 preserved: readers never observe uninitialized chunk data, region status keeps
 reporting `Locked` during page-ins, eviction never targets a chunk whose buffer
 is being filled, and `~Chunk`/pageOut behavior is unchanged. Pre-existing
 hazard NOT introduced nor fixed by these edits: `flush`/`flushAll` can destroy
 a chunk while a pager thread fills it (destructor `pageOut` + `delete[] m_tData`
 race) — the timestamp ordering makes eviction safe, but a concurrent flushAll
-during active paging was unsafe before P3a' and remains so; flagged for the P4
-async design.
+during active paging was unsafe before the decoupling and remains so; noted as a hazard
+for any future async paging design.
 
 ## 6. Findings catalog
 
 (Append dated, numbered findings here once profiling starts; do not re-derive
 diagnosed root causes.)
 
-### 6.1 Thread & call-site inventory (P0, source audit 2026-11-16)
+### 6.1 Thread & call-site inventory (source audit 2026-11-16)
 
 **Client** (`CMapClient` + `CSlavePager`; volume owned by `CDynContinent::MAP`):
 
@@ -236,24 +235,25 @@ miss into the same volume.
   from-scratch `makeChunk` on the GPMS move loop (stall, not multi-thread contention;
   `CMasterPager` has the cache load/save commented out, `master_pager.cpp:38`).
 
-### 6.2 D5 verification — generation-path thread safety (P0, 2026-11-16)
+### 6.2 Generation-path thread safety (2026-11-16)
 
 | Shared state | Verdict |
 |---|---|
 | `CBiomeManager` noise impls | **Safe** — `NLMISC::CTDS` per-thread impl (`biome_manager.h:35`), each thread lazily builds its own generators (`biome_manager.cpp:54-68`) |
 | `CMapGen` members (`flags`, `csize`) | **Safe** — read-only during `makeChunk` |
 | Mapgen noise/RNG in flora/cave paths | **Safe** — function-local (`mapgen.cpp:691,694,883-884`) |
-| `g_logMinSoil`/`g_logMaxSoil` (`mapgen.cpp:125-126`) | **DATA RACE (F1)** — written per-voxel in `cacheTerrainLevel` (`mapgen.cpp:170-173`) from concurrent workers; stats-only but UB. Trivial fix (atomics/TL) — fold into P3 |
+| `g_logMinSoil`/`g_logMaxSoil` (`mapgen.cpp:125-126`) | **DATA RACE (F1)** — written per-voxel in `cacheTerrainLevel` (`mapgen.cpp:170-173`) from concurrent workers; stats-only but UB. Trivial fix (atomics/TL) — done with the lock work |
 | `CMaterialLibrary` | **Invariant, not enforced** — plain static-pointer singleton (`nel/misc/singleton.h:124-126`, no sync); `getEnvironmentDef`/`getMaterialId` are read-only after load. Depends on the library being fully loaded on the main thread before any worker runs `makeChunk` (the `CGenerateMeshCommand` ctor comment acknowledges this discipline). Record as a hard invariant |
 | `CDiskFileDataBase` | One file per sector id, fresh `CIFile` per call (`disk_file_db.h:47-80`) → concurrent reads of different sectors are safe; a read racing a deferred compress-save of the *same* sector is theoretically possible (low risk; note) |
 | `CMapDeferredCommandManager` | `CFairMutex` queue — fine |
 
-### 6.3 Other P0 facts
+### 6.3 Other audit facts
 
 - **F2**: `CMapCacheManagerImpl::readChunk` does the disk read **and LZMA unpack of a
-  256 KB chunk** synchronously inside `pageIn` (`map_cache_manager.cpp:99-135`), i.e.
-  under the chunk write lock; the save side is already deferred (`saveChunk` copies
-  into a `CMemStream` then queues compression) — the copy itself is under the lock.
+  1 MB chunk** (64³ voxels × 4 B) inside `pageIn` (`map_cache_manager.cpp:100-150`), now with
+  **no locks held** (the chunk write lock is not taken for the page-in body since the
+  decoupling); the save side is deferred (`saveChunk` copies into a `CMemStream` then
+  queues compression).
 - **F3**: server has no prefetch at all; client's `prepareExtraction` bursts
   synchronous `emergeSector` loops both on workers and on the main-thread
   extraction path (`dyn_landscape_user.cpp:453`).
@@ -262,7 +262,7 @@ miss into the same volume.
   readers hold it, but the slot is freed for creation (no pageOut on explicit
   delete; `~Chunk` pages out via the destructor when the last reference dies).
 
-### 6.4 Profile results (P2, client sandbox session 2026-11-17)
+### 6.4 Baseline profile (client sandbox session 2026-11-17)
 
 Session: normal play + fast traversal into fresh terrain; three `dyn_paging_stats`
 dumps (two 10 s windows after resets, one session-cumulative). Raw dumps in the
@@ -306,9 +306,9 @@ client log (`pipeline/client_dev/local/client*.log`, 18:26–18:27). Chunk = 1 M
   (three lock round-trips and a potential O(65536)-bounded array walk), because
   the single-slot thread-local chunk cache defeats itself whenever reads alternate
   chunks (DDA sweeps, marching-cubes extraction over chunk boundaries). Aggregate
-  core-time cost is comparable to the page-in stalls themselves — P3e target.
+  core-time cost is comparable to the page-in stalls themselves — hot-read-path target.
 - **F5 (page-in hold is IO, not generation, on the client)**: 95–100 % of the
-  chunk-lock hold is `cacheReadChunk` (disk + LZMA unpack). The P3a/P4a principle
+  chunk-lock hold is `cacheReadChunk` (disk + LZMA unpack). The decoupling principle
   "generate/load outside the lock" applies equally to the cache-load path: the
   read+unpack should also move out of the chunk write lock (decompress to a buffer,
   then a short locked install).
@@ -319,22 +319,22 @@ client log (`pipeline/client_dev/local/client*.log`, 18:26–18:27). Chunk = 1 M
   tune `ChunksMemoryCache` upward when minimizing stalls matters.
 - **F7 (from-scratch generation measured)**: `mapGenMakeChunk` ≈ 242 ms per chunk
   (64³, caves disabled). This is what the GPMS move loop would pay per fresh
-  sector (H5) — server-side async paging (P4) or cache enabling are the candidates.
+  sector (H5) — server-side async paging or cache enabling are the candidates.
 - **F8 (createChunk outlier)**: one 269 ms `createChunk` in the cumulative window —
   1 MB allocation occasionally hitting a slow heap/commit path. Single sample, no
-  action; watch for recurrence after P3.
+  action; watch for recurrence.
 
-### 6.5 P3a' invariant break found live: `Locked` no longer implies sector metadata (2026-11-17)
+### 6.5 Invariant break found live (decoupled page-in): `Locked` no longer implies sector metadata (2026-11-17)
 
 **Symptom**: `nlassert(infos != nullptr)` in `CMapClient::prepareExtraction`
 (map_client.cpp:227, via `CGenerateIgCommand::execute` → `CDynInstanceGroupUser::init`)
 during normal IG load in the sandbox.
 
-**Root cause**: an old-protocol invariant broke. Before P3a', `getRegionStatus` reporting
+**Root cause**: an old-protocol invariant broke. Before the decoupling, `getRegionStatus` reporting
 anything other than `NotAvailable` implied the sector metadata was registered, because
 `tryGetChunk`/`getChunk` blocked on the chunk write lock until the whole page-in —
-including the pager's `regionPagedIn` (metadata registration) — had completed. Under
-P3a' the page-in no longer holds the chunk write lock: a chunk whose page-in is in
+including the pager's `regionPagedIn` (metadata registration) — had completed. Under the
+decoupled protocol the page-in no longer holds the chunk write lock: a chunk whose page-in is in
 progress reports `Locked` while its metadata is not yet registered. The metadata
 registration (`regionPagedIn`, called by the pager inside its pageIn body) happens
 before finalize clears the paging flag, so a thread that blocks in `getChunk` on the
@@ -359,18 +359,18 @@ is blocked inside the test pager; it must not complete before the pager is relea
 the metadata must be registered (`IsFull`) when `emergeSector` returns. Full dynworld
 exe set (15 suites) green after the fix; client rebuilt.
 
-**Takeaway**: after P3a', `getRegionStatus`/`isSectorLoaded` returning `Locked` means
+**Takeaway**: after the decoupling, `getRegionStatus`/`isSectorLoaded` returning `Locked` means
 "page-in in progress" and says nothing about metadata; any new consumer that needs
 metadata must go through a blocking call (`emergeSector`, `getChunk`) rather than
 trusting the status enum.
 
-### 6.6 P3a' after-profile (client sandbox session 2026-11-17, 20:27–20:34)
+### 6.6 After-profile: decoupled page-in (client sandbox session 2026-11-17, 20:27–20:34)
 
 Session: fresh-terrain traversal, ~7 min, heavy generation load (601 from-scratch
-generations vs 4 in the P2 baseline). Cumulative dump at 20:34:26 (raw lines in
+generations vs 4 in the baseline profile). Cumulative dump at 20:34:26 (raw lines in
 `pipeline/client_dev/local/client.log`); counters reset after the dump.
 
-| Marker | P2 baseline (§ 6.4) | P3a' after | Verdict |
+| Marker | baseline (§ 6.4) | after decoupling | Verdict |
 |---|---|---|---|
 | `readLookupChunk` | 33.2 M, 8.2 s CPU, **max 233 ms** | 56.0 M, 9.35 s CPU, **max 7 ms** | reader max collapsed to ordinary lookup cost — H1 stall gone; avg ~0.25 → ~0.167 µs/call |
 | `pageInWaitChunk` | (n/a) | 182 waits, 12.4 s total, **max 404 ms** | waiters now isolated: only threads touching a chunk mid-page-in spin on the flag, lock-free; max ≈ `pageInChunk` max (425 ms) |
@@ -382,21 +382,21 @@ generations vs 4 in the P2 baseline). Cumulative dump at 20:34:26 (raw lines in
 | `searchOldestChunk` / `deleteOldestChunk` | ~80 µs each | 9398 each, 1.07 s / 0.074 s, max 2 ms | eviction O(65536) scan still cheap |
 | `mapLockRegionPagedIn` / `Out` / `GetSectorInfo` | negligible | 47 / 48 ms / 14 ms over 36–94 k calls | H4 still refuted |
 
-**Verdict (P3a' validated)**:
+**Verdict (decoupling validated)**:
 - **H1 eliminated** — `readLookupChunk` max 233 ms → 7 ms: readers no longer queue
   behind page-ins. The movement thread and extraction workers only wait when they
   genuinely need the chunk being paged in (`pageInWaitChunk`, 182 events), and that
   wait holds no locks.
 - The residual 12.4 s of `pageInWaitChunk` (max 404 ms ≈ generation max) is the
-  **D4 synchronous-wait cohort** — inherent until P4 async paging ("blocked with
-  last-known fallback") lands; then waits become non-blocking collision fallbacks.
+  **synchronous-wait cohort of movement queries** — inherent to the block-not-fallback
+  policy; what removes it in practice is the prefetch (§ 6.7), not a semantics change.
 - F8's createChunk outlier did not recur (max 1 ms over 9398 events).
 - Session caveat: this was a generation-heavy window (fresh terrain, 601
   generations); steady-state cache-hit play will show even less pager work.
 
-### 6.7 P3e — hot read path: multi-slot TLS cache + movement prefetch (2026-11-17/18)
+### 6.7 Hot read path: multi-slot TLS cache + movement prefetch (2026-11-17/18)
 
-**P3e-1: multi-slot TLS chunk cache** (`polyvox_defs.h/.cpp`, dynworld-owned — no
+**Multi-slot TLS chunk cache** (`polyvox_defs.h/.cpp`, dynworld-owned — no
 PolyVox edit). The single-slot `MultiThreadChunkCache` was defeated by any sweep
 alternating chunks (DDA collision sweeps, marching-cubes samplers), so every
 voxel read fell through to `getChunk`'s internal-lock lookup — 33–56 **million**
@@ -408,7 +408,7 @@ every slot (flushAll/flush semantics unchanged).
 
 Measured (client session 2026-11-18, cumulative windows):
 
-| Marker | P3a' baseline (§ 6.6) | after multi-slot cache |
+| Marker | decoupled baseline (§ 6.6) | after multi-slot cache |
 |---|---|---|
 | `readLookupChunk` count | 56.0 M / 9.35 s | **1.0–1.3 M** per session window |
 | `readLookupChunk` avg / max | ~0.17 µs / 7 ms | ~6.7 µs / 27–31 ms |
@@ -423,8 +423,8 @@ Regression test: `MultiSlotChunkCacheSurvivesChunkAlternation` — 3 chunks × 1
 alternating warm reads produce ZERO `ReadLookupChunk` events and per-chunk values
 stay distinct.
 
-**P3e-2: movement/collision prefetch** (the hitch fix). The hitches reported in
-play were the D4 synchronous-wait cohort: movement/collision queries blocking on
+**Movement/collision prefetch** (the hitch fix). The hitches reported in
+play were the synchronous-wait cohort: movement/collision queries blocking on
 a chunk whose page-in (from-scratch generation, ~165–425 ms) was in progress
 (`pageInWaitChunk`, up to ~420 ms max). Investigation finding: **the stock PACS
 around-position prefetch (`CDynGlobalRetriever::refreshLrAround` /
@@ -446,7 +446,7 @@ Fix (dynworld-owned):
   `g_prefetchBound` (25 m) box in global voxel coords — the caller's radius
   (static-PACS streaming radius, 400 m) is deliberately ignored, it would thrash
   the 1024-chunk volume limit.
-- Semantics unchanged (D4): queries still block synchronously when they outrun
+- Collision semantics unchanged: queries still block synchronously when they outrun
   the prefetcher; the prefetch only makes that rare (walk speed ≈ 3 voxels/s vs
   165 ms generation per 64-voxel chunk).
 
@@ -538,9 +538,9 @@ zero `MVDBG` lines, and the movement thread paid **no page-in at all**:
 The same session's first half (old build, probes on) reproduced the probe
 self-stall three times — 102, 171 and 358 ms gaps, each with 1–2 fresh
 generations on the query thread at mirrored regions — so the attribution is
-confirmed from both sides. **P3e-2's target class is closed.**
+confirmed from both sides. **That target class is closed.**
 
-Residual gap class (outside this plan): the counted 121 ms gap, and a 406 ms one
+Residual gap class (outside this system): the counted 121 ms gap, and a 406 ms one
 at startup before the reset, carry `pageIns on query thread 0` → a main-thread
 cost that is not paging (zone/mesh streaming around load).
 
@@ -580,12 +580,12 @@ and the role marker is thread-local and nesting-safe.
 Reading: over 370 s of walking, the movement/collision thread paid **zero**
 page-in waits, while the same volume served 87 k page-ins (peak ≈ 320/s) and
 remained so far over the 1024-chunk limit that `searchOldestChunk` ran on
-essentially every creation. The prefetch + P3a' flag spin completely removed the
-D4 movement cohort — the residual waits all belong to background
+essentially every creation. The prefetch + lock-free flag spin completely removed the
+movement-query wait cohort — the residual waits all belong to background
 extraction/IG/paging threads waiting on each other's in-flight chunks, which is
 normal queueing and not user-visible.
 
-Side observation for P4: ~99 % of page-ins are `cacheTryFill` (disk + LZMA) and
+Side observation for throughput work: ~99 % of page-ins are `cacheTryFill` (disk + LZMA) and
 the volume thrashes the limit continuously, so the next meaningful cost is the
 cache read/decompress pipeline itself, not locking.
 
@@ -755,6 +755,8 @@ Consequence for the "compressed cache in memory" idea:
   demand) removes the entire 72 % read half and leaves decode-only page-ins
   (~1.48 ms, paging CPU 0.70 → 0.19 core). This is a cache-layer change that
   pays *without* reuse, because the win is the removed per-file syscall path.
+  (**Pre-exclusion arithmetic — revised in 6.8.2:** once the AV tax is gone the
+  read is 1.15 ms of 2.59, so preload buys 0.39 → 0.21 core, not 0.70 → 0.19.)
 - Cheaper intermediate options, in increasing effort: skip `CPath::lookup` for
   cache files (the name is `<id>.sector` in a known directory — the VFS probe is
   pure waste), keep one pack file + index instead of 88 746 tiny files (one
@@ -802,9 +804,31 @@ minute). At 150 loads/s every 1 ms shaved per chunk is 0.15 core, so the load
 range/prefetch widths determine it). That is a streaming question, not a paging
 mutex question.
 
-P4 as scoped ("async/manual paging") does not change any of this: it moves the
-cost to another thread, and the original target (movement blocking) is already at
-zero. If paging throughput becomes visible once slower code paths depend on it
-(the same window still had 1 991 background page-in waits / 13.3 s / max 380 ms,
-i.e. extraction threads queueing on each other), the follow-up is a
-**chunk-load-cost** task, not the P4 locking task.
+Async/manual paging does not change any of this: it moves the cost to another
+thread, and the original target (movement blocking) is already at zero. If paging
+throughput becomes visible once slower code paths depend on it (the same window
+still had 1 991 background page-in waits / 13.3 s / max 380 ms, i.e. extraction
+threads queueing on each other), the follow-up is a **chunk-load-cost** task, not
+a paging-lock task.
+
+**6.9 Close-out (2026-11-20).** The contention work is closed with the target met:
+
+| Requirement | Evidence |
+|---|---|
+| No lock spans `makeChunk`/file-IO | page-in body runs outside the chunk write lock; readers wait on the paging flag (§ 2.1, § 3, § 6.6) |
+| No movement stall on fresh terrain | `pageInWaitChunkQuery` = 0 and `pageInChunkQuery`/`mapGenMakeChunkQuery` = 0 across five windows (up to 197 s / 52 867 page-ins, § 6.7); `frameHitch` 0 in the final windows |
+| Read path not lock-bound | 32-slot TLS chunk cache: lookups 56 M → ~1 M per window (§ 6.7) |
+| Prefetch covers what moves | two hot points (player + camera), each with its own directional lead (§ 6.7) |
+| Page-in cost understood | 2.59 ms per chunk (decode 1.42, file I/O 0.92, lookup 0.23), 0.39 core at 150 loads/s (§ 6.8.2) |
+
+Not done, by decision: **async/manual paging** (moves the cost to another thread;
+nothing blocks on it) and **marker stripping** (the counters are kept — always
+compiled, per-page-in frequency only, and they are the re-measurement tool). What
+remains is a different problem: the chunk load *rate* and the decode cost, i.e.
+streaming/LOD work, plus the server-side (GPMS) leg, which still has no client
+equivalent of the prefetch.
+
+Open follow-ups if this ever becomes visible again, in cost order: reduce the load
+*rate* (LOD/view range/prefetch widths), then the preloaded compressed-blob tier
+(1.15 ms of 2.59 for 348 MB), then — last — a codec change. Server side: the
+`CMasterPager` cache is still disabled, so GPMS generates every chunk from scratch.

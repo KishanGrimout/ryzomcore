@@ -8,10 +8,10 @@
 #include <game_share/dynworld/voxel_paging_stats.h>
 
 // Test suite for the voxel paging instrumentation registry
-// (plan docs/VOXEL_PAGING_CONTENTION_PLAN.md P1; system doc
-// docs/VoxelVolumePaging.md § 5): stat accounting integrity, the PolyVox
-// PIX-macro hook routing, and the documented contention shape — readers
-// queueing on a chunk whose pageIn is in progress — counted without deadlock.
+// (system doc docs/VoxelVolumePaging.md § 5): stat accounting integrity, the
+// PolyVox PIX-macro hook routing, and the documented contention shape —
+// readers queueing on a chunk whose pageIn is in progress — counted without
+// deadlock.
 
 namespace {
 
@@ -251,7 +251,7 @@ TEST(DynWorldPagingStats, ReadersQueueWhilePageInProgressWithoutDeadlock)
 				// alternation defeats the single-slot thread-local chunk
 				// cache, so every read goes through the getChunk lookup
 				// (the ReadLookupChunk site); the first B read triggers the
-				// pageIn, further B reads queue on the paging flag (P3a')
+				// pageIn, further B reads queue on the paging flag
 				Voxel b = map.getVoxelAt(TVoxelPos(ChunkSide, 0, 0));
 				if (b.getType() != Voxel::Raw)
 					++bNotRaw;
@@ -278,10 +278,10 @@ TEST(DynWorldPagingStats, ReadersQueueWhilePageInProgressWithoutDeadlock)
 	EXPECT_EQ(voxelPagingStats().pageInChunk.m_count.load(), 2u);
 	EXPECT_GE(voxelPagingStats().readLookupChunk.m_count.load(), 4u);
 	EXPECT_GT(voxelPagingStats().readLookupChunk.m_maxTicks.load(), 0u);
-	EXPECT_GT(voxelPagingStats().pageInWaitChunk.m_count.load(), 0u); // P3a': the wait moved to the flag spin
+	EXPECT_GT(voxelPagingStats().pageInWaitChunk.m_count.load(), 0u); // the wait moved to the flag spin
 }
 
-// P3a' flag semantics, deterministic: while a chunk's pageIn is blocked in the
+// Paging-flag semantics, deterministic: while a chunk's pageIn is blocked in the
 // pager, a setVoxel and further reads issued for it must wait, region status
 // must report Locked, and everything must complete with the pager data (or a
 // later write on top of it) once released.
@@ -330,7 +330,7 @@ TEST(DynWorldPagingStats, ConcurrentAccessWaitsForPageInProgress)
 	EXPECT_EQ(final.getRawValue(), testWrittenVoxel().getRawValue());
 }
 
-// P3a' region-status semantics: getRegionStatus must report Locked for a
+// Region-status semantics after the decoupling: getRegionStatus must report Locked for a
 // chunk whose page-in is in progress (isLocked() ORs the paging flag), even
 // though the chunk write lock is no longer held during the page-in.
 TEST(DynWorldPagingStats, RegionStatusLockedWhilePagingInProgress)
@@ -363,7 +363,7 @@ TEST(DynWorldPagingStats, RegionStatusLockedWhilePagingInProgress)
 	std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
 	// paging in progress: Locked (the old scheme only covered this while the
-	// chunk write lock was held; P3a' moved that hold into the flag)
+	// chunk write lock was held; the decoupling moved that hold into the flag)
 	EXPECT_EQ(volume->getRegionStatus(bRegion), PolyVox::RegionStatus::Locked);
 
 	pager.release.store(true, std::memory_order_seq_cst);
@@ -374,7 +374,7 @@ TEST(DynWorldPagingStats, RegionStatusLockedWhilePagingInProgress)
 	EXPECT_EQ(volume->getRegionStatus(bRegion), PolyVox::RegionStatus::Available);
 }
 
-// P3e (docs/VoxelVolumePaging.md § 6.7): the TLS chunk cache must survive
+// Multi-slot TLS chunk cache (docs/VoxelVolumePaging.md § 6.7): the TLS chunk cache must survive
 // chunk-alternating sweeps. With the old single-slot cache, every voxel read
 // alternating across a chunk boundary fell through to getChunk's internal-lock
 // lookup (33-56 M lookups per session, F4). With the direct-mapped multi-slot
@@ -421,7 +421,7 @@ TEST(DynWorldPagingStats, MultiSlotChunkCacheSurvivesChunkAlternation)
 		<< "warm alternating reads must not fall through to getChunk";
 }
 
-// P4-lite (docs/VoxelVolumePaging.md § 6.7): the async movement prefetch. A
+// Async movement prefetch (docs/VoxelVolumePaging.md § 6.7). A
 // region requested through prefetchRegionAsync must become fully paged in on
 // the worker (isSectorLoaded Available) without the caller blocking, and the
 // map must still tear down cleanly (the worker joins in ~CMapBase before the
@@ -473,7 +473,7 @@ TEST(DynWorldPagingStats, PrefetchRegionAsyncPagesInBackground)
 	EXPECT_TRUE(available2) << "latest-wins prefetch must still complete the last request";
 }
 
-// P3a' invariant regression: while a sector's page-in is in progress on
+// Decoupling invariant regression: while a sector's page-in is in progress on
 // another thread, getRegionStatus reports Locked (the chunk write lock is no
 // longer held during the page-in) but the sector metadata is only registered
 // by regionPagedIn at the END of the pager body. emergeSector must therefore

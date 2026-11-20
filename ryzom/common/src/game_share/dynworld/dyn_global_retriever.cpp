@@ -54,7 +54,7 @@ bool g_forceRegenerate = false;
 // Toggled by the dyn_collisiondebug client command.
 bool g_dynCollisionDebug = false;
 
-// P4-lite (docs/VoxelVolumePaging.md § 6.7): the hot-neighborhood region for a
+// Movement prefetch (docs/VoxelVolumePaging.md § 6.7): the hot-neighborhood region for a
 // position, in global voxel coords (the frame getDoubleGlobalPosition feeds to
 // traceSegment). The radius is clamped to the hot box: callers pass the
 // static-PACS streaming radius (400 m), far beyond what the voxel cache should
@@ -186,7 +186,7 @@ void CDynGlobalRetriever::refreshLrAroundMax(const CVector &position, float radi
 		g_forceRegenerate = false;
 	}
 
-	// P4-lite (docs/VoxelVolumePaging.md § 6.7): keep the chunk neighborhood
+	// Movement prefetch (docs/VoxelVolumePaging.md § 6.7): keep the chunk neighborhood
 	// of the position hot. The stock selectInstances+emergeSector loop above
 	// was disabled, so movement/collision sweeps were the first to touch fresh
 	// chunks and blocked on their generation (pageInWaitChunk hitches, up to
@@ -255,8 +255,9 @@ void CDynGlobalRetriever::refreshLrAround(const CVector &position, float radius)
 
 	if (g_refresh)
 	{
-		// P4-lite: per-frame path — async, latest-wins (never blocks the main
-		// loop; a query that outruns the prefetcher still blocks, D4). The box
+		// Per-frame path — async, latest-wins (never blocks the main
+		// loop; a query that outruns the prefetcher still blocks, since collision
+		// queries always block). The box
 		// is led by the camera's smoothed velocity; the player hot point is
 		// requested from the collision entry points into the other slot.
 		static thread_local SHotPointTracker s_cameraTracker;

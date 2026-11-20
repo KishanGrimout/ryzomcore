@@ -14,6 +14,10 @@
   + 16-process count.
 - `pipeline\shard_dev\stop_mainland.bat` — reverse-roster graceful→force shutdown +
   optional XAMPP stop.
+- `pipeline\shard_dev\deploy_mainland.bat` — rebuild redeploy: copies the roster exes
+  from `code\build\bin\Release` into their `shard_dev\<service dir>`s (one entry per exe;
+  optional `%1` = alternate source dir). Shard must be stopped — a running service keeps
+  its exe image locked.
 - `pipeline\client_dev\local\launch_client.bat` — client launcher (sandbox CWD) — see
   the README_SANDBOX next to it.
 - Manual startup order: XAMPP apache/mysql → `start_mainland.bat` → `launch_client.bat`.
@@ -34,8 +38,9 @@
 - **MySQL must be up before SU**; FE console close is the classic accidental kill (§6).
 - FE and EGS service ids can collide visually (FE restarted as `FS-130` while EGS is
   `EGS-130`) — always disambiguate by context/full prefix, never by the number alone.
-- Restart discipline for replacing a service binary: `Stop-Process` → copy exe →
-  `Start-Process` (`Copy-Item` onto a running exe fails in-use).
+- Restart discipline for replacing a service binary: `stop_mainland.bat` →
+  `deploy_mainland.bat` → `start_mainland.bat` (per service: `Stop-Process` → copy exe →
+  `Start-Process`; `Copy-Item` onto a running exe fails in-use).
 
 ## 3. AES (port 46997) — the SYN_SENT storm class
 

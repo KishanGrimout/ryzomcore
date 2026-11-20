@@ -1,5 +1,10 @@
 # VOXEL_PAGING_CONTENTION_PLAN — instrument, profile, and optimize the voxel paging locks
 
+> **Finalized plan (closed 2026-11-20).** Kept as the decision/history record of the
+> voxel paging contention work; the system knowledge and the final numbers live in
+> **`docs/VoxelVolumePaging.md`**. No inbound references: code, tests and the other
+> docs point at the system doc, not here.
+>
 > **Plan doc.** Owns decisions, phases and acceptance criteria for eliminating the
 > mutex contention around voxel region paging (`pageIn`, especially from-scratch
 > generation). All system knowledge about the locks lives in
@@ -8,6 +13,17 @@
 > Related: `docs/VoxelTerrainCollision.md` (collision queries are the hot readers),
 > `docs/TestEnvironmentNotes.md` (validation env), `docs/ShardRuntimeOps.md` (shard-side
 > validation), `docs/LEGACY_DYNWORLD_INTEGRATION.md` (roadmap).
+
+**Outcome (2026-11-20).** Target met and closed. The deliverable was measured, not
+assumed: the movement/collision thread pays **zero** page-in waits and performs
+**zero** page-ins (five dumped windows between 2026-11-18 and 2026-11-20, up to
+197 s / 52 867 page-ins), with `frameHitch` 0 in the final windows. The lock work
+that mattered is done: the page-in body runs with no locks held, readers wait on a
+lock-free chunk flag, the per-voxel read path uses a multi-slot TLS cache, and
+movement/collision prefetch covers both hot points (player and camera). Two items
+do not ship: **P4 (async/manual paging) is out of scope** and **P5 became a keep
+decision** (the counters stay, documented, near-zero cost). What remains is not
+locking but per-chunk load cost/rate (system doc § 6.8.1-6.8.2).
 
 Status: **P0 done 2026-11-16** (thread inventory + D5 verification in
 `docs/VoxelVolumePaging.md` § 6.1-6.2; findings F1–F3 recorded).
@@ -288,7 +304,16 @@ Measured priority order (each still gated on its own before/after numbers):
 
 ### P4 — Manual/async paging (the structural change; the user's proposal)
 
-**Status (2026-11-18): not required for the plan's target — deferred, not
+**Status (2026-11-20): out of scope — closed without implementation.** Both
+acceptance halves were already met by the P3 work: *no lock spans a
+`makeChunk`/file-IO call* (page-in holds are measured outside the chunk lock,
+§ 6.6) and *no movement stall on fresh-terrain entry* (§ 6.7). The residual
+background queueing delays extraction/pop-in, never the player, and the measured
+cost of that queueing is 0.39 core at 150 chunk loads/s — a throughput question
+for a chunk-load-cost/streaming task, not a reason to restructure paging. The
+detail below is kept as the design record in case such a consumer appears.
+
+**Original status (2026-11-18): not required for the plan's target — deferred, not
 abandoned.** P4's acceptance names two things: *no lock spans a `makeChunk`/file-IO
 call*, and *no movement stall on fresh-terrain entry*. The second is validated
 (`docs/VoxelVolumePaging.md` § 6.7: 197 s / 52 867 page-ins with 0 query-thread
@@ -302,8 +327,9 @@ the per-chunk load cost, i.e. on the disk/decode split — see
 a page-in is 2.59 ms (decode 1.42, file I/O 0.92, name resolution 0.23) after the
 cache directory was excluded from AV scanning; paging is 0.39 core at 150 chunk
 loads/s. The remaining lever is the load *rate* and the decode, not locks —
-P4 stays deferred. Revisit P4 only if a new consumer needs page-in throughput
-(slower mesh code, larger view distance, server-side dynworld A*).
+which closed the question: P4 stays out of scope. It is only worth reopening if a
+new consumer needs page-in throughput (slower mesh code, larger view distance,
+server-side dynworld A*).
 
 - **P4a** Ryzom-side miss detection: queries use `tryGetChunk`-style probes
   (`CMapBase` layer) instead of synchronous `getChunk` page-in — per D4 semantics
@@ -329,11 +355,23 @@ P4 stays deferred. Revisit P4 only if a new consumer needs page-in throughput
 
 ### P5 — Validation consolidation & strip
 
+**Status (2026-11-20): done as a keep decision.** The before/after tables are in
+`docs/VoxelVolumePaging.md` § 6 (baseline § 6.4, decoupling § 6.6, hot read path
+§ 6.7, load cost § 6.8). The markers were **kept**, not stripped: they are
+always-compiled, atomic, per-page-in frequency only (never per-voxel), and they
+are the only way to re-measure a future streaming/paging change. The registry in
+`docs/VoxelVolumePaging.md` § 5 therefore records `kept` for every site instead of
+a strip gate. Phase/plan references were stripped from code, tests, the system docs
+and the roadmap; this plan doc remains the history record.
+
 - Re-run the P2 profile scripts; before/after table in `docs/VoxelVolumePaging.md` § 6.
 - Strip P1 markers whose validation completed (rebuild + redeploy per convention),
   keeping any promoted to permanent guards with an explicit decision line.
 - Update `docs/LEGACY_DYNWORLD_INTEGRATION.md` roadmap only for integration-level
   state (phase validation entry + pointer here).
+
+Both bullets landed as described above; the "strip markers" bullet is the one that
+was decided the other way (kept by decision, system doc § 5 "Keep" column).
 
 ## 4. Out of scope / follow-ups recorded elsewhere
 

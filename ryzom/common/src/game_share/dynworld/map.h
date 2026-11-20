@@ -72,9 +72,10 @@ public:
 	// returns true if it has been loaded, false if it was already loaded
 	bool emergeSector(TLoadingSector::TId sectorIndex);
 
-	// P4-lite movement prefetch (docs/VoxelVolumePaging.md § 6.7): page the
+	// Movement prefetch (docs/VoxelVolumePaging.md § 6.7): page the
 	// region in on a background worker, latest request wins. Best-effort only:
-	// a query that outruns the prefetcher still blocks synchronously (D4).
+	// a query that outruns the prefetcher still blocks synchronously (collision
+	// queries always block, never fall back to the last-known state).
 	//
 	// Two hot points are tracked in independent slots: the camera and the player
 	// query the same volume (camera collisions vs entity collisions) and the
@@ -156,7 +157,7 @@ protected:
 	TVolume* m_volume;
 
 private:
-	// P4-lite: async region prefetch worker (latest request wins); heap-held
+	// Async region prefetch worker (latest request wins); heap-held
 	// so the worker joins before m_volume is deleted (~CMapBase resets it first)
 	class CPrefetchWorker;
 	std::unique_ptr<CPrefetchWorker> m_prefetchWorker;

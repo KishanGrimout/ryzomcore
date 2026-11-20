@@ -17,10 +17,9 @@
 #ifndef VOXEL_PAGING_STATS_HEADER
 #define VOXEL_PAGING_STATS_HEADER
 
-// Voxel paging instrumentation registry (plan docs/VOXEL_PAGING_CONTENTION_PLAN.md P1;
-// system doc docs/VoxelVolumePaging.md § 5). Always-compiled, near-zero-cost atomic
-// counters at per-page-in frequency (never per-voxel). Each marker is strippable per
-// the plan's P5 strip gate; see the registry table in the system doc.
+// Voxel paging instrumentation registry (system doc docs/VoxelVolumePaging.md § 5).
+// Always-compiled, near-zero-cost atomic counters at per-page-in frequency (never
+// per-voxel). Strippable per site; see the registry table in the system doc.
 
 #include <atomic>
 #include <string>
@@ -61,21 +60,21 @@ struct TVoxelPagingStat
 	double maxSeconds() const { return NLMISC::CTime::ticksToSecond((NLMISC::TTicks)m_maxTicks.load(std::memory_order_relaxed)); }
 };
 
-// All timed sites of the voxel paging pipeline. Grouped per the plan's markers:
+// All timed sites of the voxel paging pipeline. Grouped by lock layer:
 //   VPI = pageIn timing split, VPL = chunk-lock read wait behind page-in,
 //   VPW = volume internal write lock, VPM = CMapBase::m_volumeLock (metadata CMutex).
 struct CVoxelPagingStats
 {
 	// PolyVox event sites (fed by the PIX macro hook in polyvox_defs.h)
 	TVoxelPagingStat readLookupChunk;     // VPL: getChunk read-path lookup (no longer blocks on an in-progress page-in)
-	TVoxelPagingStat pageInWaitChunk;     // VPL: reader spin on the chunk paging flag while the pager fills the buffer (P3a')
-	TVoxelPagingStat pageInWaitChunkQuery; // VPL: subset of pageInWaitChunk paid by a movement/collision query thread (D4 cohort)
+	TVoxelPagingStat pageInWaitChunk;     // VPL: reader spin on the chunk paging flag while the pager fills the buffer
+	TVoxelPagingStat pageInWaitChunkQuery; // VPL: subset of pageInWaitChunk paid by a movement/collision query thread
 	TVoxelPagingStat getExistingChunk;    // VPW: write-branch re-lookup under the internal write lock
 	TVoxelPagingStat createChunk;         // VPW: chunk alloc + registration prep
 	TVoxelPagingStat searchFreeChunkSlot; // VPW: hash-slot insertion scan
-	TVoxelPagingStat searchOldestChunk;   // VPW: the O(65536) array scan for the eviction candidate (only when over limit, P3b)
+	TVoxelPagingStat searchOldestChunk;   // VPW: the O(65536) array scan for the eviction candidate (only when over limit)
 	TVoxelPagingStat deleteOldestChunk;   // VPW: eviction slot release
-	TVoxelPagingStat pageInChunk;         // VPI: the pager body (runs with no locks held since P3a')
+	TVoxelPagingStat pageInChunk;         // VPI: the pager body (runs with no locks held since the decoupling)
 	TVoxelPagingStat pageInChunkQuery;    // VPI: page-in PERFORMED on a query thread (self page-in: no wait is paid)
 
 	// Ryzom-side pageIn split (VPI)
@@ -191,7 +190,7 @@ inline CVoxelPagingStats& voxelPagingStats()
 
 // Thread role marker (docs/VoxelVolumePaging.md § 6.7): lets the dump separate
 // the waits that a movement/collision query thread pays (the user-visible hitch
-// cohort, D4) from the waits of the paging/extraction workers. thread_local, so
+// cohort) from the waits of the paging/extraction workers. thread_local, so
 // it costs one TLS read at each WaitPagingChunk end event.
 enum class EVoxelPagingRole
 {

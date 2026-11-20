@@ -47,10 +47,11 @@ CMapBase::~CMapBase()
 	m_volume = NULL;
 }
 
-// P4-lite (docs/VoxelVolumePaging.md § 6.7): async, latest-wins region
+// Movement prefetch (docs/VoxelVolumePaging.md § 6.7): async, latest-wins region
 // prefetch. One worker thread pages pending regions in so movement/collision
 // queries find their chunks already paged; a query that outruns the prefetcher
-// still blocks synchronously (D4 amendment: collision queries always block).
+// still blocks synchronously (collision queries always block, no last-known
+// fallback).
 //
 // Two slots (camera and player hot points) so neither starves the other; when
 // they are close (third-person view) the worker pages in their union once.
@@ -217,7 +218,7 @@ SectorMetadata* CMapBase::getSectorInfo(TLoadingSector::TId sectorIndex)
 bool CMapBase::emergeSector(TLoadingSector::TId sectorIndex)
 {
 	// check it's not already in memory
-	// NOTE(dynworld) P3a': `Locked` now also covers "page-in in progress on
+	// NOTE(dynworld): `Locked` now also covers "page-in in progress on
 	// another thread" (the chunk write lock is no longer held during the
 	// page-in), and in that case the sector metadata is not registered yet.
 	// Prefetch anyway: getChunk waits on the paging flag and the pager

@@ -20,7 +20,7 @@
 // Disable PIX profiling (Windows Performance Analyzer SDK) as per integration rules
 #ifndef PIX_COLOR_DEFAULT
 #define PIX_COLOR_DEFAULT 0
-// P1 instrumentation (docs/VoxelVolumePaging.md § 5): the PolyVox event sites in
+// Paging instrumentation (docs/VoxelVolumePaging.md § 5): the PolyVox event sites in
 // PagedVolume.inl are driven through these macros, wired to the voxel paging stats
 // registry instead of PIX. The sites run at per-page-in frequency (never per voxel).
 #include "voxel_paging_stats.h"
@@ -96,7 +96,7 @@ public:
 	virtual void dirtyCache();
 
 private:
-	// P3e (docs/VoxelVolumePaging.md § 6.7): the single-slot TLS cache was
+	// Multi-slot TLS cache (docs/VoxelVolumePaging.md § 6.7): the single-slot TLS cache was
 	// defeated by any sweep that alternates chunks (DDA collision sweeps,
 	// marching-cubes samplers) - every voxel read then fell through to
 	// getChunk's internal-lock lookup (33-56 M lookups per session, F4).
