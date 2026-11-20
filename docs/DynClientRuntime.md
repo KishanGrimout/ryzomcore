@@ -135,3 +135,10 @@ thread-stats section.
   `pipeline/client_dev/local/README_SANDBOX.md` for the live copy recipe).
 - Legacy asset run dir (`ryzom_core_client`): chosen client runtime bed; details in
   `docs/LegacyAssetInventory.md`.
+- **Exclude the voxel cache directory from real-time AV scanning.** With Windows
+  Defender scanning `pipeline\client_dev\local\cache`, every voxel chunk page-in
+  pays an AV filter on `open`: measured 3.89 ms vs 1.15 ms per ~4 KB cache file
+  (paging CPU 0.70 → 0.39 core). This is an environment fix, not a code fix;
+  numbers and method: `docs/VoxelVolumePaging.md` § 6.8.2. Note the cache lives
+  wherever the client runs, so exclude the run dir's `cache\` subtree, not a
+  fixed absolute path.

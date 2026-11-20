@@ -741,9 +741,9 @@ local directory before falling back to the cache dir) and then opens, reads and
 closes the file (the disk is an SSD: `Get-PhysicalDisk` → Samsung 860 QVO / 990
 PRO, so a 4 KB read should be ≪1 ms).
 
-Two counters split that fixed cost for the next session: `cachePathLookup`
-(name resolution) and `cacheFileIo` (open + read + close), both nested inside
-`cacheDiskRead`.
+Two counters split that fixed cost: `cachePathLookup` (name resolution) and
+`cacheFileIo` (open + read + close), both nested inside `cacheDiskRead`; 6.8.2
+shows where the 3.89 ms actually came from (an AV filter on every open).
 
 Consequence for the "compressed cache in memory" idea:
 
@@ -758,11 +758,49 @@ Consequence for the "compressed cache in memory" idea:
 - Cheaper intermediate options, in increasing effort: skip `CPath::lookup` for
   cache files (the name is `<id>.sector` in a known directory — the VFS probe is
   pure waste), keep one pack file + index instead of 88 746 tiny files (one
-  open for the session, offset reads), and check whether a Defender/AV filter
-  is inflating every open.
+  open for the session, offset reads), and exclude the cache directory from
+  Defender real-time scanning (**done 2026-11-20 — 6.8.2; it was the dominant
+  cost**).
 - The decode half is already cheap and, unlike the read, bounded by real work;
   swapping LZMA for LZ4 would buy ≤0.19 core and needs a cache-format migration,
   so it is the last lever, not the first.
+
+**6.8.2 The read was a Defender tax (measured 2026-11-20, 69 s window, same
+build).** The user added a Windows Defender exclusion for
+`pipeline\client_dev\local\cache` and re-ran (dump 18:39:17 → 18:40:26: 10 333
+page-ins, all from cache, `pageInChunkQuery` 0, `frameHitch` 0):
+
+| Marker | before (6.8.1) | after exclusion | change |
+|---|---|---|---|
+| `pageInChunk` | 5.39 ms | **2.59 ms** | −52 % |
+| `cacheDiskRead` | 3.89 ms | **1.15 ms** | **−70 %** |
+| — `cachePathLookup` | (not split) | 0.23 ms | 9 % of the read |
+| — `cacheFileIo` | (not split) | 0.92 ms | 80 % of the read |
+| `cacheLzmaDecode` | 1.48 ms | 1.42 ms | unchanged (as expected) |
+| paging CPU | 0.70 core | **0.39 core** | −44 % |
+
+So ~2.7 ms of every 4 KB cache read was the AV filter driver on `open`, not the
+file system and not the code. Two consequences:
+
+- **`CPath::lookup` is not worth fixing.** It is 0.23 ms/chunk (≈0.03 core) once
+  the AV tax is gone; it can be skipped (open the known path first, fall back to
+  the lookup) as a tidy-up, but it is no longer a lever.
+- **Decode is now the largest single piece (55 %)**, with file I/O at 36 % and
+  name resolution at 9 %. Per-chunk cost is flat across the three, so no single
+  cheap change halves it any more.
+
+Preload arithmetic, revised: holding the blobs in RAM now removes only
+0.92 + 0.23 = 1.15 ms of 2.59 (page-in → 1.42 ms, paging CPU 0.39 → 0.21 core)
+for 348 MB of RAM — still the best remaining per-chunk lever, but no longer a
+"deletes 72 % of the cost" story.
+
+The bigger multiplier is elsewhere: **10 335 chunk creations in 69 s = 150/s**,
+each one evicting another (`searchOldestChunk` = `deleteOldestChunk` =
+`createChunk` = 10 335; the 1024-chunk volume is turned over ~9 times per
+minute). At 150 loads/s every 1 ms shaved per chunk is 0.15 core, so the load
+*rate* — not the load cost — is what would move the CPU budget next (LOD/view
+range/prefetch widths determine it). That is a streaming question, not a paging
+mutex question.
 
 P4 as scoped ("async/manual paging") does not change any of this: it moves the
 cost to another thread, and the original target (movement blocking) is already at

@@ -298,8 +298,12 @@ page-in holds are measured outside the chunk lock, § 6.6). What remains is
 13.3 s / max 380 ms in that window), which delays extraction/mesh/vegetation work
 (pop-in), never the player. Whether that is worth P4's structural cost depends on
 the per-chunk load cost, i.e. on the disk/decode split — see
-`docs/VoxelVolumePaging.md` § 6.8. Revisit P4 only if a new consumer needs page-in
-throughput (slower mesh code, larger view distance, server-side dynworld A*).
+`docs/VoxelVolumePaging.md` § 6.8. **Measured since (2026-11-20, § 6.8.1/6.8.2):**
+a page-in is 2.59 ms (decode 1.42, file I/O 0.92, name resolution 0.23) after the
+cache directory was excluded from AV scanning; paging is 0.39 core at 150 chunk
+loads/s. The remaining lever is the load *rate* and the decode, not locks —
+P4 stays deferred. Revisit P4 only if a new consumer needs page-in throughput
+(slower mesh code, larger view distance, server-side dynworld A*).
 
 - **P4a** Ryzom-side miss detection: queries use `tryGetChunk`-style probes
   (`CMapBase` layer) instead of synchronous `getChunk` page-in — per D4 semantics
